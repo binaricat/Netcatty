@@ -246,25 +246,29 @@ const ComposeBarSnippetManagePopover = memo(function ComposeBarSnippetManagePopo
         if (!next) setSearch('');
       }}
     >
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="h-6 w-6 flex-shrink-0 flex items-center justify-center rounded transition-colors duration-150"
-          style={{ color: theme.mutedFg }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = theme.hoverBg;
-            e.currentTarget.style.color = theme.resolvedFg;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'transparent';
-            e.currentTarget.style.color = theme.mutedFg;
-          }}
-          aria-label={manageLabel}
-          title={manageLabel}
-        >
-          <Plus size={12} />
-        </button>
-      </PopoverTrigger>
+      <Tooltip open={open ? false : undefined}>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="h-6 w-6 flex-shrink-0 flex items-center justify-center rounded transition-colors duration-150"
+              style={{ color: theme.mutedFg }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme.hoverBg;
+                e.currentTarget.style.color = theme.resolvedFg;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = theme.mutedFg;
+              }}
+              aria-label={manageLabel}
+            >
+              <Plus size={12} />
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{manageLabel}</TooltipContent>
+      </Tooltip>
       <PopoverContent
         className="w-72 p-0"
         align="end"
@@ -740,6 +744,10 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
     }
   }, [handleSend, navigate, onClose, sessionId]);
 
+  const handleReturnFocus = useCallback(() => {
+    textareaRef.current?.focus({ preventScroll: true });
+  }, []);
+
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     resizeCleanupRef.current?.();
@@ -804,9 +812,28 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
       </div>
 
       <div
-        className="flex-shrink-0 flex items-center gap-1 px-2 min-w-0"
+        data-compose-top-bar
+        className="flex-shrink-0 flex items-center gap-1.5 px-2 min-w-0"
         style={{ height: SNIPPET_STRIP_HEIGHT }}
       >
+        {contextChipsEnabled && (
+          <>
+            <ComposeDirectoryPicker
+              key={sessionId}
+              sessionId={sessionId}
+              theme={theme}
+              onReturnFocus={handleReturnFocus}
+            />
+            {pinnedSnippets.length > 0 && (
+              <span
+                aria-hidden="true"
+                className="h-3.5 w-px flex-shrink-0"
+                style={{ backgroundColor: theme.borderColor }}
+              />
+            )}
+          </>
+        )}
+
         <div
           data-compose-snippet-strip
           className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto scrollbar-thin"
@@ -848,9 +875,6 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
           pinnedCountLabel={t('terminal.composeBar.pinnedCount', { count: pinnedSnippets.length })}
         />
       </div>
-
-      {contextChipsEnabled && <ComposeDirectoryPicker key={sessionId} sessionId={sessionId} theme={theme}
-        onReturnFocus={() => textareaRef.current?.focus({ preventScroll: true })} />}
 
       <div className="flex-1 min-h-0 px-3 pt-1.5 pb-2 flex flex-col">
         <div className="flex flex-1 min-h-0 items-start gap-1.5">

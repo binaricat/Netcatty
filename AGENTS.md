@@ -100,7 +100,7 @@ Placement rules (`resolveAgentKinds` in `toolSurfaces.cjs`):
 | Vault bridge | `electron/bridges/aiBridge/vaultAgentBridge.cjs` + `infrastructure/ai/vaultAgentBridgeClient.ts` | Renderer vault state; **never** returns password/privateKey |
 | AI context | `buildAITerminalSessionInfo` + `useTerminalAiContexts` | Per-session `hostChain` + `activePortForwards`; mirrored in `getContext` and Catty system prompt |
 
-**Policy:** SFTP writes/transfers, `portforward_start`, and `host_notes_set` require confirm-mode approval. Observer mode blocks writes.
+**Policy:** SFTP writes/transfers, `portforward_start`, and `host_notes_set` require confirm-mode approval. Observer mode blocks writes. `terminal_execute_bulk` (2–20 sessions, loaded via the `terminal_bulk` toolset) is all-or-nothing before sending and sets `policy.requiresFreshApproval`: remembered grants and external-client session approval never satisfy it. See `docs/features/terminal-execute-bulk.md`.
 
 **Handles:** `ToolOutputStore` persists across turns per chat session; cleared on chat session delete. Large `sftp.read` results spill to `tool_output_read`.
 

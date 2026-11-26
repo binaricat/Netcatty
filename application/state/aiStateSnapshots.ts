@@ -29,7 +29,7 @@ import {
 import { emitAIStateChanged } from './aiStateEvents';
 import { peekAgentRuntimeCleanup } from '../../infrastructure/ai/harness/agentRuntimeHandle';
 import { setReversibleModelPrivacy } from '../../infrastructure/ai/harness/modelSecretRedaction';
-import { DebouncedBackupMirror, readLiveSessionsArray } from './aiSessionsBackup';
+import { DebouncedBackupMirror, readLiveSessionsArray, type BackupMirrorInput } from './aiSessionsBackup';
 import {
   idbDeleteSessionIds,
   idbPutMeta,
@@ -305,6 +305,7 @@ let idbWriteQueue: Promise<void> = Promise.resolve();
 /** Test hook: reset diff state between tests. */
 export function __resetIdbPersistenceForTests() {
   lastPersistedSessionsById = new Map();
+  lastMirroredSessions = null;
   idbWriteQueue = Promise.resolve();
   // Tests swap the fake indexedDB factory between cases; the cached open
   // handle must not survive the swap.
@@ -429,12 +430,13 @@ export function flushBackupMirror() {
 export function __resetBackupMirrorForTests() {
   backupMirror.reset();
   aiSessionsBackupRecoveryPending = false;
+  lastMirroredSessions = null;
 }
 
-export function scheduleBackupMirror(json: string) {
+export function scheduleBackupMirror(input: BackupMirrorInput) {
   if (aiSessionsBackupRecoveryPending) return;
   try {
-    backupMirror.schedule(json);
+    backupMirror.schedule(input);
   } catch {
     // ignore
   }
@@ -503,9 +505,11 @@ export function writeSessionsForStorage(
     const removedIds = Array.from(prevById.keys()).filter(id => !persistedIds.has(id));
     lastPersistedSessionsById = new Map(persisted.map(session => [session.id, session]));
 
-    if (changed.length > 0 || removedIds.length > 0 || lastMirroredSessions !== persisted) {
-      scheduleBackupMirror(JSON.stringify(persisted));
-      lastMirroredSessions = persisted;
+    if (changed.length > 0 || removedIds.length > 0 || lastMirroredSessions === null) {
+      if (!aiSessionsBackupRecoveryPending) {
+        scheduleBackupMirror(() => JSON.stringify(persisted));
+        lastMirroredSessions = persisted;
+      }
     }
     queueIdbSessionSync(changed, removedIds, prevById, persisted);
     return true;

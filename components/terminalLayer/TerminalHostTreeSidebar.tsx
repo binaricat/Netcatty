@@ -1023,99 +1023,85 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   const targetLayoutWidth = getTerminalHostTreeLayoutTargetWidth(isVisible, displayWidth);
   const hiddenSurfaceShellWidth = getTerminalHostTreeHiddenSurfaceShellWidth(isOpen, enabled, displayWidth);
   const [shellWidth, setShellWidth] = useState(getTerminalHostTreeInitialLayoutWidth);
+  const shellWidthRef = useRef(shellWidth);
+  shellWidthRef.current = shellWidth;
+  const prevSurfaceVisibleRef = useRef(surfaceVisible);
   const cancelSyncLayoutWidthRef = useRef<(() => void) | null>(null);
-  const prevIsVisibleRef = useRef(isVisible);
-
-  const syncLayoutWidthFromShell = useCallback((fallbackWidth = targetLayoutWidth) => {
-    terminalHostTreeStore.setLayoutWidth(
-      getTerminalHostTreeMeasuredLayoutWidth(shellRef.current, fallbackWidth),
-    );
-  }, [targetLayoutWidth]);
 
   useEffect(() => {
-    const el = shellRef.current;
-    if (!el) return;
-
-    const ro = new ResizeObserver(() => {
-      if (isResizing) return;
-      syncLayoutWidthFromShell();
-    });
-    ro.observe(el);
-    syncLayoutWidthFromShell();
-
-    return () => ro.disconnect();
-  }, [isResizing, syncLayoutWidthFromShell]);
-
-  useEffect(() => {
-    if (prevIsVisibleRef.current === isVisible) return;
-    prevIsVisibleRef.current = isVisible;
-
-    const el = shellRef.current;
-    if (!el) return;
-
-    terminalLayoutSuppressStore.begin();
-    let ended = false;
-    const finish = () => {
-      if (ended) return;
-      ended = true;
-      terminalLayoutSuppressStore.end();
-    };
-    const onTransitionEnd = (event: TransitionEvent) => {
-      if (event.target !== el || event.propertyName !== 'width') return;
-      syncLayoutWidthFromShell();
-      finish();
-    };
-    el.addEventListener('transitionend', onTransitionEnd);
-    const timer = window.setTimeout(() => {
-      syncLayoutWidthFromShell();
-      finish();
-    }, TERMINAL_HOST_TREE_ANIMATION_MS + 80);
     return () => {
-      el.removeEventListener('transitionend', onTransitionEnd);
-      window.clearTimeout(timer);
-      finish();
+      terminalHostTreeStore.setLayoutTransitionAnimated(false);
     };
-  }, [isVisible, syncLayoutWidthFromShell]);
-
-  useEffect(() => {
-    const el = shellRef.current;
-    if (!el) return;
-
-    const onTransitionEnd = (event: TransitionEvent) => {
-      if (event.target !== el || event.propertyName !== 'width' || isResizing) return;
-      syncLayoutWidthFromShell();
-    };
-    el.addEventListener('transitionend', onTransitionEnd);
-    return () => el.removeEventListener('transitionend', onTransitionEnd);
-  }, [isResizing, syncLayoutWidthFromShell]);
+  }, []);
 
   useEffect(() => {
     cancelSyncLayoutWidthRef.current?.();
     cancelSyncLayoutWidthRef.current = null;
 
+    const wasSurfaceVisible = prevSurfaceVisibleRef.current;
+    prevSurfaceVisibleRef.current = surfaceVisible;
+
     if (isResizing) {
       setShellWidth(targetLayoutWidth);
-      terminalHostTreeStore.setLayoutWidth(targetLayoutWidth);
+      terminalHostTreeStore.setLayoutWidth(targetLayoutWidth, false);
       return;
     }
 
     if (!surfaceVisible) {
       setShellWidth(hiddenSurfaceShellWidth);
-      terminalHostTreeStore.setLayoutWidth(0);
+      terminalHostTreeStore.setLayoutWidth(0, false);
       return;
     }
 
-    syncLayoutWidthFromShell();
+    // Returning from a hidden surface (Vault/SFTP -> work tab) keeps the prior
+    // shell width, so snap layout width immediately with no CSS transition.
+    if (!wasSurfaceVisible || shellWidthRef.current === targetLayoutWidth) {
+      setShellWidth(targetLayoutWidth);
+      terminalHostTreeStore.setLayoutWidth(targetLayoutWidth, false);
+      return;
+    }
+
+    const el = shellRef.current;
+    terminalLayoutSuppressStore.begin();
+    let suppressEnded = false;
+    let timer: number | null = null;
+    const endSuppress = () => {
+      if (suppressEnded) return;
+      suppressEnded = true;
+      terminalLayoutSuppressStore.end();
+    };
+    const cleanupTransitionListeners = () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      el?.removeEventListener('transitionend', onTransitionEnd);
+    };
+    const completeTransition = () => {
+      cleanupTransitionListeners();
+      terminalHostTreeStore.setLayoutTransitionAnimated(false);
+      endSuppress();
+    };
+    const onTransitionEnd = (event: TransitionEvent) => {
+      if (event.target !== el || event.propertyName !== 'width') return;
+      completeTransition();
+    };
+
     cancelSyncLayoutWidthRef.current = scheduleChromeLayoutAnimation(() => {
       cancelSyncLayoutWidthRef.current = null;
       setShellWidth(targetLayoutWidth);
+      terminalHostTreeStore.setLayoutWidth(targetLayoutWidth, true);
+      el?.addEventListener('transitionend', onTransitionEnd);
+      timer = window.setTimeout(completeTransition, TERMINAL_HOST_TREE_ANIMATION_MS + 80);
     });
 
     return () => {
       cancelSyncLayoutWidthRef.current?.();
       cancelSyncLayoutWidthRef.current = null;
+      cleanupTransitionListeners();
+      endSuppress();
     };
-  }, [hiddenSurfaceShellWidth, isResizing, surfaceVisible, syncLayoutWidthFromShell, targetLayoutWidth]);
+  }, [hiddenSurfaceShellWidth, isResizing, surfaceVisible, targetLayoutWidth]);
 
   return (
     <div
@@ -1205,19 +1191,28 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   );
 };
 
-export const TerminalHostTreeSidebar = memo(
-  TerminalHostTreeSidebarInner,
-  (prev, next) => (
+export function terminalHostTreeSidebarPropsEqual(
+  prev: TerminalHostTreeSidebarProps,
+  next: TerminalHostTreeSidebarProps,
+): boolean {
+  const hiddenAcrossRender = (!prev.surfaceVisible || !prev.enabled)
+    && (!next.surfaceVisible || !next.enabled);
+  return (
     prev.hosts === next.hosts
     && prev.enabled === next.enabled
     && prev.surfaceVisible === next.surfaceVisible
     && prev.customGroups === next.customGroups
-    && prev.activeHostId === next.activeHostId
-    && themeFingerprint(prev.resolvedPreviewTheme) === themeFingerprint(next.resolvedPreviewTheme)
+    && (hiddenAcrossRender || prev.activeHostId === next.activeHostId)
+    && (hiddenAcrossRender || themeFingerprint(prev.resolvedPreviewTheme) === themeFingerprint(next.resolvedPreviewTheme))
     && prev.onConnect === next.onConnect
     && prev.onNewHost === next.onNewHost
     && prev.onEditHost === next.onEditHost
     && prev.onCreateLocalTerminal === next.onCreateLocalTerminal
-  ),
+  );
+}
+
+export const TerminalHostTreeSidebar = memo(
+  TerminalHostTreeSidebarInner,
+  terminalHostTreeSidebarPropsEqual,
 );
 TerminalHostTreeSidebar.displayName = 'TerminalHostTreeSidebar';

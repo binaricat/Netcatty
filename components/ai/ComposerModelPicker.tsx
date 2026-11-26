@@ -13,6 +13,7 @@ import {
 import type { AgentModelPreset, ProviderConfig } from '../../infrastructure/ai/types';
 import { formatRelativeTime } from '../AIChatSessionHistoryDrawer';
 import { ProviderIconBadge } from '../settings/tabs/ai/ProviderIconBadge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { useProviderModelCatalog } from './useProviderModelCatalog';
 
 export const COMPOSER_PROVIDER_PICKER_WIDTH = 260;
@@ -416,15 +417,21 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
             <span className="min-w-0 flex-1 truncate" title={catalogChipText}>{catalogChipText}</span>
           )}
           {showRefreshButton && (
-            <button
-              type="button"
-              aria-label={refreshLabel}
-              title={refreshLabel}
-              onClick={onRefreshCatalog}
-              className="shrink-0 rounded p-0.5 text-muted-foreground/55 transition-colors hover:bg-muted/40 hover:text-foreground/75 cursor-pointer"
-            >
-              <RotateCw size={11} />
-            </button>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={refreshLabel}
+                    onClick={onRefreshCatalog}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground/55 transition-colors hover:bg-muted/40 hover:text-foreground/75 cursor-pointer"
+                  >
+                    <RotateCw size={11} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{refreshLabel}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
       )}

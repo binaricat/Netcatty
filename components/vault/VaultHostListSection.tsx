@@ -25,12 +25,10 @@ import {
   type HostClickBehavior,
 } from "../../domain/hostClickBehavior";
 import type { GroupNode, Host } from "../../domain/models";
-import { isPluginHostProtocol } from "../../domain/pluginConnection";
-import { OpenDualPaneSftpMenuItem, OpenHostBrowserMenuItem } from "../host/HostTreeContextMenus";
-import { VAULT_HOST_DRAG_IDS, isVaultHostDraggable } from "../../domain/vaultHostDrag";
-import { getVaultHostRowSubtitle } from "../../domain/localShellHost";
+import { VAULT_HOST_DRAG_IDS } from "../../domain/vaultHostDrag";
 import { beginVaultHostCardDrag } from "./vaultHostDragImage";
 import { useVaultHostMarquee } from "./useVaultHostMarquee";
+import { VaultHostCard, type VaultHostCardPrimitives, type VaultHostCardSection } from "./VaultHostCard";
 
 type VaultHostListSectionContext = Record<string, any>;
 
@@ -356,6 +354,65 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
     </Button>
   );
 
+  const hostCardPrimitives: VaultHostCardPrimitives = {
+    Badge,
+    CheckSquare,
+    ClipboardCopy,
+    cn,
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuTrigger,
+    Copy,
+    DistroAvatar,
+    Edit2,
+    Pin,
+    Plug,
+    Square,
+    Star,
+    Trash2,
+  };
+
+  const renderHostCard = (
+    host: Host,
+    section: VaultHostCardSection,
+    gridItemKey: string,
+  ) => (
+    <VaultHostCard
+      key={host.id}
+      host={host}
+      section={section}
+      gridItemKey={gridItemKey}
+      viewMode={viewMode}
+      isMultiSelectMode={Boolean(isMultiSelectMode)}
+      selectedHostIds={selectedHostIds}
+      draggingHostIds={draggingHostIds}
+      isFocusSelected={isHostFocusSelected(host.id)}
+      tabIndex={getHostTabIndex(host.id)}
+      isPopInAnimated={section === "pinned" && lastPinnedId === host.id}
+      onPopInAnimationEnd={section === "pinned"
+        ? () => {
+            if (lastPinnedId === host.id) setLastPinnedId(null);
+          }
+        : undefined}
+      sanitizeHost={sanitizeHost}
+      getEffectiveHostDistro={getEffectiveHostDistro}
+      renderEditButton={renderHostEditButton}
+      onDragStart={handleHostDragStart}
+      onActivate={activateHost}
+      onConnect={handleHostConnect}
+      onOpenBrowser={handleOpenHostBrowser}
+      onEdit={handleEditHost}
+      onDuplicate={handleDuplicateHost}
+      onCopyHostname={handleCopyHostname}
+      onCopyCredentials={handleCopyCredentials}
+      onTogglePinned={toggleHostPinned}
+      onDelete={onDeleteHost}
+      t={t}
+      primitives={hostCardPrimitives}
+    />
+  );
+
   const renderGroupEditButton = (groupPath: string, compact = false) => (
     <Button
       variant="ghost"
@@ -587,112 +644,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                         onActiveItemChange={focusHost}
                         activeItemKey={focusedHostId}
                         onBoundaryNavigation={(direction) => navigateHostSection("pinned", direction)}
-                        renderItem={(host) => {
-                          const safeHost = sanitizeHost(host);
-                          const effectiveDistro = getEffectiveHostDistro(safeHost);
-                          const distroBadge = {
-                            text: (safeHost.os || "L")[0].toUpperCase(),
-                            label: effectiveDistro || safeHost.os || "Linux",
-                          };
-                          return (
-                            <ContextMenu key={host.id}>
-                              <ContextMenuTrigger>
-                                <div
-                                  className={cn(
-                                    "vault-drop-indicator-row group cursor-pointer relative",
-                                    viewMode === "grid"
-                                      ? cn(
-                                        "soft-card elevate rounded-xl h-[68px] px-3 py-2 will-change-transform transition-[opacity,box-shadow,border-color,background-color] duration-150",
-                                        draggingHostIds?.has(host.id) && "opacity-45",
-                                        hostCardFocusClassName(viewMode, isHostFocusSelected(host.id)),
-                                      )
-                                      : cn(
-                                        "h-14 px-2 py-2 rounded-lg transition-colors",
-                                        isHostFocusSelected(host.id)
-                                          ? hostCardFocusClassName("list", true)
-                                          : "hover:bg-secondary/60",
-                                      ),
-                                  )}
-                                  data-host-id={host.id}
-                                  data-vault-grid-item={`pinned:${host.id}`}
-                                  role={isMultiSelectMode ? "checkbox" : "button"}
-                                  aria-checked={isMultiSelectMode
-                                    ? selectedHostIds.has(host.id)
-                                    : undefined}
-                                  tabIndex={getHostTabIndex(host.id)}
-                                  style={lastPinnedId === host.id ? { animation: "pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both" } : undefined}
-                                  onAnimationEnd={() => { if (lastPinnedId === host.id) setLastPinnedId(null); }}
-                                  draggable={isVaultHostDraggable(Boolean(isMultiSelectMode), selectedHostIds, host.id)}
-                                  onDragStart={(e) => handleHostDragStart(e, host.id)}
-                                  onClick={() => {
-                                    activateHost(safeHost);
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key !== "Enter" && event.key !== " ") return;
-                                    event.preventDefault();
-                                    activateHost(safeHost);
-                                  }}
-                                >
-                                  {viewMode === "grid" && (
-                                    <Star size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400" />
-                                  )}
-                                  <div className="flex items-center gap-3 h-full">
-                                    {isMultiSelectMode && (
-                                      <div className="shrink-0">
-                                        {selectedHostIds.has(host.id) ? (
-                                          <CheckSquare size={18} className="text-primary" />
-                                        ) : (
-                                          <Square size={18} className="text-muted-foreground" />
-                                        )}
-                                      </div>
-                                    )}
-                                    <DistroAvatar host={safeHost} fallback={distroBadge.text} size="lg" />
-                                    <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-sm font-semibold truncate leading-5">
-                                          {safeHost.label}
-                                        </span>
-                                        {viewMode !== "grid" && renderHostEditButton(host, true)}
-                                        <HostNotesIndicator notes={safeHost.notes} />
-                                      </div>
-                                      <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
-                                        {getVaultHostRowSubtitle(safeHost, { localFallback: t('localShell.subtitle') })}
-                                      </div>
-                                    </div>
-                                    {viewMode === "grid" && renderHostEditButton(host)}
-                                  </div>
-                                </div>
-                              </ContextMenuTrigger>
-                              <ContextMenuContent>
-                                <ContextMenuItem onClick={() => handleHostConnect(host)}>
-                                  <Plug className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
-                                </ContextMenuItem>
-                                <OpenDualPaneSftpMenuItem host={host} />
-                                <OpenHostBrowserMenuItem host={host} onOpenBrowser={handleOpenHostBrowser} />
-                                <ContextMenuItem onClick={() => handleEditHost(host)}>
-                                  <Edit2 className="mr-2 h-4 w-4" /> {t('action.edit')}
-                                </ContextMenuItem>
-                                <ContextMenuItem onClick={() => handleDuplicateHost(host)}>
-                                  <Copy className="mr-2 h-4 w-4" /> {t('action.duplicate')}
-                                </ContextMenuItem>
-                                {!isPluginHostProtocol(host.protocol) ? (
-                                  <ContextMenuItem onClick={() => handleCopyHostname(host)}>
-                                    <Copy className="mr-2 h-4 w-4" /> {t('terminal.statusbar.copyHostname.label')}
-                                  </ContextMenuItem>
-                                ) : null}
-                                <ContextMenuItem onClick={() => handleCopyCredentials(host)}>
-                                  <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
-                                </ContextMenuItem>
-                                <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
-                                  <Pin className="mr-2 h-4 w-4" /> {t('vault.hosts.unpin')}
-                                </ContextMenuItem>
-                                <ContextMenuItem className="text-destructive" onClick={() => onDeleteHost(host.id)}>
-                                  <Trash2 className="mr-2 h-4 w-4" /> {t('action.delete')}
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            </ContextMenu>
-                          );
-                        }}
+                        renderItem={(host) => renderHostCard(host, "pinned", `pinned:${host.id}`)}
                       />
                     </section>
                   )}
@@ -713,107 +665,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                         onActiveItemChange={focusHost}
                         activeItemKey={focusedHostId}
                         onBoundaryNavigation={(direction) => navigateHostSection("recent", direction)}
-                        renderItem={(host) => {
-                          const safeHost = sanitizeHost(host);
-                          const effectiveDistro = getEffectiveHostDistro(safeHost);
-                          const distroBadge = {
-                            text: (safeHost.os || "L")[0].toUpperCase(),
-                            label: effectiveDistro || safeHost.os || "Linux",
-                          };
-                          return (
-                            <ContextMenu key={host.id}>
-                              <ContextMenuTrigger>
-                                <div
-                                  className={cn(
-                                    "vault-drop-indicator-row group cursor-pointer relative",
-                                    viewMode === "grid"
-                                      ? cn(
-                                        "soft-card elevate rounded-xl h-[68px] px-3 py-2 will-change-transform transition-[opacity,box-shadow,border-color,background-color] duration-150",
-                                        draggingHostIds?.has(host.id) && "opacity-45",
-                                        hostCardFocusClassName(viewMode, isHostFocusSelected(host.id)),
-                                      )
-                                      : cn(
-                                        "h-14 px-2 py-2 rounded-lg transition-colors",
-                                        isHostFocusSelected(host.id)
-                                          ? hostCardFocusClassName("list", true)
-                                          : "hover:bg-secondary/60",
-                                      ),
-                                  )}
-                                  data-host-id={host.id}
-                                  data-vault-grid-item={`recent:${host.id}`}
-                                  role={isMultiSelectMode ? "checkbox" : "button"}
-                                  aria-checked={isMultiSelectMode
-                                    ? selectedHostIds.has(host.id)
-                                    : undefined}
-                                  tabIndex={getHostTabIndex(host.id)}
-                                  draggable={isVaultHostDraggable(Boolean(isMultiSelectMode), selectedHostIds, host.id)}
-                                  onDragStart={(e) => handleHostDragStart(e, host.id)}
-                                  onClick={() => {
-                                    activateHost(safeHost);
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key !== "Enter" && event.key !== " ") return;
-                                    event.preventDefault();
-                                    activateHost(safeHost);
-                                  }}
-                                >
-                                  <div className="flex items-center gap-3 h-full">
-                                    {isMultiSelectMode && (
-                                      <div className="shrink-0">
-                                        {selectedHostIds.has(host.id) ? (
-                                          <CheckSquare size={18} className="text-primary" />
-                                        ) : (
-                                          <Square size={18} className="text-muted-foreground" />
-                                        )}
-                                      </div>
-                                    )}
-                                    <DistroAvatar host={safeHost} fallback={distroBadge.text} size="lg" />
-                                    <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-sm font-semibold truncate leading-5">
-                                          {safeHost.label}
-                                        </span>
-                                        {viewMode !== "grid" && renderHostEditButton(host, true)}
-                                        <HostNotesIndicator notes={safeHost.notes} />
-                                      </div>
-                                      <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
-                                        {getVaultHostRowSubtitle(safeHost, { localFallback: t('localShell.subtitle') })}
-                                      </div>
-                                    </div>
-                                    {viewMode === "grid" && renderHostEditButton(host)}
-                                  </div>
-                                </div>
-                              </ContextMenuTrigger>
-                              <ContextMenuContent>
-                                <ContextMenuItem onClick={() => handleHostConnect(host)}>
-                                  <Plug className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
-                                </ContextMenuItem>
-                                <OpenDualPaneSftpMenuItem host={host} />
-                                <OpenHostBrowserMenuItem host={host} onOpenBrowser={handleOpenHostBrowser} />
-                                <ContextMenuItem onClick={() => handleEditHost(host)}>
-                                  <Edit2 className="mr-2 h-4 w-4" /> {t('action.edit')}
-                                </ContextMenuItem>
-                                <ContextMenuItem onClick={() => handleDuplicateHost(host)}>
-                                  <Copy className="mr-2 h-4 w-4" /> {t('action.duplicate')}
-                                </ContextMenuItem>
-                                {!isPluginHostProtocol(host.protocol) ? (
-                                  <ContextMenuItem onClick={() => handleCopyHostname(host)}>
-                                    <Copy className="mr-2 h-4 w-4" /> {t('terminal.statusbar.copyHostname.label')}
-                                  </ContextMenuItem>
-                                ) : null}
-                                <ContextMenuItem onClick={() => handleCopyCredentials(host)}>
-                                  <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
-                                </ContextMenuItem>
-                                <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
-                                  <Pin className="mr-2 h-4 w-4" /> {host.pinned ? t('vault.hosts.unpin') : t('vault.hosts.pinToTop')}
-                                </ContextMenuItem>
-                                <ContextMenuItem className="text-destructive" onClick={() => onDeleteHost(host.id)}>
-                                  <Trash2 className="mr-2 h-4 w-4" /> {t('action.delete')}
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            </ContextMenu>
-                          );
-                        }}
+                        renderItem={(host) => renderHostCard(host, "recent", `recent:${host.id}`)}
                       />
                     </section>
                   )}
@@ -1085,130 +937,9 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
 	                                  </span>
 	                                </div>
 	                              )}
-	                              renderItem={(host: Host, group) => {
-                                const safeHost = sanitizeHost(host);
-                                const effectiveDistro = getEffectiveHostDistro(safeHost);
-                                const distroBadge = {
-                                  text: (safeHost.os || "L")[0].toUpperCase(),
-                                  label: effectiveDistro || safeHost.os || "Linux",
-                                };
-                                return (
-                                  <ContextMenu key={host.id}>
-                                    <ContextMenuTrigger>
-                                      <div
-                                        className={cn(
-                                          "vault-drop-indicator-row group cursor-pointer relative",
-                                          viewMode === "grid"
-                                            ? cn(
-                                              "soft-card elevate rounded-xl h-[68px] px-3 py-2 will-change-transform transition-[opacity,box-shadow,border-color,background-color] duration-150",
-                                              draggingHostIds?.has(host.id) && "opacity-45",
-                                              hostCardFocusClassName(viewMode, isHostFocusSelected(host.id)),
-                                            )
-                                            : cn(
-                                              "h-14 px-2 py-2 rounded-lg transition-colors",
-                                              isHostFocusSelected(host.id)
-                                                ? hostCardFocusClassName("list", true)
-                                                : "hover:bg-secondary/60",
-                                            ),
-                                        )}
-                                        data-host-id={host.id}
-                                        data-vault-grid-item={`grouped:${group.name || "__ungrouped__"}:${host.id}`}
-                                        role={isMultiSelectMode ? "checkbox" : "button"}
-                                        aria-checked={isMultiSelectMode
-                                          ? selectedHostIds.has(host.id)
-                                          : undefined}
-	                                        tabIndex={getHostTabIndex(host.id)}
-                                        draggable={isVaultHostDraggable(Boolean(isMultiSelectMode), selectedHostIds, host.id)}
-                                        onDragStart={(e) => handleHostDragStart(e, host.id)}
-                                        onClick={() => {
-                                          activateHost(safeHost);
-                                        }}
-                                        onKeyDown={(event) => {
-                                          if (event.key !== "Enter" && event.key !== " ") return;
-                                          event.preventDefault();
-                                          activateHost(safeHost);
-                                        }}
-                                      >
-                                        {host.pinned && viewMode === "grid" && (
-                                          <Star size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400" />
-                                        )}
-                                        <div className="flex items-center gap-3 h-full">
-                                          {isMultiSelectMode && (
-                                            <div className="shrink-0" aria-hidden="true">
-                                              {selectedHostIds.has(host.id) ? (
-                                                <CheckSquare size={18} className="text-primary" />
-                                              ) : (
-                                                <Square size={18} className="text-muted-foreground" />
-                                              )}
-                                            </div>
-                                          )}
-                                          <DistroAvatar
-                                            host={safeHost}
-                                            fallback={distroBadge.text}
-                                            size="lg"
-                                          />
-                                          <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
-                                            <div className="flex items-center gap-1.5">
-                                              <span className="text-sm font-semibold truncate leading-5">
-                                                {safeHost.label}
-                                              </span>
-                                              {viewMode !== "grid" && renderHostEditButton(host, true)}
-                                              {safeHost.managedSourceId && (
-                                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 shrink-0">
-                                                  managed
-                                                </Badge>
-                                              )}
-                                              <HostNotesIndicator notes={safeHost.notes} />
-                                            </div>
-                                            <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
-                                              {getVaultHostRowSubtitle(safeHost, { localFallback: t('localShell.subtitle') })}
-                                            </div>
-                                          </div>
-                                          {viewMode === "grid" && renderHostEditButton(host)}
-                                        </div>
-                                      </div>
-                                    </ContextMenuTrigger>
-                                    <ContextMenuContent>
-                                      <ContextMenuItem
-                                        onClick={() => handleHostConnect(host)}
-                                      >
-                                        <Plug className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
-                                      </ContextMenuItem>
-                                      <OpenDualPaneSftpMenuItem host={host} />
-                                      <OpenHostBrowserMenuItem host={host} onOpenBrowser={handleOpenHostBrowser} />
-                                      <ContextMenuItem
-                                        onClick={() => handleEditHost(host)}
-                                      >
-                                        <Edit2 className="mr-2 h-4 w-4" /> {t('action.edit')}
-                                      </ContextMenuItem>
-                                      <ContextMenuItem
-                                        onClick={() => handleDuplicateHost(host)}
-                                      >
-                                        <Copy className="mr-2 h-4 w-4" /> {t('action.duplicate')}
-                                      </ContextMenuItem>
-                                      {!isPluginHostProtocol(host.protocol) ? (
-                                      <ContextMenuItem onClick={() => handleCopyHostname(host)}>
-                                        <Copy className="mr-2 h-4 w-4" /> {t('terminal.statusbar.copyHostname.label')}
-                                      </ContextMenuItem>
-                                    ) : null}
-                                      <ContextMenuItem
-                                        onClick={() => handleCopyCredentials(host)}
-                                      >
-                                        <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
-                                      </ContextMenuItem>
-                                      <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
-                                        <Pin className="mr-2 h-4 w-4" /> {host.pinned ? t('vault.hosts.unpin') : t('vault.hosts.pinToTop')}
-                                      </ContextMenuItem>
-                                      <ContextMenuItem
-                                        className="text-destructive"
-                                        onClick={() => onDeleteHost(host.id)}
-                                      >
-                                        <Trash2 className="mr-2 h-4 w-4" /> {t('action.delete')}
-                                      </ContextMenuItem>
-                                    </ContextMenuContent>
-                                  </ContextMenu>
-	                                );
-	                              }}
+	                              renderItem={(host: Host, group) =>
+	                                renderHostCard(host, "grouped", `grouped:${group.name || "__ungrouped__"}:${host.id}`)
+	                              }
 	                            />
 	                        {groupedDisplayHosts.length === 0 && (
 	                          <div className="col-span-full flex flex-col items-center justify-center py-24 text-muted-foreground">
@@ -1236,130 +967,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                         onActiveItemChange={focusHost}
                         activeItemKey={focusedHostId}
                         onBoundaryNavigation={(direction) => navigateHostSection("main", direction)}
-                        renderItem={(host: Host) => {
-                          const safeHost = sanitizeHost(host);
-                          const effectiveDistro = getEffectiveHostDistro(safeHost);
-                          const distroBadge = {
-                            text: (safeHost.os || "L")[0].toUpperCase(),
-                            label: effectiveDistro || safeHost.os || "Linux",
-                          };
-                          return (
-                            <ContextMenu key={host.id}>
-                              <ContextMenuTrigger>
-                                <div
-                                  className={cn(
-                                    "vault-drop-indicator-row group cursor-pointer relative",
-                                    viewMode === "grid"
-                                      ? cn(
-                                        "soft-card elevate rounded-xl h-[68px] px-3 py-2 will-change-transform transition-[opacity,box-shadow,border-color,background-color] duration-150",
-                                        draggingHostIds?.has(host.id) && "opacity-45",
-                                        hostCardFocusClassName(viewMode, isHostFocusSelected(host.id)),
-                                      )
-                                      : cn(
-                                        "h-14 px-2 py-2 rounded-lg transition-colors",
-                                        isHostFocusSelected(host.id)
-                                          ? hostCardFocusClassName("list", true)
-                                          : "hover:bg-secondary/60",
-                                      ),
-                                  )}
-                                  data-host-id={host.id}
-                                  data-vault-grid-item={`main:${host.id}`}
-                                  role={isMultiSelectMode ? "checkbox" : "button"}
-                                  aria-checked={isMultiSelectMode
-                                    ? selectedHostIds.has(host.id)
-                                    : undefined}
-                                  tabIndex={getHostTabIndex(host.id)}
-                                  draggable={isVaultHostDraggable(Boolean(isMultiSelectMode), selectedHostIds, host.id)}
-                                  onDragStart={(e) => handleHostDragStart(e, host.id)}
-                                  onClick={() => {
-                                    activateHost(safeHost);
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key !== "Enter" && event.key !== " ") return;
-                                    event.preventDefault();
-                                    activateHost(safeHost);
-                                  }}
-                                >
-                                  {host.pinned && viewMode === "grid" && (
-                                    <Star size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400" />
-                                  )}
-                                  <div className="flex items-center gap-3 h-full">
-                                    {isMultiSelectMode && (
-                                      <div className="shrink-0" aria-hidden="true">
-                                        {selectedHostIds.has(host.id) ? (
-                                          <CheckSquare size={18} className="text-primary" />
-                                        ) : (
-                                          <Square size={18} className="text-muted-foreground" />
-                                        )}
-                                      </div>
-                                    )}
-                                    <DistroAvatar
-                                      host={safeHost}
-                                      fallback={distroBadge.text}
-                                      size="lg"
-                                    />
-                                    <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-sm font-semibold truncate leading-5">
-                                          {safeHost.label}
-                                        </span>
-                                        {viewMode !== "grid" && renderHostEditButton(host, true)}
-                                        {safeHost.managedSourceId && (
-                                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 shrink-0">
-                                            managed
-                                          </Badge>
-                                        )}
-                                        <HostNotesIndicator notes={safeHost.notes} />
-                                      </div>
-                                      <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
-                                        {getVaultHostRowSubtitle(safeHost, { localFallback: t('localShell.subtitle') })}
-                                      </div>
-                                    </div>
-                                    {viewMode === "grid" && renderHostEditButton(host)}
-                                  </div>
-                                </div>
-                              </ContextMenuTrigger>
-                              <ContextMenuContent>
-                                <ContextMenuItem
-                                  onClick={() => handleHostConnect(host)}
-                                >
-                                  <Plug className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
-                                </ContextMenuItem>
-                                <OpenDualPaneSftpMenuItem host={host} />
-                                <OpenHostBrowserMenuItem host={host} onOpenBrowser={handleOpenHostBrowser} />
-                                <ContextMenuItem
-                                  onClick={() => handleEditHost(host)}
-                                >
-                                  <Edit2 className="mr-2 h-4 w-4" /> {t('action.edit')}
-                                </ContextMenuItem>
-                                <ContextMenuItem
-                                  onClick={() => handleDuplicateHost(host)}
-                                >
-                                  <Copy className="mr-2 h-4 w-4" /> {t('action.duplicate')}
-                                </ContextMenuItem>
-                                {!isPluginHostProtocol(host.protocol) ? (
-                                      <ContextMenuItem onClick={() => handleCopyHostname(host)}>
-                                        <Copy className="mr-2 h-4 w-4" /> {t('terminal.statusbar.copyHostname.label')}
-                                      </ContextMenuItem>
-                                    ) : null}
-                                      <ContextMenuItem
-                                        onClick={() => handleCopyCredentials(host)}
-                                      >
-                                        <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
-                                      </ContextMenuItem>
-                                <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
-                                  <Pin className="mr-2 h-4 w-4" /> {host.pinned ? t('vault.hosts.unpin') : t('vault.hosts.pinToTop')}
-                                </ContextMenuItem>
-                                <ContextMenuItem
-                                  className="text-destructive"
-                                  onClick={() => onDeleteHost(host.id)}
-                                >
-                                  <Trash2 className="mr-2 h-4 w-4" /> {t('action.delete')}
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            </ContextMenu>
-                          );
-                        }}
+                        renderItem={(host: Host) => renderHostCard(host, "main", `main:${host.id}`)}
                       />
                       {displayedHosts.length === 0 && (
                         <div className="col-span-full flex flex-col items-center justify-center py-24 text-muted-foreground">

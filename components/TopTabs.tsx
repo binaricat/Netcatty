@@ -1,6 +1,6 @@
 import { Folder, FolderLock, Lock, Menu, MoreHorizontal, Plus, Settings, Sparkles } from 'lucide-react';
-import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { fromEditorTabId, isEditorTabId, toEditorTabId, useActiveTabId } from '../application/state/activeTabStore';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { activeTabStore, fromEditorTabId, isEditorTabId, toEditorTabId } from '../application/state/activeTabStore';
 import { topTabsSessionsEqual } from '../domain/topTabsSessionsEqual';
 import { isHostTreeWorkTabSurface } from '../application/app/workTabSurface';
 import { buildTabShortcutNumberById } from '../application/app/tabShortcutTargets';
@@ -15,6 +15,7 @@ import type { DynamicTabTitleMode, KeyBinding, TerminalTabDoubleClickBehavior } 
 
 import { getTopTabInsertionTarget, getWorkspaceSessionDragId, hasWorkspaceSessionDrag } from '../application/state/terminalDragData';
 import {
+  useTerminalHostTreeLayoutTransitionAnimated,
   useTerminalHostTreeLayoutWidth,
   useTerminalHostTreeOpen,
   useToggleTerminalHostTree,
@@ -44,7 +45,10 @@ import {
   WorkspaceTopTab,
 } from './top-tabs/TopTabItems';
 import type { PluginViewTab } from '../application/state/pluginViewTabStore';
-import { TERMINAL_HOST_TREE_ANIMATION_MS } from '../application/state/terminalHostTreeAnimation';
+import {
+  TERMINAL_HOST_TREE_ANIMATION_MS,
+  TERMINAL_HOST_TREE_WIDTH_TRANSITION,
+} from '../application/state/terminalHostTreeAnimation';
 import {
   scheduleAfterInstantThemeSwitch,
   scheduleChromeLayoutAnimation,
@@ -64,6 +68,20 @@ const EMPTY_WORKSPACE_TAB_SESSIONS: WorkspaceTabSessions = { ids: [], sessions: 
 
 export function computeHostTreeTabGutter(hostTreeLayoutWidth: number, toggleRight: number): number {
   return Math.max(0, hostTreeLayoutWidth - toggleRight);
+}
+
+export function getHostTreeTabGutterStyle(
+  hostTreeTabGutter: number,
+  hostTreeGutterExiting: boolean,
+  hostTreeLayoutAnimated: boolean,
+): React.CSSProperties {
+  if (hostTreeGutterExiting) {
+    return { width: hostTreeTabGutter };
+  }
+  return {
+    width: hostTreeTabGutter,
+    transition: hostTreeLayoutAnimated ? TERMINAL_HOST_TREE_WIDTH_TRANSITION : 'none',
+  };
 }
 
 export function shouldShowHostTreeToggle({
@@ -89,6 +107,34 @@ export function shouldShowHostTreeToggle({
     sessionIds,
     workspaceIds,
   });
+}
+
+export function useShowHostTreeToggle({
+  enabled,
+  logViewIds,
+  orderedTabs,
+  sessionIds,
+  workspaceIds,
+}: {
+  enabled: boolean;
+  logViewIds?: ReadonlySet<string>;
+  orderedTabs: readonly string[];
+  sessionIds: ReadonlySet<string>;
+  workspaceIds: ReadonlySet<string>;
+}): boolean {
+  const getSnapshot = useCallback(
+    () =>
+      shouldShowHostTreeToggle({
+        enabled,
+        activeTabId: activeTabStore.getActiveTabId(),
+        logViewIds,
+        orderedTabs,
+        sessionIds,
+        workspaceIds,
+      }),
+    [enabled, logViewIds, orderedTabs, sessionIds, workspaceIds],
+  );
+  return useSyncExternalStore(activeTabStore.subscribe, getSnapshot, getSnapshot);
 }
 
 export function shouldKeepHostTreeToggleSurface({
@@ -264,8 +310,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   }, [hotkeyScheme, showTabNumberBadges, showSftpTab, shellOnlyTabNumberShortcuts, orderedTabs, editorTabs]);
   const isHostTreeOpen = useTerminalHostTreeOpen();
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
+  const hostTreeLayoutAnimated = useTerminalHostTreeLayoutTransitionAnimated();
   const toggleHostTree = useToggleTerminalHostTree();
-  const activeTabId = useActiveTabId();
   // Presentation (dynamic title / coding-CLI icon) is applied per-tab inside
   // SessionTopTab via usePresentedSession — do not remap the whole bar on
   // every sibling title tick.
@@ -387,14 +433,17 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     return counts;
   }, [sessions]);
 
+  const orphanSessionIds = useMemo(() => new Set(orphanSessionMap.keys()), [orphanSessionMap]);
+  const workspaceIds = useMemo(() => new Set(workspaceMap.keys()), [workspaceMap]);
+  const logViewIds = useMemo(() => new Set(logViewMap.keys()), [logViewMap]);
+
   const activeWorkTabCount = orderedTabs.length;
-  const showHostTreeToggle = shouldShowHostTreeToggle({
+  const showHostTreeToggle = useShowHostTreeToggle({
     enabled: showHostTreeSidebar,
-    activeTabId,
-    logViewIds: new Set(logViewMap.keys()),
+    logViewIds,
     orderedTabs,
-    sessionIds: new Set(orphanSessionMap.keys()),
-    workspaceIds: new Set(workspaceMap.keys()),
+    sessionIds: orphanSessionIds,
+    workspaceIds,
   });
   const hasHostTreeToggleSurface = shouldKeepHostTreeToggleSurface({
     enabled: showHostTreeSidebar,
@@ -962,6 +1011,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
 
         return (
           <WorkspaceTopTab
+            tabDoubleClickBehavior={tabDoubleClickBehavior}
             key={workspace.id}
             workspace={workspace}
             paneCount={paneCount}
@@ -1143,7 +1193,11 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 'top-tab-host-tree-gutter flex-shrink-0',
                 hostTreeGutterExiting && 'top-tab-host-tree-gutter-exit',
               )}
-              style={{ width: hostTreeTabGutter }}
+              style={getHostTreeTabGutterStyle(
+                hostTreeTabGutter,
+                hostTreeGutterExiting,
+                hostTreeLayoutAnimated,
+              )}
               aria-hidden
             />
           )}

@@ -464,6 +464,8 @@ export const ruVaultMessages: Messages = {
   'sftp.encoding.auto': 'Авто',
   'sftp.encoding.utf8': 'UTF-8',
   'sftp.encoding.gb18030': 'GB18030',
+  'sftp.goBack': 'Назад',
+  'sftp.goForward': 'Вперёд',
   'sftp.goHome': 'Перейти в домашний каталог',
   'sftp.goRoot': 'Перейти в корень',
   'sftp.folderName': 'Имя папки',
@@ -534,6 +536,9 @@ export const ruVaultMessages: Messages = {
 
   // SFTP File Opener
   'sftp.context.copyPath': 'Копировать путь к файлу',
+  'sftp.context.insertPathToTerminal': 'Вставить путь в терминал',
+  'sftp.context.cdInTerminal': 'Открыть в терминале (cd)',
+  'sftp.terminal.insertBlockedUnsafeQuote': 'Невозможно вставить путь, пока курсор терминала находится внутри незакрытых кавычек или экранирования',
   'sftp.context.openWithDefault': 'Открыть в системном приложении',
   'sftp.context.openWith': 'Открыть с помощью...',
   'sftp.context.edit': 'Редактировать',
@@ -657,6 +662,13 @@ export const ruVaultMessages: Messages = {
   'settings.sftp.packedDownload': 'Скачивание архивом',
   'settings.sftp.packedDownload.enable': 'Упаковывать папки и выбранные вместе файлы перед скачиванием',
   'settings.sftp.packedDownload.enableDesc': 'Выбранные файлы передаются одним потоком и распаковываются с сохранением структуры папок. Если сервер не поддерживает упаковку, файлы скачиваются по отдельности.',
+  'settings.sftp.downloadLocation': 'Папка для загрузок',
+  'settings.sftp.downloadLocation.directory': 'Папка загрузок по умолчанию',
+  'settings.sftp.downloadLocation.directoryDesc': 'Диалоги скачивания по SFTP открываются в этой папке. Если она не задана или больше не существует, используется системная папка «Загрузки».',
+  'settings.sftp.downloadLocation.systemDefault': 'Системная папка «Загрузки»',
+  'settings.sftp.downloadLocation.browse': 'Обзор…',
+  'settings.sftp.downloadLocation.reset': 'Использовать системную папку «Загрузки»',
+  'settings.sftp.downloadLocation.select': 'Выберите папку загрузок по умолчанию',
 
   'settings.sftp.skipUnchanged.enable': 'Пропускать неизменённые файлы',
   'settings.sftp.skipUnchanged.enableDesc': 'Пропускать файлы, у которых размер и время изменения уже совпадают с назначением (в стиле rsync). Отключается при замене папки во временный путь.',

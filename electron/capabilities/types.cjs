@@ -23,6 +23,7 @@
  * @property {boolean} bypassesObserverBlock
  * @property {boolean} bypassesApproval
  * @property {boolean} bypassesChatCancel
+ * @property {boolean} [requiresFreshApproval] Never satisfied by remembered grants or session-wide approval.
  *
  * @typedef {Object} CapabilityDefinition
  * @property {string} id

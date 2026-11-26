@@ -363,3 +363,34 @@ test('side panel icon clicks write the tool through selectSidePanelToolForTab', 
   assert.match(body, /startTransition\(\(\) => \{\s*selectSidePanelToolForTab\(tabId, tab\);/);
   assert.doesNotMatch(body, /setSidePanelOpenTabs/);
 });
+
+test('all five side-panel open triggers commit atomically through selectSidePanelToolForTab', () => {
+  const layerSource = readFileSync(new URL('../../components/TerminalLayer.tsx', import.meta.url), 'utf8');
+  const sliceBetween = (startMarker: string, endMarker: string) => {
+    const start = layerSource.indexOf(startMarker);
+    const end = layerSource.indexOf(endMarker, start);
+    assert.ok(start !== -1, `missing marker: ${startMarker}`);
+    assert.ok(end !== -1 && end > start, `missing end marker: ${endMarker}`);
+    return layerSource.slice(start, end);
+  };
+
+  const applyAutoOpenBody = sliceBetween('const applyAutoOpen = (remoteSshVersion?: string) => {', 'const explicitSftpAutoOpen =');
+  assert.match(applyAutoOpenBody, /selectSidePanelToolForTab\(tabId, targetPanel\);/);
+  assert.doesNotMatch(applyAutoOpenBody, /setSidePanelOpenTabs/);
+
+  const handleOpenSftpBody = sliceBetween('const handleOpenSftp = useCallback(', 'const handlePendingUploadHandled = useCallback(');
+  assert.match(handleOpenSftpBody, /selectSidePanelToolForTab\(tabId, 'sftp'\);/);
+  assert.doesNotMatch(handleOpenSftpBody, /setSidePanelOpenTabs/);
+
+  const handleToggleScriptsBody = sliceBetween('const handleToggleScriptsSidePanel = useCallback(', 'const handleToggleSidePanel = useCallback(');
+  assert.match(handleToggleScriptsBody, /startTransition\(\(\) => \{\s*selectSidePanelToolForTab\(tabId, 'scripts'\);/);
+  assert.doesNotMatch(handleToggleScriptsBody, /setSidePanelOpenTabs/);
+
+  const hostBrowserEffectBody = sliceBetween('useEffect(() => subscribeHostBrowserPanelRequests(', 'const handleOpenNotes = useCallback(');
+  assert.match(hostBrowserEffectBody, /selectSidePanelToolForTab\(tabId, 'browser'\);/);
+  assert.doesNotMatch(hostBrowserEffectBody, /setSidePanelOpenTabs/);
+
+  const openNotesBody = sliceBetween('const openNotesPanelForSourceNote = useCallback(', 'const handleOpenHostFromNotes = useCallback(');
+  assert.match(openNotesBody, /selectSidePanelToolForTab\(tabId, 'notes'\);/);
+  assert.doesNotMatch(openNotesBody, /setSidePanelOpenTabs/);
+});

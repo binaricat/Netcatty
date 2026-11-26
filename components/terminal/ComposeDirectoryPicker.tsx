@@ -1,12 +1,12 @@
 import { ArrowUp, ChevronDown, Folder, LoaderCircle, RefreshCw } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { memo, useEffect, useId, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { useComposeDirectoryPicker } from '../../application/state/useComposeDirectoryPicker';
 import { directoryDisplayName, directoryLabel } from '../../domain/directoryPicker';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import type { ComposeBarTheme } from './TerminalComposeBar';
 
-export function ComposeDirectoryPicker({ sessionId, theme, onReturnFocus }: {
+export const ComposeDirectoryPicker = memo(function ComposeDirectoryPicker({ sessionId, theme, onReturnFocus }: {
   sessionId: string; theme: ComposeBarTheme; onReturnFocus: () => void;
 }) {
   const { t } = useI18n();
@@ -47,14 +47,20 @@ export function ComposeDirectoryPicker({ sessionId, theme, onReturnFocus }: {
     </div>
   );
   return (
-    <div className="shrink-0 flex items-center gap-2 px-3 h-7 min-w-0" role="group" aria-label="Context Chips">
+    <div className="shrink-0 flex items-center gap-1 h-6 min-w-0 max-w-[min(220px,45%)]" role="group" aria-label="Context Chips">
       <Popover open={model.open} onOpenChange={value => { if (value) outside.current = false; model.setOpen(value); }}>
         <PopoverTrigger asChild>
           <button type="button" disabled={model.pending}
             aria-label={t('terminal.directory.open', { path: model.cwd ? directoryLabel(model.cwd, model.home, model.pathFlavor) : t('terminal.directory.unknown') })}
             title={model.cwd ? directoryDisplayName(model.cwd) : t('terminal.directory.unknown')}
-            className="h-6 min-w-0 max-w-full flex items-center gap-1.5 rounded border px-2 text-[11px] font-mono focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60"
+            className="h-6 min-w-0 max-w-full flex items-center gap-1.5 rounded border px-2 text-[11px] font-mono transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60"
             style={{ backgroundColor: theme.chipBg, borderColor: theme.borderColor, color: theme.resolvedFg }}
+            onMouseEnter={(event) => {
+              if (!model.pending) event.currentTarget.style.backgroundColor = theme.chipHoverBg;
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.backgroundColor = theme.chipBg;
+            }}
           >
             {model.pending ? <LoaderCircle size={12} className="shrink-0 animate-spin" /> : <Folder size={12} className="shrink-0" />}
             <span className="truncate">{model.cwd ? directoryDisplayName(directoryLabel(model.cwd, model.home, model.pathFlavor)) : t('terminal.directory.unknown')}</span>
@@ -124,7 +130,6 @@ export function ComposeDirectoryPicker({ sessionId, theme, onReturnFocus }: {
           </div>
         </PopoverContent>
       </Popover>
-      {!model.open && errorText && <span role="status" title={errorText} className="truncate text-[10px]" style={{ color: theme.mutedFg }}>{errorText}</span>}
     </div>
   );
-}
+});

@@ -1,6 +1,16 @@
 import type { SftpFilenameEncoding } from "../../types";
 
 declare global {
+  /**
+   * Opt-in directory hints for native open/save dialogs. The main process
+   * opens `preferredDirectory` when it is an existing absolute directory and
+   * otherwise falls back to the named system folder.
+   */
+  interface NetcattyDialogDirectoryOptions {
+    preferredDirectory?: string;
+    fallbackDirectory?: "downloads";
+  }
+
   interface NetcattyBridge {
     // File opener helpers (for "Open With" feature)
     selectApplication?(): Promise<{ path: string; name: string } | null>;
@@ -15,8 +25,12 @@ declare global {
     ): Promise<{ localPath: string; cancelled: boolean }>;
 
     // Save dialog for file downloads
-    showSaveDialog?(defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>): Promise<string | null>;
-    selectDirectory?(title?: string, defaultPath?: string): Promise<string | null>;
+    showSaveDialog?(
+      defaultPath: string,
+      filters?: Array<{ name: string; extensions: string[] }>,
+      directoryOptions?: NetcattyDialogDirectoryOptions,
+    ): Promise<string | null>;
+    selectDirectory?(title?: string, defaultPath?: string, directoryOptions?: NetcattyDialogDirectoryOptions): Promise<string | null>;
     selectFile?(title?: string, defaultPath?: string, filters?: Array<{ name: string; extensions: string[] }>): Promise<string | null>;
 
     // File watcher for auto-sync feature

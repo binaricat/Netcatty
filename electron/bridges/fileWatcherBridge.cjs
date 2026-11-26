@@ -656,4 +656,5 @@ module.exports = {
   init,
   registerHandlers,
   stopWatchersForSession,
+  cleanup,
 };

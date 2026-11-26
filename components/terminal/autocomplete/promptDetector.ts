@@ -9,7 +9,7 @@
 
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { isSensitiveTerminalChallenge } from "../../../domain/terminalPromptSecurity";
-import { sliceStringByCellColumns } from "./terminalStringCellWidth";
+import { sliceStringByCellColumns, stringCellWidth } from "./terminalStringCellWidth";
 import { COMMON_SHELL_COMMANDS, NON_PROMPT_PATTERNS, PROMPT_CHARS } from "./promptDetectorPatterns";
 
 export interface PromptDetectionResult {
@@ -685,6 +685,114 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
   return NO_PROMPT;
 }
 
+type CellInspectableBufferLine = {
+  getCell?: (x: number) => {
+    getCode?: () => number;
+    getChars?: () => string;
+  } | undefined;
+};
+
+/**
+ * True when single-row text after the cursor is confirmed by xterm cell
+ * metadata to be a cursor-jumped right-aligned shell prompt decoration (e.g.
+ * zsh `RPROMPT`, fish `fish_right_prompt`, Powerlevel10k, Starship) rather than
+ * editable command text left behind after `Ctrl+A`.
+ *
+ * Shells draw right prompts by erasing to end-of-line (`EL`) and jumping to the
+ * right margin (`CUF`/`CHA`), leaving unwritten null cells (`code === 0`,
+ * `chars === ""`) in the gap starting at `cursorX`. By contrast, recalled or
+ * typed commands with leading spaces write literal ASCII space characters
+ * (`code === 32`, `chars === " "`) starting at `cursorX`, so checking the cell
+ * buffer prevents space-padded commands near the right margin from ever being
+ * misclassified as non-editable decorations. Rows without `getCell` metadata
+ * are conservatively treated as editable text.
+ */
+function isRightPromptDecorationAfterCursor(
+  line: CellInspectableBufferLine,
+  rowAfter: string,
+  cursorX: number,
+  cols: number,
+  term: XTerm,
+): boolean {
+  if (typeof line.getCell !== "function") return false;
+  if (!Number.isFinite(cols) || cols <= 0) return false;
+  const trimmedRight = rowAfter.trimEnd();
+  if (!trimmedRight) return false;
+
+  const leadingSpaces = trimmedRight.length - trimmedRight.trimStart().length;
+  if (leadingSpaces < 2) return false;
+
+  const endCol = cursorX + stringCellWidth(trimmedRight, term);
+  if (endCol < cols - 2) return false;
+
+  // Confirm the padding gap starting at cursorX consists of unwritten null
+  // cells left by cursor-forward jumps (not literal 0x20 space characters
+  // written by a recalled command). Allow at most 1 written leading space at
+  // the end of the gap in case the RPROMPT text itself starts with a space.
+  let unwrittenGapCells = 0;
+  for (let offset = 0; offset < leadingSpaces; offset += 1) {
+    const cell = line.getCell(cursorX + offset);
+    if (!cell || typeof cell.getCode !== "function") return false;
+    const isUnwritten = cell.getCode() === 0 && (!cell.getChars || cell.getChars() === "");
+    if (!isUnwritten) break;
+    unwrittenGapCells += 1;
+  }
+  if (unwrittenGapCells < 2 || unwrittenGapCells < leadingSpaces - 1) return false;
+
+  // Reject lines where editable text sits near the cursor before a wider gap
+  // leading into the right prompt.
+  const body = trimmedRight.trimStart();
+  let maxInternalSpaceRun = 0;
+  let currentSpaceRun = 0;
+  for (let i = 0; i < body.length; i += 1) {
+    if (body[i] === " ") {
+      currentSpaceRun += 1;
+      if (currentSpaceRun > maxInternalSpaceRun) {
+        maxInternalSpaceRun = currentSpaceRun;
+      }
+    } else {
+      currentSpaceRun = 0;
+    }
+  }
+  if (maxInternalSpaceRun >= unwrittenGapCells) return false;
+
+  return true;
+}
+
+/**
+ * Extract editable text on the active logical line to the right of the cursor,
+ * including any wrapped continuation rows belonging to the same line, while
+ * ignoring cell-confirmed right-aligned prompt decorations (e.g. zsh `RPROMPT`)
+ * on an unwrapped row.
+ */
+export function getPromptLineTextAfterCursor(term: XTerm): string {
+  const buffer = term.buffer.active;
+  const cursorY = buffer.cursorY + buffer.baseY;
+  const cursorX = Math.max(0, buffer.cursorX);
+  const line = buffer.getLine(cursorY);
+  if (!line) return "";
+
+  const rowAfter = sliceStringByCellColumns(line.translateToString(false), cursorX, undefined, term);
+  let wrappedAfter = "";
+  const maxRow = typeof buffer.length === "number" ? buffer.length : Number.POSITIVE_INFINITY;
+  for (let row = cursorY + 1; row < maxRow; row += 1) {
+    const nextLine = buffer.getLine(row);
+    if (!nextLine || !nextLine.isWrapped) break;
+    wrappedAfter += nextLine.translateToString(false);
+  }
+
+  if (wrappedAfter.trim().length > 0) {
+    return rowAfter + wrappedAfter;
+  }
+  if (rowAfter.trim().length === 0) {
+    return "";
+  }
+  if (isRightPromptDecorationAfterCursor(line, rowAfter, cursorX, term.cols, term)) {
+    return "";
+  }
+  return rowAfter;
+}
+
 /**
  * Whether a character lives in the Unicode Private Use Area (U+E000–U+F8FF).
  * Powerline separators (U+E0B0..) and Nerd Font icons (U+E200.., U+F000..) all
@@ -808,22 +916,21 @@ function findPromptBoundary(lineText: string): number {
       // A prompt $ is typically preceded by: space, ), ], digit, username chars, or is at position 0.
       // A variable $ is typically inside a command: echo $HOME, export PATH=$PATH:...
       //
-      // Heuristic: if the $ is preceded by a letter/digit/underscore without a space before it
-      // (i.e., it's part of a token like "echo" or "=$PATH"), it's likely a variable.
+      // Standard Linux/BSD prompts also end with `:/$ ` when the shell's cwd is `/`
+      // (e.g. `ubuntu@server:/$ `, `(venv) user@host:/$ `, `host:/$ `, `/$ `).
+      const prefixBeforeDollar = lineText.slice(0, i);
+      const prev = i > 0 ? lineText[i - 1] : "";
+      const isRootOrSlashPathPrompt =
+        prev === "/" &&
+        !prefixBeforeDollar.includes("://") &&
+        (prefixBeforeDollar === "/" ||
+          /(?:^|\s)[\w.@-]+:\/(?:[^\s]*\/)?$/.test(prefixBeforeDollar));
+
       if (i > 0) {
-        const prev = lineText[i - 1];
-        // If preceded by = or / or another non-separator, it's a variable reference
-        if (prev === "=" || prev === "/" || prev === ":") continue;
-        // If preceded by a letter and there's no space between, it could be $HOME-style
-        // But actually: "user@host:~$ " has letter before $. So check if there's
-        // a valid prompt pattern before the $.
+        // If preceded by = or : or a non-prompt /, it's likely a variable reference
+        if (prev === "=" || prev === ":" || (prev === "/" && !isRootOrSlashPathPrompt)) continue;
       }
 
-      // Check what follows: if after "$ " there's more content with $ in variable positions
-      // Actually the simplest reliable check: if the character after the space is alphanumeric
-      // or $ or (, this is likely the START of a command (i.e., this $ IS the prompt ending).
-      // That's always true for a prompt. So the $ check is really about false positives mid-line.
-      //
       // Better heuristic: if we haven't seen a space before this $ (meaning the $ is inside
       // the first token), it's likely a prompt. If we've already passed spaces (meaning
       // we're past the first "word"), a $ is more likely a variable.
@@ -834,10 +941,10 @@ function findPromptBoundary(lineText: string): number {
       // If there was a space before this $, it might be mid-command (like "echo $HOME")
       // Only accept if the $ is reasonably close to common prompt patterns
       if (seenSpaceBeforeDollar) {
-        // Check if this looks like a bracketed prompt ending: "]$ " or ")$ "
+        // Check if this looks like a bracketed or host:path prompt ending: "]$ ", ")$ ", "user@host:/$ "
         if (i > 0 && (lineText[i - 1] === "]" || lineText[i - 1] === ")" ||
-            lineText[i - 1] === " " || lineText[i - 1] === "~")) {
-          // Likely a prompt ending like [user@host ~]$
+            lineText[i - 1] === " " || lineText[i - 1] === "~" || isRootOrSlashPathPrompt)) {
+          // Likely a prompt ending like [user@host ~]$ or (venv) user@host:/$
         } else {
           continue; // Skip — likely a variable reference mid-command
         }

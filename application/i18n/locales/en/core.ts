@@ -475,7 +475,7 @@ export const enCoreMessages: Messages = {
   'settings.appearance.themeColor.dark': 'Dark palette',
   'settings.appearance.customCss': 'Custom CSS',
   'settings.appearance.customCss.desc':
-    'Add custom CSS to personalize the app appearance. Changes apply immediately. Selected top tabs (`.top-tab[data-active="true"]`) read `--top-tab-active-bg`, `--top-tab-active-fg`, and `--top-tab-active-border`. Leave them unset to keep the current look.',
+    'Add custom CSS to personalize the app appearance. Changes apply immediately.',
   'settings.appearance.customCss.help.ariaLabel': 'Custom CSS help',
   'settings.appearance.customCss.help.title': 'Custom CSS guide',
   'settings.appearance.customCss.help.body': `Major UI regions expose a \`data-section\` attribute you can target. Changes apply as soon as you edit the CSS.

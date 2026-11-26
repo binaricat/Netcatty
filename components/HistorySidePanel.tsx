@@ -36,6 +36,8 @@ import {
   type VariableSizeVirtualListHandle,
 } from './ui/VariableSizeVirtualList';
 import { Input } from './ui/input';
+import { SnippetCommandTooltipContent } from './snippets/SnippetCommandTooltipContent';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { TERMINAL_SIDE_PANEL_INNER_HEADER_CLASS } from './terminalLayer/terminalSidePanelChrome';
 
 export type HistoryPanelScope = 'host' | 'global';
@@ -273,6 +275,7 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
   // Stay mounted when the side panel parks this tree. Returning null here
   // would remount the virtual list on every Notes <-> History switch.
   return (
+    <TooltipProvider delayDuration={300}>
     <div
       className="h-full flex flex-col bg-background overflow-hidden"
       data-section="history-panel"
@@ -295,28 +298,40 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
           />
         </div>
         {scope === 'host' && (
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={!isSupportedSession || state.loading}
-            title={t('history.action.refresh')}
-            aria-label={t('history.action.refresh')}
-            className="shrink-0 h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40 disabled:hover:text-muted-foreground disabled:hover:bg-transparent"
-          >
-            <RefreshCw size={14} className={cn(state.loading && 'animate-spin')} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex shrink-0">
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={!isSupportedSession || state.loading}
+                  aria-label={t('history.action.refresh')}
+                  className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40 disabled:hover:text-muted-foreground disabled:hover:bg-transparent"
+                >
+                  <RefreshCw size={14} className={cn(state.loading && 'animate-spin')} />
+                </button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('history.action.refresh')}</TooltipContent>
+          </Tooltip>
         )}
         {scope === 'global' && (
-          <button
-            type="button"
-            onClick={() => setClearAllOpen(true)}
-            disabled={!onClearGlobalHistory}
-            title={t('history.action.clearAll')}
-            aria-label={t('history.action.clearAll')}
-            className="shrink-0 h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40 disabled:hover:text-muted-foreground disabled:hover:bg-transparent"
-          >
-            <Trash2 size={14} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setClearAllOpen(true)}
+                  disabled={!onClearGlobalHistory}
+                  aria-label={t('history.action.clearAll')}
+                  className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40 disabled:hover:text-muted-foreground disabled:hover:bg-transparent"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('history.action.clearAll')}</TooltipContent>
+          </Tooltip>
         )}
       </div>
 
@@ -447,6 +462,7 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
         onConfirm={handleClearAll}
       />
     </div>
+    </TooltipProvider>
   );
 };
 
@@ -457,23 +473,27 @@ const ScopeTab: React.FC<{
   onClick: () => void;
   className?: string;
 }> = ({ active, label, icon, onClick, className }) => (
-  <button
-    type="button"
-    role="tab"
-    aria-selected={active}
-    onClick={onClick}
-    title={label}
-    className={cn(
-      'inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] leading-4 transition-colors min-w-0 shrink whitespace-nowrap',
-      active
-        ? 'bg-muted text-foreground font-medium'
-        : 'text-muted-foreground hover:text-foreground',
-      className,
-    )}
-  >
-    {icon}
-    <span className="truncate">{label}</span>
-  </button>
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active}
+        onClick={onClick}
+        className={cn(
+          'inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] leading-4 transition-colors min-w-0 shrink whitespace-nowrap',
+          active
+            ? 'bg-muted text-foreground font-medium'
+            : 'text-muted-foreground hover:text-foreground',
+          className,
+        )}
+      >
+        {icon}
+        <span className="truncate">{label}</span>
+      </button>
+    </TooltipTrigger>
+    <TooltipContent side="bottom">{label}</TooltipContent>
+  </Tooltip>
 );
 
 const EmptyState: React.FC<{ message: string }> = ({ message }) => (
@@ -564,11 +584,18 @@ const HistoryRow: React.FC<HistoryRowProps> = memo(
       }
     };
 
-    const rowTitle = isSelected
-      ? undefined
-      : [entry.command, showHostLabel && entry.hostLabel ? entry.hostLabel : null]
-          .filter(Boolean)
-          .join('\n');
+    const textContent = (
+      <div className="w-0 flex-1 min-w-0">
+        <div className="font-mono text-[11px] truncate whitespace-nowrap">
+          {entry.command}
+        </div>
+        {showHostLabel && entry.hostLabel ? (
+          <div className="text-[10px] text-muted-foreground truncate">
+            {entry.hostLabel}
+          </div>
+        ) : null}
+      </div>
+    );
 
     return (
       <div
@@ -579,21 +606,21 @@ const HistoryRow: React.FC<HistoryRowProps> = memo(
         role="button"
         tabIndex={0}
         aria-expanded={isSelected}
-        title={rowTitle}
         onClick={onSelect}
         onKeyDown={handleKeyDown}
         onMouseDown={handleMouseDown}
       >
-        <div className="w-0 flex-1 min-w-0">
-          <div className="font-mono text-[11px] truncate whitespace-nowrap">
-            {entry.command}
-          </div>
-          {showHostLabel && entry.hostLabel ? (
-            <div className="text-[10px] text-muted-foreground truncate">
-              {entry.hostLabel}
-            </div>
-          ) : null}
-        </div>
+        {isSelected ? textContent : (
+          <Tooltip>
+            <TooltipTrigger asChild>{textContent}</TooltipTrigger>
+            <TooltipContent side="left" align="start">
+              <SnippetCommandTooltipContent
+                label={showHostLabel ? entry.hostLabel : undefined}
+                command={entry.command}
+              />
+            </TooltipContent>
+          </Tooltip>
+        )}
         <div
           className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100"
           onClick={(event) => event.stopPropagation()}
@@ -624,15 +651,19 @@ const IconButton: React.FC<{
   onClick: () => void;
   children: React.ReactNode;
 }> = ({ title, onClick, children }) => (
-  <button
-    type="button"
-    title={title}
-    aria-label={title}
-    onClick={onClick}
-    className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
-  >
-    {children}
-  </button>
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <button
+        type="button"
+        aria-label={title}
+        onClick={onClick}
+        className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
+      >
+        {children}
+      </button>
+    </TooltipTrigger>
+    <TooltipContent side="top">{title}</TooltipContent>
+  </Tooltip>
 );
 
 export const HistorySidePanel = memo(HistorySidePanelInner);

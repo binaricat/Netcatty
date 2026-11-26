@@ -82,7 +82,11 @@ test('terminal extension pages use actual split panes, focus and session ownersh
     assert.equal(document.querySelector('button[aria-label="Extension pages"]'), null, 'pages do not require opening a grouped menu');
     assert.ok(document.querySelector('button[aria-label="Second page — Synthetic plugin"]'), 'each contributed page has a direct toolbar button');
     const firstButton = document.querySelector<HTMLButtonElement>('button[aria-label="First page — Synthetic plugin"]')!;
-    await act(async () => { firstButton.click(); await settle(); });
+    await act(async () => {
+      firstButton.click();
+      await import('./plugins/PluginHostDrawnPage');
+      await settle();
+    });
     assert.equal(document.querySelectorAll('[data-section="terminal-side-panel-pane"]').length, 1);
     assert.ok(document.querySelector('[data-pane-tool] [data-plugin-view-slot="terminal-sidebar"]'));
     assert.equal(document.querySelectorAll('[data-plugin-terminal-sidebar] header').length, 1);
@@ -110,5 +114,151 @@ test('terminal extension pages use actual split panes, focus and session ownersh
   } finally {
     await act(async () => { root.unmount(); (await import('../application/state/pluginViewSession')).pluginViewSessions.dispose(); await settle(); }); dom.window.close();
     for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
+  }
+});
+
+test('usePluginTerminalSidebar skips tab/focus subscriptions when zero pages exist and stays hook-safe across 0 <-> 1 toggles', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true, url: 'http://localhost' });
+  const previous = new Map<string, PropertyDescriptor | undefined>();
+  const install = (key: string, value: unknown) => {
+    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  };
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'CustomEvent', 'Event']) {
+    install(key, key === 'window' ? dom.window : dom.window[key as keyof typeof dom.window]);
+  }
+  install('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 0));
+  install('cancelAnimationFrame', (id: number) => clearTimeout(id));
+  install('IS_REACT_ACT_ENVIRONMENT', true);
+
+  const { act, useState } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('../application/i18n/I18nProvider');
+  const { activeTabStore } = await import('../application/state/activeTabStore');
+  const { sidePanelLiveStore, SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT } = await import('../application/state/sidePanelLiveStore');
+  const { usePluginTerminalSidebar } = await import('../application/state/usePluginTerminalSidebar');
+  const { createSidePanelLayout } = await import('../domain/sidePanelLayout');
+
+  const pageA = { id: 'com.example.sidebar.toggle', title: 'Toggle page', location: 'terminal-sidebar' as const, visible: true };
+  let snapshot: NetcattyPluginContributionSnapshot = { locale: 'en', plugins: [] };
+  const changed = new Set<() => void>();
+  Object.assign(dom.window, {
+    netcatty: {
+      async getPluginRuntimeStatus() { return { available: true }; },
+      async getPluginContributions() { return snapshot; },
+      onPluginContributionsChanged(fn: () => void) { changed.add(fn); return () => { changed.delete(fn); }; },
+      onPluginViewClosed() { return () => {}; },
+    },
+  });
+
+  let currentSession = 'session-1';
+  let renderCount = 0;
+  let lastModel: ReturnType<typeof usePluginTerminalSidebar> | null = null;
+  let triggerParentRender!: () => void;
+  let layouts = new Map<string, import('../domain/sidePanelLayout').SidePanelLayout>();
+  const withdrawn: Array<{ tabId: string; paneId: string; tool: string }> = [];
+
+  function Probe() {
+    const [, setTick] = useState(0);
+    triggerParentRender = () => setTick((n) => n + 1);
+    renderCount += 1;
+    // Pass a fresh inline host object every render (matching TerminalLayerSidePanelSectionInner).
+    const model = usePluginTerminalSidebar({
+      layouts,
+      getSession: () => currentSession,
+      isTerminalTab: (id) => id.startsWith('term-'),
+      select: () => {},
+      withdraw: (tabId, paneId, tool) => { withdrawn.push({ tabId, paneId, tool }); },
+    });
+    lastModel = model;
+    return null;
+  }
+
+  const root = createRoot(document.getElementById('root')!);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  try {
+    activeTabStore.setActiveTabId('term-a');
+    sidePanelLiveStore.update({ ...SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, focusedSessionId: currentSession });
+    await act(async () => {
+      root.render(<I18nProvider locale="en"><Probe /></I18nProvider>);
+      await settle();
+    });
+    assert.equal(lastModel!.pages.length, 0);
+    assert.equal(lastModel!.tabId, null);
+    assert.equal(lastModel!.sessionId, null);
+
+    // 1. With 0 pages, tab switches and workspace focus changes must not re-render.
+    const modelBeforeIdleTicks = lastModel;
+    renderCount = 0;
+    await act(async () => {
+      activeTabStore.setActiveTabId('term-b');
+      currentSession = 'session-2';
+      sidePanelLiveStore.update({ ...SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, focusedSessionId: currentSession });
+      await settle();
+    });
+    assert.equal(renderCount, 0, 'tab and focus ticks must not re-render when zero plugin sidebar pages exist');
+
+    // 2. Parent re-render with fresh inline host object keeps return value memoized.
+    await act(async () => {
+      triggerParentRender();
+      await settle();
+    });
+    assert.equal(renderCount, 1);
+    assert.equal(lastModel, modelBeforeIdleTicks, 'returned model stays referentially identical for unchanged state');
+
+    // 3. Toggle pages 0 -> 1: obeys Rules of Hooks and subscribes live immediately.
+    snapshot = {
+      locale: 'en',
+      plugins: [{ id: 'com.example.sidebar', displayName: 'Toggle plugin', description: 'Toggle plugin', version: '1.0.0', commands: [], keybindings: [], menus: [], settings: [], views: [pageA] }],
+    };
+    await act(async () => {
+      for (const fn of changed) fn();
+      await settle();
+    });
+    assert.equal(lastModel!.pages.length, 1);
+    assert.equal(lastModel!.tabId, 'term-b');
+    assert.equal(lastModel!.sessionId, 'session-2');
+
+    // With 1 page, tab/focus changes DO update tabId and sessionId.
+    await act(async () => {
+      activeTabStore.setActiveTabId('term-c');
+      currentSession = 'session-3';
+      sidePanelLiveStore.update({ ...SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, focusedSessionId: currentSession });
+      await settle();
+    });
+    assert.equal(lastModel!.tabId, 'term-c');
+    assert.equal(lastModel!.sessionId, 'session-3');
+
+    // 4. Toggle pages 1 -> 0: withdraws removed plugin pane, stays hook-safe, and unsubscribes again.
+    layouts = new Map([['term-c', createSidePanelLayout(`plugin-view:${pageA.id}`, 'pane-plugin')]]);
+    snapshot = { locale: 'en', plugins: [] };
+    await act(async () => {
+      for (const fn of changed) fn();
+      await settle();
+    });
+    assert.equal(lastModel!.pages.length, 0);
+    assert.equal(lastModel!.tabId, null);
+    assert.equal(lastModel!.sessionId, null);
+    assert.deepEqual(withdrawn, [{ tabId: 'term-c', paneId: 'pane-plugin', tool: `plugin-view:${pageA.id}` }]);
+
+    renderCount = 0;
+    await act(async () => {
+      activeTabStore.setActiveTabId('term-d');
+      currentSession = 'session-4';
+      sidePanelLiveStore.update({ ...SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, focusedSessionId: currentSession });
+      await settle();
+    });
+    assert.equal(renderCount, 0, 'tab and focus ticks must not re-render after pages return to zero');
+  } finally {
+    await act(async () => {
+      root.unmount();
+      await settle();
+    });
+    dom.window.close();
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
   }
 });

@@ -267,4 +267,107 @@ test("ensureCliDiscoveryFile does nothing while the host is down", async (t) => 
   // once the old listener closed), so don't assert they differ.
   assert.equal(readDiscovery(discoveryPath).port, newPort);
 });
+
+test("ensureCliDiscoveryFileAsync heals asynchronously and skips overlapping runs", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-discovery-async-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  const originalReadFile = fs.promises.readFile;
+  const originalReadFileSync = fs.readFileSync;
+  t.after(() => {
+    fs.promises.readFile = originalReadFile;
+    fs.readFileSync = originalReadFileSync;
+    bridge.cleanup();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  bridge.init({ cliDiscoveryFilePath: discoveryPath });
+  const port = await bridge.getOrCreateHost();
+  const original = readDiscovery(discoveryPath);
+
+  fs.writeFileSync(discoveryPath, JSON.stringify({ port: 1, token: "stale", pid: 999 }));
+
+  let asyncReads = 0;
+  let syncReads = 0;
+  let releaseRead;
+  const readGate = new Promise((resolve) => {
+    releaseRead = resolve;
+  });
+
+  fs.readFileSync = (...args) => {
+    if (args[0] === discoveryPath) syncReads += 1;
+    return originalReadFileSync(...args);
+  };
+  fs.promises.readFile = async (...args) => {
+    if (args[0] === discoveryPath) {
+      asyncReads += 1;
+      await readGate;
+    }
+    return originalReadFile(...args);
+  };
+
+  const first = bridge.ensureCliDiscoveryFileAsync();
+  const second = bridge.ensureCliDiscoveryFileAsync();
+  releaseRead();
+  await Promise.all([first, second]);
+
+  assert.equal(asyncReads, 1, "in-flight guard prevents overlapping async self-heal reads");
+  assert.equal(syncReads, 0, "async self-heal must not call fs.readFileSync");
+
+  fs.readFileSync = originalReadFileSync;
+  const repaired = readDiscovery(discoveryPath);
+  assert.equal(repaired.port, port);
+  assert.equal(repaired.token, original.token);
+  assert.equal(repaired.pid, process.pid);
+});
+
+test("ensureCliDiscoveryFileAsync never recreates discovery file if shutdownHost races an in-flight read", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-discovery-race-"));
+  const discoveryPath = path.join(dir, "discovery.json");
+  const originalReadFile = fs.promises.readFile;
+  t.after(() => {
+    fs.promises.readFile = originalReadFile;
+    bridge.cleanup();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  bridge.init({ cliDiscoveryFilePath: discoveryPath });
+
+  for (const outcome of ["stale-resolve", "enoent-reject"]) {
+    await bridge.getOrCreateHost();
+    assert.ok(fs.existsSync(discoveryPath));
+
+    let resolveRead;
+    let rejectRead;
+    fs.promises.readFile = (targetPath, ...rest) => {
+      if (targetPath === discoveryPath) {
+        return new Promise((resolve, reject) => {
+          resolveRead = resolve;
+          rejectRead = reject;
+        });
+      }
+      return originalReadFile(targetPath, ...rest);
+    };
+
+    const inFlight = bridge.ensureCliDiscoveryFileAsync();
+    assert.equal(typeof resolveRead, "function");
+
+    // Shut down while the async read is still pending; this deletes discoveryPath.
+    bridge.shutdownHost();
+    assert.equal(fs.existsSync(discoveryPath), false);
+
+    if (outcome === "stale-resolve") {
+      resolveRead(JSON.stringify({ port: 1, token: "stale", pid: 999 }));
+    } else {
+      rejectRead(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+    }
+    await inFlight;
+
+    assert.equal(
+      fs.existsSync(discoveryPath),
+      false,
+      `shutdownHost race (${outcome}) must not rewrite the deleted discovery file`,
+    );
+    fs.promises.readFile = originalReadFile;
+  }
+});
 }

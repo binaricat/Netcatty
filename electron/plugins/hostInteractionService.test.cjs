@@ -2,7 +2,7 @@
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const test = require("node:test");
-const { PluginHostInteractionService, assertInteractionRequest, interactionAuthorization, PROMPT_CHANNEL } = require("./hostInteractionService.cjs");
+const { PluginHostInteractionService, LIMITS, assertInteractionRequest, interactionAuthorization, PROMPT_CHANNEL } = require("./hostInteractionService.cjs");
 
 function fixture(t, options = {}) {
   const messages = [], audit = [], writes = [], charges = [];
@@ -210,7 +210,8 @@ test("quota, deadline, locked host, unknown fields, duplicate choices and text b
   await assert.rejects(f.service.request(assertInteractionRequest({ kind: "input", title: "Locked" }), f.context), /focused unlocked/);
   assert.throws(() => assertInteractionRequest({ kind: "clipboard.read", title: "Forged", userGesture: true }), /invalid/);
   assert.throws(() => assertInteractionRequest({ kind: "quickPick", title: "Duplicate", items: [{ id: "same", label: "A" }, { id: "same", label: "B" }] }), /unique/);
-  assert.throws(() => assertInteractionRequest({ kind: "clipboard.write", title: "Too long", text: "文".repeat(1500) }), /limit/);
+  assert.throws(() => assertInteractionRequest({ kind: "input", title: "Too long", initialValue: "文".repeat(1500) }), /limit/);
+  assert.throws(() => assertInteractionRequest({ kind: "clipboard.write", title: "Too long", text: "a".repeat(LIMITS.clipboardBytes + 1) }), /invalid|limit/);
   assert.equal(interactionAuthorization({ kind: "clipboard.read" }).permission, "clipboard.read");
   assert.equal(interactionAuthorization({ kind: "clipboard.write" }).permission, "clipboard.write");
   assert.equal(interactionAuthorization({ kind: "input" }).permission, "ui.interact");
@@ -234,7 +235,7 @@ test("manifest permission checks and interaction quota run before any host promp
   await assert.rejects(denied({ kind: "input", title: "Undeclared" }, { signal: f.context.signal }), /declare/);
   assert.equal(decisions, 0); assert.equal(f.messages.length, 0);
   const route = registry.createRoutes({ ...base, manifest: { ...base.manifest, permissions: { optional: ["ui.interact"] } } }).requestHandlers["ui.interact"];
-  for (let count = 1; count < 10; count++) {
+  for (let count = 1; count < LIMITS.requestsPerMinute; count++) {
     await assert.rejects(route({ kind: "input", title: "Denied" }, { signal: f.context.signal }), /disabled/);
   }
   const before = decisions;
@@ -298,4 +299,214 @@ test("single-line inputs reject CR/LF before display and submission while clipbo
   await f.respond(copy.prompt, "submit");
   assert.deepEqual(await copy.promise, { cancelled: false, value: true });
   assert.deepEqual(f.writes, ["first\nsecond"]);
+});
+
+test("terminalSelection timer stays idle without terminal dialogs/handles and still cancels pending selection dialogs on non-event invalidation", async (t) => {
+  const { privateOwner, LOCAL_SOURCE, OFFICIAL_SOURCE } = require("./sourceIdentity.cjs");
+  t.mock.timers.enable({ apis: ["setInterval"] });
+
+  let senderDestroyed = false;
+  let source = LOCAL_SOURCE;
+  const messages = [];
+  const sender = Object.assign(new EventEmitter(), {
+    id: 7,
+    isDestroyed: () => senderDestroyed,
+    send: (channel, message) => { assert.equal(channel, PROMPT_CHANNEL); messages.push(message); },
+  });
+  const window = Object.assign(new EventEmitter(), {
+    webContents: sender,
+    isFocused: () => true,
+    isVisible: () => true,
+    isDestroyed: () => false,
+  });
+  const manager = {
+    getPluginSessionBinding: (sessionId, ownerId) => (sessionId === "term-1" && ownerId === 7
+      ? { epoch: "worker-1", generation: 1 } : null),
+  };
+  const service = new PluginHostInteractionService({
+    getWindow: () => window,
+    getTerminalWorkerManager: () => manager,
+    isLocked: () => false,
+    permissionEngine: { onDidRevoke: () => ({ dispose() {} }), getMode: () => "ask" },
+    database: {
+      recordSecurityAudit() {},
+      privateOwner: (id) => privateOwner(source, id),
+      publicPluginId: (owner) => (owner === privateOwner(source, "com.example.synthetic") ? "com.example.synthetic" : null),
+    },
+    quotaManager: { chargeBytes() {} },
+    clipboard: { readText: () => "", writeText() {} },
+  });
+  service.setReady(sender, true);
+  t.after(() => service.shutdown());
+  service.setTerminalTarget(sender, { sessionId: "term-1", rendererId: "renderer-1", label: "Main terminal" });
+
+  const signal = new AbortController();
+  const context = {
+    pluginId: "com.example.synthetic",
+    pluginVersion: "1.0.0",
+    runtimeId: "runtime-synthetic",
+    signal: signal.signal,
+    manifest: { features: { required: ["terminal.selection-sharing", "terminal.input-drafts"] } },
+    async assertActive() { signal.signal.throwIfAborted(); },
+  };
+
+  // Idle service has zero active selection-authority intervals.
+  assert.equal(service.terminalSelection.timer, null);
+
+  // Non-terminal interaction dialogs do not arm the selection-authority timer.
+  const inputPromise = service.request(assertInteractionRequest({ kind: "input", title: "Plain input" }), context);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(service.terminalSelection.timer, null);
+  const inputPrompt = messages.filter((m) => !m.closed).at(-1);
+  await service.respond(sender, { requestId: inputPrompt.requestId, actionToken: inputPrompt.actionToken, action: "cancel" });
+  await inputPromise;
+  assert.equal(service.terminalSelection.timer, null);
+
+  // Case 1: pending terminal.selection.read arms timer BEFORE issue() (handles.size === 0),
+  // and non-event sender.isDestroyed() cancels it on the 1s tick and disarms the timer.
+  const share1 = service.request(assertInteractionRequest({ kind: "terminal.selection.read", title: "Share" }), context);
+  void share1.catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(service.terminalSelection.handles.size, 0);
+  assert.notEqual(service.terminalSelection.timer, null);
+  senderDestroyed = true;
+  t.mock.timers.tick(1_000);
+  await assert.rejects(share1, /Selected terminal connection changed/);
+  assert.equal(service.terminalSelection.timer, null, "timer disarms after pending dialog cancels");
+
+  // Case 2: non-event database.privateOwner revocation cancels a pending selection dialog and disarms.
+  senderDestroyed = false;
+  const share2 = service.request(assertInteractionRequest({ kind: "terminal.selection.read", title: "Share again" }), context);
+  void share2.catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.notEqual(service.terminalSelection.timer, null);
+  source = OFFICIAL_SOURCE;
+  t.mock.timers.tick(1_000);
+  await assert.rejects(share2, /Selected terminal connection changed/);
+  assert.equal(service.terminalSelection.timer, null);
+
+  // Case 3: cancelling a pending selection dialog disarms; completing it hands off to the handle timer.
+  source = LOCAL_SOURCE;
+  const share3 = service.request(assertInteractionRequest({ kind: "terminal.selection.read", title: "Cancel me" }), context);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.notEqual(service.terminalSelection.timer, null);
+  const prompt3 = messages.filter((m) => !m.closed).at(-1);
+  await service.respond(sender, { requestId: prompt3.requestId, actionToken: prompt3.actionToken, action: "cancel" });
+  assert.deepEqual(await share3, { cancelled: true });
+  assert.equal(service.terminalSelection.timer, null);
+
+  const share4 = service.request(assertInteractionRequest({ kind: "terminal.selection.read", title: "Complete me" }), context);
+  await new Promise((resolve) => setImmediate(resolve));
+  const prompt4 = messages.filter((m) => !m.closed).at(-1);
+  await service.respond(sender, { requestId: prompt4.requestId, actionToken: prompt4.actionToken, action: "preview", value: "selected" });
+  const preview4 = messages.filter((m) => !m.closed).at(-1);
+  await service.respond(sender, { requestId: preview4.requestId, actionToken: preview4.actionToken, action: "submit" });
+  const completed = await share4;
+  assert.equal(completed.cancelled, false);
+  assert.equal(service.terminalSelection.handles.size, 1);
+  assert.equal(service.terminalSelection.activeWatches, 0);
+  assert.notEqual(service.terminalSelection.timer, null, "timer stays armed for issued handle");
+  service.terminalSelection.clearHandles();
+  assert.equal(service.terminalSelection.timer, null, "timer disarms once handle is cleared");
+});
+
+test("clipboard write supports up to 4 MiB and native file dialogs support open, save, chunked handles, and isolation", async (t) => {
+  const fsPromises = require("node:fs/promises");
+  const os = require("node:os");
+  const path = require("node:path");
+  const dir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "netcatty-file-dialog-test-"));
+  t.after(() => fsPromises.rm(dir, { recursive: true, force: true }));
+  const samplePath = path.join(dir, "demo.sqlite");
+  const savePath = path.join(dir, "export.bin");
+  const initialBytes = Buffer.from("SQLite format 3\0demo-payload");
+  await fsPromises.writeFile(samplePath, initialBytes);
+
+  let nextOpen = { canceled: false, filePaths: [samplePath] };
+  let nextSave = { canceled: false, filePath: savePath };
+  const f = fixture(t, {
+    dialog: {
+      showOpenDialog: async () => nextOpen,
+      showSaveDialog: async () => nextSave,
+    },
+  });
+
+  // 1) Large clipboard write (1 MiB) succeeds within the 4 MiB limit.
+  const largeText = "SELECT 1;\n".repeat(100_000);
+  const clipReq = await f.begin({ kind: "clipboard.write", title: "Copy SQL", text: largeText });
+  await f.respond(clipReq.prompt, "submit");
+  assert.deepEqual(await clipReq.promise, { cancelled: false, value: true });
+  assert.equal(f.writes.at(-1).length, largeText.length);
+
+  // 2) ui.openFile returns basename, data, and opaque handleId without exposing full path.
+  const opened = await f.service.openFile({ title: "Open DB", readAs: "bytes" }, f.context);
+  assert.equal(opened.cancelled, false);
+  assert.equal(opened.name, "demo.sqlite");
+  assert.equal(opened.streamed, false);
+  assert.equal(JSON.stringify(opened).includes(dir), false);
+  assert.deepEqual(Buffer.from(opened.data, "base64"), initialBytes);
+
+  // 3) Re-save back to the exact picked handle without re-prompting (chunked atomic write).
+  const part1 = Buffer.from("SQLite format 3\0updated-part-1-");
+  const part2 = Buffer.from("updated-part-2");
+  await f.service.writeFileHandle({ handleId: opened.handleId, data: part1.toString("base64"), encoding: "base64", mode: "replace", commit: false }, f.context);
+  // Before commit, the original file is untouched!
+  assert.deepEqual(await fsPromises.readFile(samplePath), initialBytes);
+  const commitRes = await f.service.writeFileHandle({ handleId: opened.handleId, data: part2.toString("base64"), encoding: "base64", mode: "append", commit: true }, f.context);
+  assert.equal(commitRes.committed, true);
+  assert.deepEqual(await fsPromises.readFile(samplePath), Buffer.concat([part1, part2]));
+
+  // 4) Another runtime cannot access this handle.
+  await assert.rejects(
+    f.service.readFileHandle({ handleId: opened.handleId }, { ...f.context, runtimeId: "other-runtime" }),
+    /invalid or closed/,
+  );
+
+  // 5) ui.saveFile writes atomically and returns handleId.
+  const saved = await f.service.saveFile({
+    title: "Save Export",
+    defaultName: "export.bin",
+    data: Buffer.from("exported-csv").toString("base64"),
+    encoding: "base64",
+  }, f.context);
+  assert.equal(saved.cancelled, false);
+  assert.equal(saved.name, "export.bin");
+  assert.equal(await fsPromises.readFile(savePath, "utf8"), "exported-csv");
+
+  // 6) Closing handle prevents further reads/writes.
+  await f.service.closeFileHandle({ handleId: opened.handleId }, f.context);
+  await assert.rejects(f.service.readFileHandle({ handleId: opened.handleId }, f.context), /invalid or closed/);
+
+  // 7) Cancelled file dialog returns { cancelled: true }.
+  nextOpen = { canceled: true, filePaths: [] };
+  assert.deepEqual(await f.service.openFile({}, f.context), { cancelled: true });
+});
+
+test("stream endpoint and TLS certificate confirmation prompts return approval and remember choice", async (t) => {
+  const f = fixture(t);
+  const streamPromise = f.service.request({
+    kind: "network.stream.confirm",
+    endpoint: "tcp://127.0.0.1:5432",
+    host: "127.0.0.1",
+    port: 5432,
+    transport: "tcp",
+    isLocal: true,
+  }, f.context);
+  await new Promise((resolve) => setImmediate(resolve));
+  const streamPrompt = f.messages.filter((m) => !m.closed).at(-1);
+  await f.service.respond(f.sender, { requestId: streamPrompt.requestId, actionToken: streamPrompt.actionToken, action: "submit", remember: true });
+  assert.deepEqual(await streamPromise, { cancelled: false, approved: true, remember: true });
+
+  const tlsPromise = f.service.request({
+    kind: "network.stream.tlsConfirm",
+    endpoint: "tcp://127.0.0.1:5432",
+    fingerprint256: "AA:BB:CC",
+    subject: "CN=postgres",
+    issuer: "CN=postgres",
+    validTo: "2030-01-01",
+    reason: "DEPTH_ZERO_SELF_SIGNED_CERT",
+  }, f.context);
+  await new Promise((resolve) => setImmediate(resolve));
+  const tlsPrompt = f.messages.filter((m) => !m.closed).at(-1);
+  await f.service.respond(f.sender, { requestId: tlsPrompt.requestId, actionToken: tlsPrompt.actionToken, action: "submit", remember: false });
+  assert.deepEqual(await tlsPromise, { cancelled: false, approved: true, remember: false });
 });

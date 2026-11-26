@@ -43,6 +43,62 @@ export interface ScriptCodeEditorHandle {
   focus: () => void;
 }
 
+export interface ScriptEditorActionConfig {
+  id: string;
+  label: string;
+  keybinding: number;
+  run: () => void;
+}
+
+type ScriptEditorActionHost = Pick<Parameters<OnMount>[0], 'addAction' | 'onDidDispose'>;
+
+/**
+ * Register disposable Monaco editor actions for ScriptCodeEditor instead of
+ * `editor.addCommand` (which leaks keybindings in Monaco's global registry).
+ * `addAction` auto-scopes to `editorId == editor.getId()`, and omitting
+ * `contextMenuGroupId` keeps the context menu clean.
+ */
+export function bindScriptEditorActions(
+  editor: ScriptEditorActionHost,
+  actions: readonly ScriptEditorActionConfig[],
+  onCleanup?: () => void,
+): { dispose: () => void } {
+  const disposables: Array<{ dispose: () => void }> = [];
+  let disposed = false;
+
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    for (const handle of disposables.splice(0)) {
+      try {
+        handle.dispose();
+      } catch {
+        // Best-effort cleanup during editor teardown.
+      }
+    }
+    onCleanup?.();
+  };
+
+  try {
+    for (const { id, label, keybinding, run } of actions) {
+      disposables.push(editor.addAction({
+        id,
+        label,
+        keybindings: [keybinding],
+        run: () => {
+          run();
+        },
+      }));
+    }
+    disposables.push(editor.onDidDispose(dispose));
+  } catch (error) {
+    dispose();
+    throw error;
+  }
+
+  return { dispose };
+}
+
 export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptCodeEditorProps>(({
   value,
   onChange,
@@ -61,6 +117,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   const themeName = useNetcattyMonacoTheme(monaco ?? undefined);
   const { readClipboardText: readClipboardTextFromBridge } = useClipboardBackend();
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const actionBindingRef = useRef<{ dispose: () => void } | null>(null);
   const completionDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const onSubmitShortcutRef = useRef(onSubmitShortcut);
   onSubmitShortcutRef.current = onSubmitShortcut;
@@ -72,8 +129,11 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   }), []);
 
   useEffect(() => () => {
+    actionBindingRef.current?.dispose();
+    actionBindingRef.current = null;
     completionDisposableRef.current?.dispose();
     completionDisposableRef.current = null;
+    editorRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -122,29 +182,51 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   }, [handlePaste]);
 
   const handleMount: OnMount = useCallback((editor, monacoInstance) => {
+    actionBindingRef.current?.dispose();
+    actionBindingRef.current = null;
     editorRef.current = editor;
     completionDisposableRef.current?.dispose();
     completionDisposableRef.current = language === 'javascript'
       ? registerNctMonacoCompletionProvider(monacoInstance)
       : null;
+
+    const actions: ScriptEditorActionConfig[] = [];
     if (onSubmitShortcut) {
-      editor.addCommand(
-        monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter,
-        () => onSubmitShortcutRef.current?.(),
-      );
+      actions.push({
+        id: 'netcatty.scriptEditor.submit',
+        label: 'Submit Script',
+        keybinding: monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter,
+        run: () => {
+          onSubmitShortcutRef.current?.();
+        },
+      });
     }
     // Fallback paste path for Electron where Monaco clipboardPasteAction can fail.
     // When focus is in the find/replace widget, paste into that input instead of the body.
-    editor.addCommand(
-      monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyV,
-      () => {
+    actions.push({
+      id: 'netcatty.scriptEditor.paste',
+      label: 'Paste',
+      keybinding: monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyV,
+      run: () => {
         void pasteForMonacoEditorCommand({
           activeElement: document.activeElement,
           readClipboardText: () => readClipboardTextRef.current(),
           pasteIntoEditor: () => handlePasteRef.current(),
         });
       },
-    );
+    });
+
+    let binding: { dispose: () => void } | null = null;
+    binding = bindScriptEditorActions(editor, actions, () => {
+      if (actionBindingRef.current === binding) {
+        actionBindingRef.current = null;
+      }
+      if (editorRef.current === editor) {
+        editorRef.current = null;
+      }
+    });
+    actionBindingRef.current = binding;
+
     requestAnimationFrame(() => editor.layout());
     if (autoFocus) editor.focus();
   }, [autoFocus, language, onSubmitShortcut]);

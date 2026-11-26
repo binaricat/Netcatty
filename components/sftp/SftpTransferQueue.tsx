@@ -187,6 +187,8 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
   const childNameWidthRef = useRef(childNameWidth);
   const dragStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const childColumnDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const isDraggingRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -272,6 +274,8 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
   }, []);
 
   useEffect(() => {
+    if (!isDragging) return;
+
     const handleMouseMove = (event: MouseEvent) => {
       if (dragStateRef.current) {
         const deltaY = dragStateRef.current.startY - event.clientY;
@@ -288,10 +292,15 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
     };
 
     const handleMouseUp = () => {
+      if (!isDraggingRef.current && !dragStateRef.current && !childColumnDragRef.current) {
+        return;
+      }
       const hadPanelDrag = !!dragStateRef.current;
       const hadChildColumnDrag = !!childColumnDragRef.current;
       dragStateRef.current = null;
       childColumnDragRef.current = null;
+      isDraggingRef.current = false;
+      setIsDragging(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
       if (hadPanelDrag) {
@@ -308,30 +317,39 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      if (isDraggingRef.current || dragStateRef.current || childColumnDragRef.current) {
+        dragStateRef.current = null;
+        childColumnDragRef.current = null;
+        isDraggingRef.current = false;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
     };
-  }, [clampPanelHeight, panelHeight, persistChildNameWidth, persistPanelHeight, setChildNameWidth, setPanelHeight]);
+  }, [clampPanelHeight, isDragging, persistChildNameWidth, persistPanelHeight, setChildNameWidth, setPanelHeight]);
 
   const handleResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     dragStateRef.current = {
       startY: event.clientY,
-      startHeight: panelHeight,
+      startHeight: panelHeightRef.current,
     };
+    isDraggingRef.current = true;
+    setIsDragging(true);
     document.body.style.cursor = "row-resize";
     document.body.style.userSelect = "none";
-  }, [panelHeight]);
+  }, []);
 
   const handleChildColumnResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
     childColumnDragRef.current = {
       startX: event.clientX,
-      startWidth: childNameWidth,
+      startWidth: childNameWidthRef.current,
     };
+    isDraggingRef.current = true;
+    setIsDragging(true);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
-  }, [childNameWidth]);
+  }, []);
 
   const handleChildColumnWidthSet = useCallback((width: number) => {
     const nextWidth = Math.max(MIN_CHILD_NAME_WIDTH, Math.min(MAX_CHILD_NAME_WIDTH, width));

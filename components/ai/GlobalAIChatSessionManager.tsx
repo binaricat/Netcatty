@@ -51,6 +51,8 @@ interface GlobalAIChatSessionManagerProps {
   externalAgents: ExternalAgentConfig[];
   rebindTargets: GlobalManagerScopeTarget[];
   onSelect: (sessionId: string) => void;
+  /** Focus an already-open terminal or workspace hosting an active chat instead of moving it. */
+  onFocusScope?: (target: { type: 'terminal' | 'workspace'; targetId: string }) => boolean | void;
   onRebind: (sessionId: string, target: GlobalManagerScopeTarget) => void;
   onRename?: (sessionId: string, title: string) => void;
   onDelete: (sessionId: string) => void;
@@ -72,6 +74,7 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
   externalAgents,
   rebindTargets,
   onSelect,
+  onFocusScope,
   onRebind,
   onRename,
   onDelete,
@@ -176,6 +179,14 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
     setMoveSession(null);
   };
 
+  const activateRow = (row: ReturnType<typeof buildGlobalManagerRows>[number]) => {
+    if (row.isActiveElsewhere && row.activeElsewhereTarget && onFocusScope) {
+      const focused = onFocusScope(row.activeElsewhereTarget);
+      if (focused !== false) return;
+    }
+    onSelect(row.session.id);
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0" data-section="ai-global-session-manager">
       <div className="px-3 py-2 shrink-0 border-b border-border/30 flex items-center gap-1.5">
@@ -264,13 +275,13 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
                       role="button"
                       tabIndex={row.canActivate ? 0 : -1}
                       onClick={() => {
-                        if (!isRenaming && row.canActivate) onSelect(row.session.id);
+                        if (!isRenaming && row.canActivate) activateRow(row);
                       }}
                       onKeyDown={(e) => {
                         if (e.target !== e.currentTarget) return;
                         if (!isRenaming && row.canActivate && (e.key === 'Enter' || e.key === ' ')) {
                           e.preventDefault();
-                          onSelect(row.session.id);
+                          activateRow(row);
                         }
                       }}
                       className={cn(

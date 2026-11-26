@@ -1,18 +1,18 @@
 import React from "react";
-import { ChevronDown, Eye, EyeOff, FileKey, FolderLock, FolderOpen, Key, KeyRound, MapPin, Plus, Shapes, Shield, Trash2, User, X } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, FileKey, FolderLock, Key, KeyRound, MapPin, Shapes, Shield, Trash2, User, X } from "lucide-react";
 import type { Host } from "../types";
 import { applyHostAuthMethodSelection } from "../domain/sshAuth";
 import { HostTotpFields } from "./HostTotpFields";
 import { HostIconPicker } from "./HostIconPicker";
 import { Button } from "./ui/button";
-import { Combobox } from "./ui/combobox";
 import { HostDetailsSection, HostDetailsSettingRow } from "./host-details";
 import { Input } from "./ui/input";
-import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Popover, PopoverAnchor, PopoverContent } from "./ui/popover";
 import { ScrollArea } from "./ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Switch } from "./ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { SshCredentialPickerSection } from "./vault/SshCredentialPickerSection";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HostDetailsConnectionSectionsProps = Record<string, any>;
@@ -540,207 +540,39 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
               </div>
             )}
 
-            {/* Credential type selection with inline popover - hidden when credential is selected */}
-            {!selectedIdentity &&
-              !form.identityFileId &&
-              !selectedCredentialType && (
-                <Popover
-                  open={credentialPopoverOpen}
-                  onOpenChange={setCredentialPopoverOpen}
-                >
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
-                    >
-                      <Plus size={12} />
-                      <span>{t("hostDetails.credential.keyCertificate")}</span>
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    className="w-[200px] p-1"
-                    align="start"
-                    sideOffset={4}
-                  >
-                    <div className="space-y-0.5">
-                      <button
-                        type="button"
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
-                        onClick={() => {
-                          setSelectedCredentialType("key");
-                          setCredentialPopoverOpen(false);
-                        }}
-                      >
-                        <Key size={16} className="text-muted-foreground" />
-                        <span className="text-sm font-medium">
-                          {t("hostDetails.credential.key")}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
-                        onClick={() => {
-                          setSelectedCredentialType("certificate");
-                          setCredentialPopoverOpen(false);
-                        }}
-                      >
-                        <Shield size={16} className="text-muted-foreground" />
-                        <span className="text-sm font-medium">
-                          {t("hostDetails.credential.certificate")}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
-                        onClick={() => {
-                          setSelectedCredentialType("localKeyFile");
-                          setCredentialPopoverOpen(false);
-                        }}
-                      >
-                        <FileKey size={16} className="text-muted-foreground" />
-                        <span className="text-sm font-medium">
-                          {t("hostDetails.credential.localKeyFile")}
-                        </span>
-                      </button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              )}
-
-            {/* Key selection combobox - appears after selecting "Key" type */}
-            {!selectedIdentity &&
-              selectedCredentialType === "key" &&
-              !form.identityFileId && (
-                <div className="flex items-center gap-1">
-                  <Combobox
-                    options={keysByCategory.key.map((k) => ({
-                      value: k.id,
-                      label: k.label,
-                      sublabel: `${k.type}${k.keySize ? ` ${k.keySize}` : ""}`,
-                      icon: <Key size={14} className="text-muted-foreground" />,
-                    }))}
-                    value={form.identityFileId}
-                    onValueChange={(val) => {
-                      update("identityFileId", val);
-                      update("authMethod", "key");
-                      update("identityFilePaths", undefined);
-                      setPendingReferenceKeyPath(null);
-                      setSelectedCredentialType(null);
-                    }}
-                    placeholder={t("hostDetails.keys.search")}
-                    emptyText={t("hostDetails.keys.empty")}
-                    icon={<Key size={14} className="text-muted-foreground" />}
-                    className="flex-1"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => setSelectedCredentialType(null)}
-                  >
-                    <X size={14} />
-                  </Button>
-                </div>
-              )}
-
-            {/* Certificate selection combobox - appears after selecting "Certificate" type */}
-            {!selectedIdentity &&
-              selectedCredentialType === "certificate" &&
-              !form.identityFileId && (
-                <div className="flex items-center gap-1">
-                  <Combobox
-                    options={keysByCategory.certificate.map((k) => ({
-                      value: k.id,
-                      label: k.label,
-                      icon: (
-                        <Shield size={14} className="text-muted-foreground" />
-                      ),
-                    }))}
-                    value={form.identityFileId}
-                    onValueChange={(val) => {
-                      update("identityFileId", val);
-                      update("authMethod", "certificate");
-                      update("identityFilePaths", undefined);
-                      setPendingReferenceKeyPath(null);
-                      setSelectedCredentialType(null);
-                    }}
-                    placeholder={t("hostDetails.certs.search")}
-                    emptyText={t("hostDetails.certs.empty")}
-                    icon={
-                      <Shield size={14} className="text-muted-foreground" />
-                    }
-                    className="flex-1"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => setSelectedCredentialType(null)}
-                  >
-                    <X size={14} />
-                  </Button>
-                </div>
-              )}
-
-            {/* Local key file path input - appears after selecting "Local Key File" type */}
-            {!selectedIdentity &&
-              selectedCredentialType === "localKeyFile" &&
-              !form.identityFileId && (
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-1 min-w-0">
-                    <input
-                      type="text"
-                      className="flex-1 min-w-0 h-8 px-2 text-xs font-mono bg-background border border-border/60 rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
-                      placeholder={t("hostDetails.credential.localKeyFilePlaceholder")}
-                      value={newKeyFilePath}
-                      onChange={(e) => setNewKeyFilePath(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && newKeyFilePath.trim()) {
-                          e.preventDefault();
-                          addLocalKeyFilePath(newKeyFilePath);
-                        }
-                      }}
-                    />
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="secondary"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          onClick={async () => {
-                            const bridge = (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
-                            if (!bridge?.selectFile) return;
-                            const filePath = await bridge.selectFile(
-                              "Select SSH Private Key",
-                              undefined,
-                              [{ name: "All Files", extensions: ["*"] }]
-                            );
-                            if (filePath) {
-                              addLocalKeyFilePath(filePath);
-                            }
-                          }}
-                        >
-                          <FolderOpen size={14} />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("hostDetails.credential.browseKeyFile")}</TooltipContent>
-                    </Tooltip>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0"
-                      onClick={() => {
-                        setSelectedCredentialType(null);
-                        setNewKeyFilePath("");
-                      }}
-                    >
-                      <X size={14} />
-                    </Button>
-                  </div>
-                </div>
-              )}
+            <SshCredentialPickerSection
+              visible={!selectedIdentity && !form.identityFileId}
+              identityFileId={form.identityFileId}
+              keysByCategory={keysByCategory}
+              selectedCredentialType={selectedCredentialType}
+              setSelectedCredentialType={setSelectedCredentialType}
+              credentialPopoverOpen={credentialPopoverOpen}
+              setCredentialPopoverOpen={setCredentialPopoverOpen}
+              newKeyFilePath={newKeyFilePath}
+              setNewKeyFilePath={setNewKeyFilePath}
+              onSelectKey={(val) => {
+                update("identityFileId", val);
+                update("authMethod", "key");
+                update("identityFilePaths", undefined);
+                setPendingReferenceKeyPath(null);
+                setSelectedCredentialType(null);
+              }}
+              onSelectCertificate={(val) => {
+                update("identityFileId", val);
+                update("authMethod", "certificate");
+                update("identityFilePaths", undefined);
+                setPendingReferenceKeyPath(null);
+                setSelectedCredentialType(null);
+              }}
+              onAddLocalKeyFile={(filePath) => {
+                addLocalKeyFilePath(filePath);
+              }}
+              onCancelLocalKeyFile={() => {
+                setSelectedCredentialType(null);
+                setNewKeyFilePath("");
+              }}
+              t={t}
+            />
             <HostTotpFields
               t={t}
               form={form}

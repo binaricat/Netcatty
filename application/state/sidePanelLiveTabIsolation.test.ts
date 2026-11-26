@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
-import React, { useCallback, useRef, useSyncExternalStore } from 'react';
+import React, { memo, useCallback, useRef, useSyncExternalStore } from 'react';
 import { act, create } from 'react-test-renderer';
 import ts from 'typescript';
 import { resolveSystemSidebarSession } from '../../domain/systemManager/resolveSystemSession';
@@ -25,10 +25,10 @@ const env = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boole
 test('workspace browser follows focus without replacing the earlier terminal context', async () => {
   const previous = env.IS_REACT_ACT_ENVIRONMENT;
   env.IS_REACT_ACT_ENVIRONMENT = true;
-  const browserSlot = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'SidePanelBrowserSlot');
+  const browserSlot = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'SidePanelBrowserSlotInner');
   assert.ok(browserSlot);
   const slotCode = ts.transpile(browserSlot.getText(ast), { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React });
-  const Slot = vm.runInNewContext(`${slotCode}; SidePanelBrowserSlot`, {
+  const Slot = vm.runInNewContext(`${slotCode}; SidePanelBrowserSlotInner`, {
     React, useRef, useSidePanelLiveSnapshotForTab: useSnapshot, resolveSystemSidebarSession, collectSessionIds,
     sidePanelHiddenPanelClassName: (hidden: boolean) => hidden ? 'hidden' : 'visible',
     HostBrowserSidePanel: (props: object) => React.createElement('div', { ...props, 'data-browser-context': true }),
@@ -127,6 +127,77 @@ test('new panels wait for their own snapshot and workspace panes accept focus ch
     panelTabId = 'new-owner';
     await act(async () => { renderer?.update(React.createElement(Probe)); });
     assert.equal(observed, SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, 'a reused hook must not retain another owner');
+  } finally {
+    await act(async () => renderer?.unmount());
+    sidePanelLiveStore.update(SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT);
+    env.IS_REACT_ACT_ENVIRONMENT = previous;
+  }
+});
+
+test('SidePanelBrowserSlot is memoized and skips re-renders when props are unchanged', async () => {
+  const previous = env.IS_REACT_ACT_ENVIRONMENT;
+  env.IS_REACT_ACT_ENVIRONMENT = true;
+  assert.match(
+    source,
+    /export const SidePanelBrowserSlot = memo\(SidePanelBrowserSlotInner\);/,
+    'SidePanelBrowserSlot must be wrapped in React.memo like sibling side-panel slots',
+  );
+  const browserSlot = ast.statements.find(
+    (node) => ts.isFunctionDeclaration(node) && node.name?.text === 'SidePanelBrowserSlotInner',
+  );
+  assert.ok(browserSlot);
+  const slotCode = ts.transpile(browserSlot.getText(ast), {
+    target: ts.ScriptTarget.ES2022,
+    jsx: ts.JsxEmit.React,
+  });
+  let renderCount = 0;
+  const MemoSlot = vm.runInNewContext(
+    `${slotCode}; memo(function TrackedBrowserSlot(props) { onRender(); return SidePanelBrowserSlotInner(props); })`,
+    {
+      React,
+      memo,
+      onRender: () => { renderCount += 1; },
+      useRef,
+      useSidePanelLiveSnapshotForTab: useSnapshot,
+      resolveSystemSidebarSession,
+      collectSessionIds,
+      sidePanelHiddenPanelClassName: (hidden: boolean) => (hidden ? 'hidden' : 'visible'),
+      HostBrowserSidePanel: (props: object) => React.createElement('div', { ...props, 'data-browser-context': true }),
+    },
+  ) as React.ComponentType<{ tabId: string; ctx: object; isVisible: boolean }>;
+
+  const sessionA = { id: 'session-a', hostId: 'host-a', protocol: 'ssh' };
+  const ctx = {
+    sessions: [sessionA],
+    workspaceById: new Map(),
+    sessionHostsMap: new Map([['session-a', { id: 'host-a', hostname: 'a', protocol: 'ssh' }]]),
+    sftpAuthHostBySessionId: new Map(),
+    effectiveHosts: [],
+    keys: [],
+    identities: [],
+    knownHosts: [],
+    terminalSettings: {},
+    t: (key: string) => key,
+  };
+
+  let renderer: ReturnType<typeof create> | undefined;
+  try {
+    await act(async () => {
+      renderer = create(React.createElement(MemoSlot, { tabId: 'session-a', ctx, isVisible: false }));
+    });
+    assert.equal(renderCount, 1);
+
+    // Re-rendering the parent with identical tabId/ctx/isVisible must be skipped by memo.
+    await act(async () => {
+      renderer!.update(React.createElement(MemoSlot, { tabId: 'session-a', ctx, isVisible: false }));
+    });
+    assert.equal(renderCount, 1);
+
+    // Visibility changes must still re-render the slot.
+    await act(async () => {
+      renderer!.update(React.createElement(MemoSlot, { tabId: 'session-a', ctx, isVisible: true }));
+    });
+    assert.equal(renderCount, 2);
   } finally {
     await act(async () => renderer?.unmount());
     sidePanelLiveStore.update(SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT);

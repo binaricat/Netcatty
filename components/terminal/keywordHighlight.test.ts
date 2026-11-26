@@ -1264,7 +1264,6 @@ test("hibernate replay defers bulk viewport coloring but subsequent live output 
   }
 });
 
-
 test("bulk streaming does not recolor a scrolled-back history viewport", async () => {
   const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 100 });
   let bypass = false;
@@ -1288,6 +1287,121 @@ test("bulk streaming does not recolor a scrolled-back history viewport", async (
     term.scrollToBottom();
     await write(term, chunk);
     assert.equal(cellRgb(term, term.buffer.active.viewportY, "ERROR"), RED);
+  } finally {
+    highlighter.dispose();
+    term.dispose();
+  }
+});
+
+test("disabled write short-circuits control regex scans and resets DECOM state safely", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 24, rows: 5, scrollback: 20 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules(rule(), false);
+  const internal = highlighter as unknown as {
+    trackAbsoluteOriginMode: (data: string | Uint8Array) => boolean;
+    collectAbsoluteControls: (data: string | Uint8Array) => string | null;
+    resolveAbsoluteRepaintRange: (...args: unknown[]) => unknown;
+    absoluteOriginMode: boolean | null;
+    absoluteActiveBuffer: string | null;
+    absoluteControlTail: string;
+    absoluteOriginControlTail: string;
+  };
+  let trackCalls = 0;
+  let collectCalls = 0;
+  let resolveCalls = 0;
+  const origTrack = internal.trackAbsoluteOriginMode.bind(highlighter);
+  const origCollect = internal.collectAbsoluteControls.bind(highlighter);
+  const origResolve = internal.resolveAbsoluteRepaintRange.bind(highlighter);
+  internal.trackAbsoluteOriginMode = (data) => {
+    trackCalls += 1;
+    return origTrack(data);
+  };
+  internal.collectAbsoluteControls = (data) => {
+    collectCalls += 1;
+    return origCollect(data);
+  };
+  internal.resolveAbsoluteRepaintRange = (...args) => {
+    resolveCalls += 1;
+    return origResolve(...args);
+  };
+
+  try {
+    await write(term, "old-1\r\nold-2\r\nold-3\r\nold-4\r\nold-5");
+    await write(term, "\x1b[2;4r\x1b[?6h");
+    assert.equal(trackCalls, 0, "disabled write must skip trackAbsoluteOriginMode");
+    assert.equal(collectCalls, 0, "disabled write must skip collectAbsoluteControls");
+    assert.equal(resolveCalls, 0, "disabled write must skip resolveAbsoluteRepaintRange");
+    assert.equal(internal.absoluteOriginMode, null, "DECOM state must be reset to unknown (null)");
+    assert.equal(internal.absoluteActiveBuffer, null);
+    assert.equal(internal.absoluteControlTail, "");
+    assert.equal(internal.absoluteOriginControlTail, "");
+
+    // Mid-session rule enable stays DECOM-safe because absoluteOriginMode is null.
+    highlighter.setRules(rule(), true);
+    await highlighter.whenSettled();
+    await write(term, "\x1b[2;1Htarget ERROR\x1b[1;1H");
+    assert.equal(cellRgb(term, 2, "ERROR"), RED);
+  } finally {
+    highlighter.dispose();
+    term.dispose();
+  }
+});
+
+test("bypassed flood writes defer resolveAbsoluteRepaintRange while preserving CUP catch-up start", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 24, rows: 5, scrollback: 20 });
+  let bypassed = true;
+  const highlighter = new KeywordHighlighter(term, {
+    shouldBypassHighlight: () => bypassed,
+  });
+  highlighter.setRules(rule(), true);
+  const internal = highlighter as unknown as {
+    resolveAbsoluteRepaintRange: (...args: unknown[]) => unknown;
+  };
+  let resolveCalls = 0;
+  const origResolve = internal.resolveAbsoluteRepaintRange.bind(highlighter);
+  internal.resolveAbsoluteRepaintRange = (...args) => {
+    resolveCalls += 1;
+    return origResolve(...args);
+  };
+
+  try {
+    await write(term, "row-1\r\nrow-2\r\nrow-3\r\nrow-4\r\nrow-5");
+    await write(term, "\x1b[1;1Htop ERROR\x1b[5;1H");
+    assert.equal(resolveCalls, 0, "bypassed writes must not run full resolveAbsoluteRepaintRange");
+
+    bypassed = false;
+    await highlighter.whenSettled();
+    assert.equal(cellRgb(term, 0, "ERROR"), RED);
+  } finally {
+    highlighter.dispose();
+    term.dispose();
+  }
+});
+
+test("recolorLogicalBounds scans highlight patterns once per matching line without redundant translateToString", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 32, rows: 5, scrollback: 20 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules(rule(), true);
+
+  const internal = highlighter as unknown as {
+    compiledPatterns: Array<{
+      priority: number;
+      rgb: number;
+      plugin: boolean;
+      visit: (text: string, onMatch: (start: number, length: number) => boolean | void) => void;
+    }>;
+  };
+  let visitCount = 0;
+  const originalVisit = internal.compiledPatterns[0]!.visit;
+  internal.compiledPatterns[0]!.visit = (text, onMatch) => {
+    visitCount += 1;
+    return originalVisit(text, onMatch);
+  };
+
+  try {
+    await write(term, "first ERROR second ERROR");
+    assert.equal(cellRgb(term, 0, "ERROR"), RED);
+    assert.equal(visitCount, 1, "matching line must only scan patterns once, not twice");
   } finally {
     highlighter.dispose();
     term.dispose();

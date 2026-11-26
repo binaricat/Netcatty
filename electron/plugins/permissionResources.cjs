@@ -115,7 +115,7 @@ function normalizePermissionDeclarations(manifest) {
         : [...new Set((value.resources ?? []).map((resource) => (
             canonicalizePermissionResource(permission, resource)
           )))].sort();
-      if ((required && RESOURCE_SCOPED_PERMISSIONS.has(permission)) || permission === "network.stream") {
+      if (required && RESOURCE_SCOPED_PERMISSIONS.has(permission)) {
         if (resources.length === 0) {
           throw new TypeError(`Required permission ${permission} must declare resources`);
         }

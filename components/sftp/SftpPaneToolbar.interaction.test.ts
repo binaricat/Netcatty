@@ -314,3 +314,166 @@ test("inline bookmark actions navigate and confirm current-path removal", async 
     }
   }
 });
+
+test("path toolbar Back and Forward buttons invoke navigation callbacks only when enabled", async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+    pretendToBeVisual: true,
+    url: "http://localhost",
+  });
+  const window = dom.window;
+  const previousGlobals = new Map<string, PropertyDescriptor | undefined>();
+  const installGlobal = (key: string, value: unknown) => {
+    previousGlobals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, {
+      configurable: true,
+      writable: true,
+      value,
+    });
+  };
+
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+
+  installGlobal("window", window);
+  installGlobal("document", window.document);
+  installGlobal("navigator", window.navigator);
+  installGlobal("HTMLElement", window.HTMLElement);
+  installGlobal("HTMLInputElement", window.HTMLInputElement);
+  installGlobal("HTMLTextAreaElement", window.HTMLTextAreaElement);
+  installGlobal("Element", window.Element);
+  installGlobal("SVGElement", window.SVGElement);
+  installGlobal("Node", window.Node);
+  installGlobal("NodeFilter", window.NodeFilter);
+  installGlobal("MutationObserver", window.MutationObserver);
+  installGlobal("CustomEvent", window.CustomEvent);
+  installGlobal("Event", window.Event);
+  installGlobal("StorageEvent", window.StorageEvent);
+  installGlobal("localStorage", window.localStorage);
+  installGlobal("sessionStorage", window.sessionStorage);
+  installGlobal("getComputedStyle", window.getComputedStyle.bind(window));
+  installGlobal("requestAnimationFrame", window.requestAnimationFrame.bind(window));
+  installGlobal("cancelAnimationFrame", window.cancelAnimationFrame.bind(window));
+  installGlobal("ResizeObserver", ResizeObserverStub);
+  installGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+
+  const { default: React, act } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { I18nProvider } = await import("../../application/i18n/I18nProvider.tsx");
+  const { SftpPaneToolbar } = await import("./SftpPaneToolbar.tsx");
+  const rootNode = window.document.getElementById("root");
+  assert.ok(rootNode);
+  const root = createRoot(rootNode);
+  let backCalls = 0;
+  let forwardCalls = 0;
+
+  const renderWithHistory = async (entries: string[], index: number) => {
+    await act(async () => {
+      const toolbar = React.createElement(SftpPaneToolbar, {
+        t: (key) => ({
+          "sftp.goBack": "Go back",
+          "sftp.goForward": "Go forward",
+        }[key] ?? key),
+        pane: {
+          id: "pane-1",
+          connection: {
+            id: "conn-1",
+            hostId: "host-1",
+            hostLabel: "Example",
+            status: "connected",
+            currentPath: entries[index] ?? "/",
+            homeDir: "/home/app",
+            isLocal: false,
+          },
+          files: [],
+          loading: false,
+          reconnecting: false,
+          error: null,
+          connectionLogs: [],
+          selectedFiles: new Set<string>(),
+          filter: "",
+          filenameEncoding: "auto",
+          showHiddenFiles: false,
+          transferMutationToken: 0,
+          navHistory: { entries, index, maxEntries: 50 },
+        },
+        onNavigateTo: () => {},
+        onNavigateBack: () => {
+          backCalls += 1;
+        },
+        onNavigateForward: () => {
+          forwardCalls += 1;
+        },
+        onSetFilter: () => {},
+        onSetFilenameEncoding: () => {},
+        onRefresh: () => {},
+        showFilterBar: false,
+        setShowFilterBar: () => {},
+        filterInputRef: { current: null },
+        isEditingPath: false,
+        editingPathValue: "",
+        setEditingPathValue: () => {},
+        setShowPathSuggestions: () => {},
+        showPathSuggestions: false,
+        setPathSuggestionIndex: () => {},
+        pathSuggestions: [],
+        pathSuggestionIndex: -1,
+        pathInputRef: { current: null },
+        pathDropdownRef: { current: null },
+        handlePathBlur: () => {},
+        handlePathKeyDown: () => {},
+        handlePathDoubleClick: () => {},
+        handlePathSubmit: () => {},
+        getNextUntitledName: () => "untitled",
+        setNewFileName: () => {},
+        setFileNameError: () => {},
+        setShowNewFileDialog: () => {},
+        setShowNewFolderDialog: () => {},
+        setNewFolderName: () => {},
+        bookmarks: [],
+        isCurrentPathBookmarked: false,
+        onToggleBookmark: () => {},
+        onAddGlobalBookmark: () => {},
+        isCurrentPathGlobalBookmarked: false,
+        onNavigateToBookmark: () => {},
+        onDeleteBookmark: () => {},
+        showHiddenFiles: false,
+        onToggleShowHiddenFiles: () => {},
+        viewMode: "list",
+        onSetViewMode: () => {},
+      });
+      root.render(React.createElement(I18nProvider, { locale: "en", children: toolbar }));
+    });
+  };
+
+  try {
+    await renderWithHistory(["/home/app"], 0);
+    const backBtn = () => window.document.querySelector<HTMLButtonElement>('button[aria-label="Go back"]');
+    const forwardBtn = () => window.document.querySelector<HTMLButtonElement>('button[aria-label="Go forward"]');
+
+    assert.equal(backBtn()?.disabled, true);
+    assert.equal(forwardBtn()?.disabled, true);
+
+    await renderWithHistory(["/home/app", "/var", "/etc"], 1);
+    assert.equal(backBtn()?.disabled, false);
+    assert.equal(forwardBtn()?.disabled, false);
+
+    await act(async () => backBtn()!.click());
+    await act(async () => forwardBtn()!.click());
+    assert.equal(backCalls, 1);
+    assert.equal(forwardCalls, 1);
+
+    await renderWithHistory(["/home/app", "/var", "/etc"], 2);
+    assert.equal(backBtn()?.disabled, false);
+    assert.equal(forwardBtn()?.disabled, true);
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, descriptor] of previousGlobals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete (globalThis as Record<string, unknown>)[key];
+    }
+  }
+});

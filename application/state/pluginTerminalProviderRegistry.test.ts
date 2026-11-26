@@ -3,10 +3,15 @@ import test from 'node:test';
 
 import {
   collectPluginTerminalProviderKinds,
+  createWindowPluginTerminalProviderRegistry,
   isPluginTerminalProviderKindAvailable,
   PluginTerminalProviderAvailability,
   PluginTerminalProviderRegistry,
 } from './pluginTerminalProviderRegistry.ts';
+import {
+  _resetSharedPluginRuntimeStatusForTests,
+  getSharedPluginRuntimeStatus,
+} from './pluginRuntimeStatusCache.ts';
 
 const session: NetcattyTerminalSessionSnapshot = {
   sessionId: 'session-1',
@@ -429,4 +434,143 @@ test('terminal Provider registry forwards contribution lifecycle invalidation', 
   assert.equal(changes, 1);
   registry.dispose();
   assert.equal(disposed, true);
+});
+
+test('terminal Provider registry short-circuits cloning, snapshots, and IPC when plugin runtime is disabled, and re-probes on contribution change', async (t) => {
+  _resetSharedPluginRuntimeStatusForTests();
+  let changed: (() => void) | undefined;
+  let available = false;
+  let statusCalls = 0;
+  let listCalls = 0;
+  let lifecycleCalls = 0;
+  const requests: NetcattyTerminalProviderRequest[] = [];
+  const events: NetcattyTerminalSessionEvent[] = [];
+
+  const registry = new PluginTerminalProviderRegistry({
+    async getPluginRuntimeStatus() {
+      statusCalls += 1;
+      return { available } as NetcattyPluginRuntimeStatus;
+    },
+    async listPluginTerminalProviders() {
+      listCalls += 1;
+      return [{
+        pluginId: 'com.example.matcher',
+        pluginVersion: '1.0.0',
+        pluginDisplayName: 'Matcher',
+        provider: {
+          id: 'com.example.matcher.output',
+          label: 'Output matcher',
+          kind: 'terminal.matcher',
+        },
+      }];
+    },
+    async providePluginTerminal(request) {
+      requests.push(request);
+      return [];
+    },
+    async cancelPluginTerminalRequest() { return false; },
+    async publishPluginTerminalSessionEvent(event) {
+      lifecycleCalls += 1;
+      events.push(event);
+      return [];
+    },
+    onPluginContributionsChanged(listener) {
+      changed = listener;
+      return () => {};
+    },
+  });
+
+  const cloneSpy = t.mock.method(globalThis, 'structuredClone');
+  try {
+    // Parallel provider enumerations coalesce onto one runtime status check and make 0 provider IPCs.
+    const [matchers, links] = await Promise.all([
+      registry.listProviders({ kind: 'terminal.matcher' }),
+      registry.listProviders({ kind: 'terminal.link' }),
+    ]);
+    assert.deepEqual(matchers, []);
+    assert.deepEqual(links, []);
+    assert.equal(statusCalls, 1);
+    assert.equal(listCalls, 0);
+    assert.equal(cloneSpy.mock.callCount(), 0);
+
+    // Lifecycle events while disabled must not clone, snapshot, or call IPC.
+    await registry.publishSessionEvent({
+      type: 'created',
+      session: { ...session, cwd: '/must-not-be-retained', title: 'Hidden title' },
+    });
+    await registry.publishSessionEvent({
+      type: 'cwdChanged',
+      session: { ...session, cwd: '/also-not-retained' },
+    });
+    await registry.publishSessionEvent({
+      type: 'resized',
+      session: { ...session, cols: 120, rows: 40 },
+    });
+    assert.equal(statusCalls, 1);
+    assert.equal(lifecycleCalls, 0);
+    assert.equal(cloneSpy.mock.callCount(), 0, '0 structuredClone calls when plugin host is disabled');
+
+    // Dev-mode hot-enable: onPluginContributionsChanged invalidates cached status and re-probes.
+    available = true;
+    changed?.();
+
+    // Verify no stale session snapshot was retained while disabled.
+    await registry.request({ kind: 'terminal.completion', operation: 'provide', session });
+    assert.equal(Object.hasOwn(requests[0].session, 'cwd'), false, 'disabled publishSessionEvent must not grow #sessionSnapshots');
+    assert.equal(Object.hasOwn(requests[0].session, 'title'), false);
+
+    const enabledProviders = await registry.listProviders({ kind: 'terminal.matcher' });
+    assert.equal(statusCalls, 2, 'onPluginContributionsChanged invalidates shared runtime status cache');
+    assert.equal(listCalls, 1);
+    assert.equal(enabledProviders.length, 1);
+
+    await registry.publishSessionEvent({ type: 'connected', session: { ...session, cwd: '/live' } });
+    assert.equal(lifecycleCalls, 1);
+    assert.equal(events[0].session.cwd, '/live');
+  } finally {
+    registry.dispose();
+    _resetSharedPluginRuntimeStatusForTests();
+  }
+});
+
+test('createWindowPluginTerminalProviderRegistry shares runtime status cache with the window bridge', async (t) => {
+  _resetSharedPluginRuntimeStatusForTests();
+  let statusCalls = 0;
+  let listCalls = 0;
+  let lifecycleCalls = 0;
+  const mockBridge = {
+    async getPluginRuntimeStatus() {
+      statusCalls += 1;
+      return { available: false };
+    },
+    async listPluginTerminalProviders() {
+      listCalls += 1;
+      return [];
+    },
+    async providePluginTerminal() { return []; },
+    async cancelPluginTerminalRequest() { return false; },
+    async publishPluginTerminalSessionEvent() {
+      lifecycleCalls += 1;
+      return [];
+    },
+  } as unknown as NetcattyBridge;
+
+  // Pre-populate shared runtime status cache (as usePluginContributions does on mount).
+  assert.deepEqual(await getSharedPluginRuntimeStatus(mockBridge), { available: false });
+  assert.equal(statusCalls, 1);
+
+  const cloneSpy = t.mock.method(globalThis, 'structuredClone');
+  const registry = createWindowPluginTerminalProviderRegistry(mockBridge);
+  assert.ok(registry);
+  try {
+    assert.deepEqual(await registry.listProviders({ kind: 'terminal.matcher' }), []);
+    await registry.publishSessionEvent({ type: 'created', session });
+    assert.equal(statusCalls, 1, 'reuses cached runtime status from window bridge without extra IPC');
+    assert.equal(listCalls, 0);
+    assert.equal(lifecycleCalls, 0);
+    assert.equal(cloneSpy.mock.callCount(), 0);
+  } finally {
+    registry.dispose();
+    _resetSharedPluginRuntimeStatusForTests();
+  }
 });

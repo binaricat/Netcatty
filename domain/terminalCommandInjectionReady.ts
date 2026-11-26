@@ -5,6 +5,7 @@ export interface ShellPromptReadiness {
   isAtPrompt: boolean;
   userInputLength: number;
   pendingTypedInputLength?: number;
+  afterCursorInputLength?: number;
 }
 
 /**
@@ -27,5 +28,6 @@ export function isIdleShellReadyForCommandInjection(options: ShellPromptReadines
   if (!isShellPromptReadyForInsertion(options)) return false;
   if (options.userInputLength > 0) return false;
   if ((options.pendingTypedInputLength ?? 0) > 0) return false;
+  if ((options.afterCursorInputLength ?? 0) > 0) return false;
   return true;
 }

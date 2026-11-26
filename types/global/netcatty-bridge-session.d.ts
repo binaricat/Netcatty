@@ -253,7 +253,7 @@ declare global {
       },
     ): Promise<{ success: boolean; cwd?: string; error?: string; directoryState?: {
       revision: number;
-      shellKind: 'powershell';
+      shellKind: 'powershell' | 'cmd';
       pathFlavor: 'win32';
       provider: string;
       cwd: string | null;

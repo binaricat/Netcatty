@@ -55,6 +55,12 @@ const testSecretStore: PluginSecretStore = {
   async get() {
     return testSecretRef;
   },
+  async getPlaintext() {
+    return "own-secret-value";
+  },
+  async readOwn() {
+    return "own-secret-value";
+  },
   async set() {
     return testSecretRef;
   },

@@ -428,3 +428,228 @@ for (const route of ['exec', 'job']) {
     assert.equal(ctx.activeSessionExecutions.size, 0);
   });
 }
+
+// ── terminal_execute_bulk support: preflightExec + shared chat lock ──
+
+function createBulkExecContext(sessions, overrides = {}) {
+  const ctx = createExecHandlerTestContext({ sessions, backgroundJobs: new Map() });
+  ctx.checkCommandSafetyForShell = checkBlocklistForShell;
+  ctx.resolveSessionBlocklistShellKind = resolveSessionBlocklistShellKind;
+  ctx.execViaPty = async () => ({ ok: true, stdout: "ran", stderr: "", exitCode: 0 });
+  ctx.execViaChannel = async () => ({ ok: true, stdout: "ran", stderr: "", exitCode: 0 });
+  ctx.execViaRawPty = async () => ({ ok: true, stdout: "ran", stderr: "", exitCode: null });
+  Object.assign(ctx, overrides);
+  return createExecHandlerApi(ctx);
+}
+
+test("preflightExec accepts supported transports without sending a command", async () => {
+  const pty = new FakePty();
+  const sessions = new Map([
+    ["pty", { protocol: "ssh", shellKind: "posix", stream: pty }],
+    ["channel", { protocol: "ssh", shellKind: "posix", conn: { exec() {} } }],
+    // Serial sessions are network-device-like and expose their port as `stream`.
+    ["serial", { protocol: "serial", stream: { write() {} }, serialPort: { write() {} } }],
+  ]);
+  const api = createBulkExecContext(sessions);
+  for (const sessionId of sessions.keys()) {
+    const result = await api.preflightExec({ sessionId, command: "uptime", chatSessionId: "chat" });
+    assert.deepEqual(result, { ok: true }, sessionId);
+  }
+  assert.deepEqual(pty.writes, [], "preflight never types into the terminal");
+});
+
+test("preflightExec reports the same refusals handleExec would give", async () => {
+  const sessions = new Map([
+    ["blocked", { protocol: "ssh", shellKind: "posix", stream: new FakePty() }],
+    ["dead", { protocol: "ssh", shellKind: "posix" }],
+    ["net-no-pty", { protocol: "ssh", conn: { exec() {} } }],
+  ]);
+  const api = createBulkExecContext(sessions, {
+    getSessionMeta: (sessionId) => (sessionId === "net-no-pty" ? { deviceType: "network" } : {}),
+  });
+
+  const blocked = await api.preflightExec({ sessionId: "blocked", command: "rm -rf /", chatSessionId: "chat" });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /^Command blocked by safety policy\. Pattern: /);
+  assert.deepEqual(
+    await api.preflightExec({ sessionId: "dead", command: "uptime", chatSessionId: "chat" }),
+    { ok: false, error: "Session does not support command execution" },
+  );
+  assert.match(
+    (await api.preflightExec({ sessionId: "net-no-pty", command: "uptime", chatSessionId: "chat" })).error,
+    /no writable PTY stream/,
+  );
+  assert.deepEqual(
+    await api.preflightExec({ sessionId: "ghost", command: "uptime", chatSessionId: "chat" }),
+    { ok: false, error: "Session not found" },
+  );
+});
+
+test("preflightExec skips the blocklist for serial and network-device sessions like handleExec", async () => {
+  const sessions = new Map([
+    ["serial", { protocol: "serial", stream: { write() {} }, serialPort: { write() {} } }],
+    ["net", { protocol: "ssh", stream: new FakePty() }],
+  ]);
+  const api = createBulkExecContext(sessions, {
+    getSessionMeta: (sessionId) => (sessionId === "net" ? { deviceType: "network" } : {}),
+  });
+  for (const sessionId of ["serial", "net"]) {
+    assert.deepEqual(
+      await api.preflightExec({ sessionId, command: "shutdown", chatSessionId: "chat" }),
+      { ok: true },
+      sessionId,
+    );
+  }
+});
+
+test("handleExec takes the chat lock unless the bulk executor already holds it", async () => {
+  const { CHAT_LOCK_HELD } = require("./mcpServerBridge/execBulk.cjs");
+  const locks = [];
+  const make = () => createBulkExecContext(
+    new Map([["ssh", { protocol: "ssh", shellKind: "posix", stream: new FakePty() }]]),
+    { beginChatExecution: (...args) => { locks.push(args); return { ok: true, release() {} }; } },
+  );
+
+  await make().handleExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" });
+  assert.equal(locks.length, 1, "single exec takes the lock");
+
+  locks.length = 0;
+  await make().handleExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" }, { [CHAT_LOCK_HELD]: true });
+  assert.equal(locks.length, 0, "bulk-held lock is not taken twice");
+
+  locks.length = 0;
+  // A plain object key with the same text is not the private marker.
+  await make().handleExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" }, { chatLockHeld: true });
+  assert.equal(locks.length, 1);
+});
+
+test("preflightExec with probe:false never opens a channel to the host and uses the common patterns", async () => {
+  const make = (session, overrides = {}) => createBulkExecContext(new Map([["ssh", session]]), {
+    checkCommandSafetyCommonOnly: (command) => (command.includes("forbidden")
+      ? { blocked: true, matchedPattern: "forbidden" } : { blocked: false }),
+    ...overrides,
+  });
+  const unknownShell = () => {
+    const calls = { probe: 0, exec: 0 };
+    const session = {
+      protocol: "ssh", shellKind: "", stream: new FakePty(),
+      _shellKindExecProbe: async () => { calls.probe += 1; return "/bin/bash\n"; },
+      conn: { exec() { calls.exec += 1; } },
+    };
+    return { session, calls };
+  };
+
+  const quiet = unknownShell();
+  const api = make(quiet.session);
+  assert.deepEqual(await api.preflightExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" }, { probe: false }), { ok: true });
+  assert.deepEqual(quiet.calls, { probe: 0, exec: 0 }, "no probe and no SSH channel before approval");
+  assert.match(
+    (await api.preflightExec({ sessionId: "ssh", command: "echo forbidden", chatSessionId: "chat" }, { probe: false })).error,
+    /Command blocked by safety policy\. Pattern: forbidden/,
+    "unknown shell falls back to the shell-independent patterns",
+  );
+
+  const loud = unknownShell();
+  const full = make(loud.session);
+  await full.preflightExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" });
+  const probesAfterFirst = loud.calls.probe;
+  assert.ok(probesAfterFirst >= 1, "the default (after approval) still probes the shell kind");
+  await full.preflightExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" });
+  assert.equal(loud.calls.probe, probesAfterFirst, "the result is cached, so the later exec does not probe again");
+});
+
+function referenceCollapseCarriageReturns(text) {
+  if (!text || text.indexOf("\r") === -1) return text;
+  let result = "";
+  let crPending = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === "\r") {
+      crPending = true;
+      continue;
+    }
+    if (ch === "\n") {
+      crPending = false;
+      result += ch;
+      continue;
+    }
+    if (crPending) {
+      const lastNl = result.lastIndexOf("\n");
+      result = lastNl >= 0 ? result.slice(0, lastNl + 1) : "";
+      crPending = false;
+    }
+    result += ch;
+  }
+  return result;
+}
+
+test("collapseCarriageReturns preserves exact CR, CRLF, and trailing-CR semantics", () => {
+  const ctx = createExecHandlerTestContext({ sessions: new Map(), backgroundJobs: new Map() });
+  const cases = [
+    "",
+    null,
+    undefined,
+    "plain text\nline 2",
+    "\r",
+    "\r\r\r",
+    "\r\n",
+    "hello\r\n",
+    "hello\r",
+    "a\rb\r",
+    "a\rb\r\n",
+    "a\rb\n",
+    "a\r\r\r\n",
+    "\r\ra",
+    "line1\n\rline2",
+    "line1\r\nline2\r\nline3\r",
+    "10%\r50%\r100%\r\ndone\r",
+    "\n\r\n\r",
+    "a\r\n\rb\rc\r\n",
+    "\u8fdb\u5ea610%\r\u8fdb\u5ea6100% \u{1F680}\r\n\u5b8c\u6210\r",
+  ];
+  for (const input of cases) {
+    assert.equal(
+      ctx.collapseCarriageReturns(input),
+      referenceCollapseCarriageReturns(input),
+      `mismatch for ${JSON.stringify(input)}`,
+    );
+  }
+
+  // Exhaustive parity check over {a, b, \r, \n} up to length 5.
+  const alphabet = ["a", "b", "\r", "\n"];
+  const checkAll = (prefix, remaining) => {
+    if (remaining === 0) {
+      assert.equal(
+        ctx.collapseCarriageReturns(prefix),
+        referenceCollapseCarriageReturns(prefix),
+        `exhaustive mismatch for ${JSON.stringify(prefix)}`,
+      );
+      return;
+    }
+    for (const ch of alphabet) {
+      checkAll(prefix + ch, remaining - 1);
+    }
+  };
+  for (let len = 1; len <= 5; len += 1) {
+    checkAll("", len);
+  }
+});
+
+test("collapseCarriageReturns handles 256KB CR-heavy progress output in linear time", () => {
+  const ctx = createExecHandlerTestContext({ sessions: new Map(), backgroundJobs: new Map() });
+  const frameCount = 5000;
+  const frames = [];
+  for (let i = 0; i < frameCount; i += 1) {
+    frames.push(`Downloading [${"#".repeat(32)}] ${String(i).padStart(4, "0")}/${frameCount}`);
+  }
+  const progressLine = `${frames.join("\r")}\r`;
+  const payload = `header line\r\n${progressLine}\nfooter\rfinal frame\r`;
+  assert.ok(payload.length > 256 * 1024);
+
+  const startedAt = Date.now();
+  const collapsed = ctx.collapseCarriageReturns(payload);
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(collapsed, `header line\n${frames[frameCount - 1]}\nfinal frame`);
+  assert.ok(elapsedMs < 500, `expected linear collapseCarriageReturns on 256KB+ payload, took ${elapsedMs}ms`);
+});

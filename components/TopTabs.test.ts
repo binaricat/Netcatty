@@ -19,10 +19,12 @@ Object.defineProperty(globalThis, "requestAnimationFrame", {
 
 const {
   computeHostTreeTabGutter,
+  getHostTreeTabGutterStyle,
   resolveWorkspaceSessionTabDropTarget,
   shouldKeepHostTreeToggleSurface,
   shouldShowHostTreeToggle,
 } = await import("./TopTabs.tsx");
+const { TERMINAL_HOST_TREE_WIDTH_TRANSITION } = await import("../application/state/terminalHostTreeAnimation.ts");
 const {
   WORKSPACE_SESSION_DRAG_TYPE,
   dataTransferHasType,
@@ -33,6 +35,7 @@ const {
 } = await import("../application/state/terminalDragData.ts");
 const {
   activateLogViewTab,
+  createTopTabCopyDoubleClickHandler,
   createTopTabSessionDoubleClickHandler,
   formatSessionTopTabLabel,
   formatSessionTopTabTooltip,
@@ -63,7 +66,21 @@ test("host tree tab gutter fills the remaining sidebar width", () => {
   assert.equal(computeHostTreeTabGutter(280, 120), 160);
 });
 
-test("workspace tabs resolve generated labels from live prompt hosts", () => {
+test("host tree tab gutter style animates only when host tree transitions and yields to exit class", () => {
+  assert.deepEqual(getHostTreeTabGutterStyle(120, false, true), {
+    width: 120,
+    transition: TERMINAL_HOST_TREE_WIDTH_TRANSITION,
+  });
+  assert.deepEqual(getHostTreeTabGutterStyle(120, false, false), {
+    width: 120,
+    transition: "none",
+  });
+  assert.deepEqual(getHostTreeTabGutterStyle(0, true, false), {
+    width: 0,
+  });
+});
+
+test("workspace tabs resolve generated labels from live prompt hosts in all mode", () => {
   const sessions = [
     topTabSession("s1", "h1", { customName: "", promptHostname: "" }),
     topTabSession("s2", "h2", { customName: "", promptHostname: "" }),
@@ -78,12 +95,36 @@ test("workspace tabs resolve generated labels from live prompt hosts", () => {
   publishSessionPromptHost("s1", "target-a");
   publishSessionPromptHost("s2", "target-b");
   assert.equal(
-    resolveWorkspaceTopTabLabel(workspace, sessions),
+    resolveWorkspaceTopTabLabel(workspace, sessions, "all"),
     "target-a/target-b",
   );
 
   sessionPresentationStore.clearSession("s1");
   sessionPresentationStore.clearSession("s2");
+});
+
+test("generated workspace tabs keep saved names in disabled and agent-only modes", (t) => {
+  const sessions = [
+    topTabSession("mode-s1", "h1", { hostLabel: "Production" }),
+    topTabSession("mode-s2", "h2", { hostLabel: "Database" }),
+  ];
+  t.after(() => sessions.forEach((session) => sessionPresentationStore.clearSession(session.id)));
+  const savedTitle = sessions.map((session) => session.hostLabel).join("/");
+  const workspace = { title: savedTitle, autoTitle: false, generatedTitle: true, focusedSessionId: "mode-s1" };
+  publishSessionPromptHost("mode-s1", "vm-prod");
+  publishSessionPromptHost("mode-s2", "db-prod");
+  for (const mode of [undefined, "off", "agent"] as const) {
+    assert.equal(resolveWorkspaceTopTabLabel(workspace, sessions, mode), savedTitle, String(mode));
+  }
+});
+
+test("auto workspace tabs apply presentation with the current mode", (t) => {
+  const session = topTabSession("auto-mode", "h1", { hostLabel: "Production" });
+  t.after(() => sessionPresentationStore.clearSession(session.id));
+  const workspace = { title: "Workspace", autoTitle: true, focusedSessionId: session.id };
+  publishSessionPromptHost(session.id, "vm-prod");
+  assert.equal(resolveWorkspaceTopTabLabel(workspace, [session], "off"), session.hostLabel);
+  assert.equal(resolveWorkspaceTopTabLabel(workspace, [session], "all"), "vm-prod");
 });
 
 test("workspace tabs keep explicit names ahead of live prompt hosts", () => {
@@ -199,6 +240,20 @@ test("duplicate double-click behavior falls back to copying when unavailable", (
   handleDoubleClick({} as Parameters<typeof handleDoubleClick>[0]);
 
   assert.deepEqual(copiedSessionIds, ["session-1"]);
+});
+
+test("workspace double-click honors Do nothing and retains copying for enabled modes", () => {
+  for (const behavior of ["disabled", "copy", "duplicate"] as const) {
+    const copiedWorkspaces: string[] = [];
+    const handler = createTopTabCopyDoubleClickHandler(
+      (id) => copiedWorkspaces.push(id), "workspace-1", behavior,
+    );
+    handler({} as Parameters<typeof handler>[0]);
+    assert.deepEqual(copiedWorkspaces, behavior === "disabled" ? [] : ["workspace-1"]);
+  }
+
+  const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+  assert.match(topTabsSource, /<WorkspaceTopTab\b[^>]*tabDoubleClickBehavior=\{tabDoubleClickBehavior\}/);
 });
 
 test("session top tab label only shows the host label for ssh sessions", () => {
@@ -473,4 +528,10 @@ test("host tree toggle is hidden on root pages", () => {
     sessionIds: new Set(["session-1"]),
     workspaceIds: new Set(),
   }), false);
+});
+
+test("TopTabs narrows active-tab subscription via useShowHostTreeToggle", () => {
+  const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(topTabsSource, /\buseActiveTabId\b/);
+  assert.match(topTabsSource, /const showHostTreeToggle = useShowHostTreeToggle\(/);
 });

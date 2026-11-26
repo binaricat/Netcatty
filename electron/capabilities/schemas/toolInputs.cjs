@@ -9,6 +9,18 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     sessionId: { type: "string", description: "The terminal session ID to execute on." },
     command: { type: "string", description: "The shell command to execute in the target session." },
   },
+  "terminal.executeBulk": {
+    command: { type: "string", description: "The shell command to execute on every target session." },
+    sessionIds: {
+      type: "string",
+      description: "JSON array of 2-20 unique terminal session IDs, for example [\"s-1\",\"s-2\"]. Every ID must be connected and in scope, otherwise nothing is sent.",
+    },
+    tailLines: {
+      type: "number",
+      optional: true,
+      description: "Keep only the last N lines of each distinct output (default 100, also used for 0; maximum 2000).",
+    },
+  },
   "terminal.start": {
     sessionId: { type: "string", description: "The terminal session ID to start a long-running command on." },
     command: { type: "string", description: "The command to start in the target session." },
@@ -133,7 +145,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     os: { type: "string", optional: true, description: "Operating system override: auto (default), linux, windows, macos, freebsd, or unknown. Use auto to use detected system information; network device mode is separate." },
     identityId: { type: "string", optional: true, description: "Reusable identity ID from vault_identities_list. Empty string detaches the identity." },
     jumpHostIds: { type: "string", optional: true, description: "JSON array of vault host IDs in jump order. Empty array clears the chain." },
-    proxyProfileId: { type: "string", optional: true, description: "Reusable proxy ID from vault_proxy_profiles_list. Empty string clears it." },
+    proxyProfileId: { type: "string", optional: true, description: "Reusable proxy ID from vault_proxy_profiles_list. Empty string removes it so the group or global default applies." },
     startupCommand: { type: "string", optional: true, description: "Command to run after connecting. Empty string clears it." },
     startupCommandRunMode: { type: "string", optional: true, description: "paste or lineDelay." },
     environmentVariables: { type: "string", optional: true, description: "JSON object or array of {name,value} entries. Empty object clears them." },
@@ -422,6 +434,8 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
     "Call this first for any task involving a live Netcatty terminal, remote server, SSH session, SFTP path, or terminal tab. Select the target by label or hostname, then pass its sessionId to terminal and SFTP tools. Call it again after the user opens, closes, or renames a session.",
   "terminal.execute":
     "Use this instead of the local shell when the command is intended for a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd). If the shell prompt cannot be recognized while the connection is alive and no busy signal is present, the command is NOT sent and the tool returns SHELL_READINESS_UNKNOWN (a recoverable, non-terminal result, not a failed command): do not blind-type into a possible password prompt — inspect the terminal read-only with get_environment or terminal_read_context, re-check readiness after the user presses Enter, reuse another idle session, or ask the user to confirm the prompt before retrying.",
+  "terminal.executeBulk":
+    "Run the same command on several terminal sessions in parallel and wait for all of them. Call get_environment first to resolve sessionIds, and pass them as a JSON array of 2-20 unique ids. All ids are checked before anything is sent: if any id is out of scope, disconnected, busy or blocked by the safety policy, the call fails and no command runs on any host. Use only for commands expected to finish within about 60 seconds; every host gets the same timeout. Hosts with identical results are grouped, each group reports status, exitCode, stdout and stderr. A non-zero exitCode is a normal result, not a tool failure. Each confirm-mode call needs a fresh user approval listing every host. For a single session use terminal_execute; this tool rejects fewer than 2.",
   "terminal.start":
     "Use this instead of the local shell for long-running commands on a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes. Shell state such as cd or export does not persist between calls — combine cd with the command.",
   "terminal.poll":

@@ -1,6 +1,10 @@
-import React, { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useActiveTabId, useIsSftpActive, useIsVaultActive } from '../state/activeTabStore';
-import { useTerminalHostTreeLayoutWidth } from '../state/terminalHostTreeStore';
+import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { activeTabStore, useIsSftpActive, useIsTabActive, useIsVaultActive } from '../state/activeTabStore';
+import {
+  useTerminalHostTreeLayoutTransitionAnimated,
+  useTerminalHostTreeLayoutWidth,
+} from '../state/terminalHostTreeStore';
+import { TERMINAL_HOST_TREE_LEFT_TRANSITION } from '../state/terminalHostTreeAnimation';
 import { isTerminalContentTabSurface } from './workTabSurface';
 import { cn } from '../../lib/utils';
 import { ConnectionLog, TerminalTheme } from '../../types';
@@ -68,9 +72,11 @@ interface LogViewWrapperProps {
 export function getLogViewWrapperStyle(
   isVisible: boolean,
   hostTreeLayoutWidth: number,
+  animateLayout = false,
 ): React.CSSProperties {
-  const baseStyle = {
+  const baseStyle: React.CSSProperties = {
     left: hostTreeLayoutWidth,
+    ...(animateLayout ? { transition: TERMINAL_HOST_TREE_LEFT_TRANSITION } : null),
   };
   return isVisible
     ? baseStyle
@@ -78,11 +84,15 @@ export function getLogViewWrapperStyle(
 }
 
 export const LogViewWrapper: React.FC<LogViewWrapperProps> = ({ logView, defaultTerminalTheme, defaultFontSize, onClose, onUpdateLog }) => {
-  const activeTabId = useActiveTabId();
-  const isVisible = activeTabId === logView.id;
+  const isVisible = useIsTabActive(logView.id);
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
+  const hostTreeLayoutAnimated = useTerminalHostTreeLayoutTransitionAnimated();
 
-  const containerStyle = getLogViewWrapperStyle(isVisible, hostTreeLayoutWidth);
+  const containerStyle = getLogViewWrapperStyle(
+    isVisible,
+    hostTreeLayoutWidth,
+    isVisible && hostTreeLayoutAnimated,
+  );
 
   return (
     <div
@@ -163,15 +173,27 @@ export const SftpViewMount: React.FC<SftpViewProps> = (props) => {
   );
 };
 
+export function useIsTerminalSurfaceActive(
+  sessionIds: ReadonlySet<string>,
+  workspaceIds: ReadonlySet<string>,
+): boolean {
+  const getSnapshot = useCallback(
+    () =>
+      isTerminalContentTabSurface({
+        activeTabId: activeTabStore.getActiveTabId(),
+        sessionIds,
+        workspaceIds,
+      }),
+    [sessionIds, workspaceIds],
+  );
+  return useSyncExternalStore(activeTabStore.subscribe, getSnapshot, getSnapshot);
+}
+
 export const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
-  const activeTabId = useActiveTabId();
   const sessionIds = useMemo(() => new Set(props.sessions.map((session) => session.id)), [props.sessions]);
   const workspaceIds = useMemo(() => new Set(props.workspaces.map((workspace) => workspace.id)), [props.workspaces]);
-  const isVisible = isTerminalContentTabSurface({
-    activeTabId,
-    sessionIds,
-    workspaceIds,
-  }) || !!props.draggingSessionId;
+  const isTerminalSurfaceActive = useIsTerminalSurfaceActive(sessionIds, workspaceIds);
+  const isVisible = isTerminalSurfaceActive || !!props.draggingSessionId;
   // Silent MCP sessions never become the activeTabId, so `isVisible` alone
   // would leave this whole layer (and its PTY-starting TerminalPane) unmounted
   // for up to 5s (the idle-callback fallback below) after host_open returns —
@@ -203,7 +225,7 @@ export const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
   if (!shouldRender) return null;
 
   return (
-    <LazyLoadBoundary name="Terminal" resetKey={activeTabId}>
+    <LazyLoadBoundary name="Terminal" resetKey={isVisible ? "active" : "idle"}>
       <Suspense fallback={<TerminalLayerFallback visible={isVisible} />}>
         <LazyTerminalLayer {...props} />
       </Suspense>

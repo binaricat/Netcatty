@@ -820,3 +820,67 @@ test("stepsToJavaScript generates sendLine and waitForPrompt steps", () => {
   assert.match(code, /waitForPrompt\(30000\)/);
   assert.doesNotMatch(code, /waitFor\("DONE"/);
 });
+
+test("SessionOutputBuffer trims via head pointer, clears vacated slots, and compacts under 50k 64B chunks", () => {
+  const maxSize = 64 * 1024;
+  const buffer = new SessionOutputBuffer("stress", maxSize);
+  const chunkCount = 50000;
+  const startedAt = Date.now();
+  for (let i = 0; i < chunkCount; i += 1) {
+    const tag = String(i).padStart(8, "0");
+    buffer.append(`${tag}:${"x".repeat(54)}\n`);
+  }
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(buffer.totalLength, maxSize);
+  const text = buffer.getText();
+  assert.equal(text.length, maxSize);
+  assert.ok(text.startsWith(`${String(chunkCount - 1024).padStart(8, "0")}:`));
+  assert.ok(text.endsWith(`${String(chunkCount - 1).padStart(8, "0")}:${"x".repeat(54)}\n`));
+  assert.ok(buffer.chunks.length < 4096, `expected compacted chunks array, got ${buffer.chunks.length}`);
+  for (let i = 0; i < buffer.chunkHead; i += 1) {
+    assert.equal(buffer.chunks[i], undefined, "vacated head slots must be cleared for GC");
+  }
+  assert.ok(elapsedMs < 2000, `expected linear append throughput for 50k chunks, took ${elapsedMs}ms`);
+
+  buffer.clear();
+  assert.equal(buffer.chunkHead, 0);
+  assert.equal(buffer.chunks.length, 0);
+  assert.equal(buffer.totalLength, 0);
+  assert.equal(buffer.getText(), "");
+
+  // Single oversized chunk still stays intact when it is the sole live entry.
+  const singleOversized = "z".repeat(maxSize + 100);
+  buffer.append(singleOversized);
+  assert.equal(buffer.totalLength, singleOversized.length);
+  assert.equal(buffer.getText(), singleOversized);
+
+  buffer.dispose();
+  assert.equal(buffer.chunkHead, 0);
+  assert.equal(buffer.chunks.length, 0);
+  assert.equal(buffer.totalLength, 0);
+});
+
+test("SessionOutputBuffer length-based helpers use totalLength without joining chunks", () => {
+  const buffer = new SessionOutputBuffer("no-join");
+  for (let i = 0; i < 200; i += 1) {
+    buffer.append(`line-${i}\n`);
+  }
+  const expectedLength = buffer.totalLength;
+  let getTextCalls = 0;
+  const origGetText = buffer.getText.bind(buffer);
+  buffer.getText = () => {
+    getTextCalls += 1;
+    return origGetText();
+  };
+
+  assert.equal(buffer.currentFreshBoundary(), expectedLength - 512);
+  assert.equal(buffer.currentTailFreshBoundary(), expectedLength - 512);
+  buffer.advanceScanOffset(100);
+  assert.equal(buffer.scanOffset, 100);
+  buffer.consumeThroughAbsolute(250);
+  assert.equal(buffer.scanOffset, 250);
+  buffer.invalidateStartupSeed();
+  assert.equal(buffer.scanOffset, expectedLength);
+  assert.equal(getTextCalls, 0, "length-only buffer helpers should not trigger getText()");
+});

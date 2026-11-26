@@ -7,6 +7,8 @@ const test = require("node:test");
 const { setRendererFlowPaused, clearSessionFlowState } = require("../bridges/terminalFlowAck.cjs");
 
 const {
+  collapseCarriageReturns,
+  createWorkerAiJobPollHandler,
   createWorkerAiJobStartHandler,
   registerWorkerAiExecHandlers,
 } = require("./aiExec.cjs");
@@ -716,3 +718,135 @@ for (const channel of ['netcatty:ai:exec', 'netcatty:ai:jobStart']) {
     assert.match(result.error, /start a new chat/);
   });
 }
+
+test("worker exec precheck runs the deterministic checks and never touches the terminal", async () => {
+  const pty = new FakePty();
+  const sessions = new Map([
+    ["ssh", { protocol: "ssh", stream: pty, shellKind: "posix", _promptTrackTail: "", lastIdlePrompt: "" }],
+    ["local-unknown", { protocol: "local", type: "local", stream: new FakePty(), shellKind: "unknown" }],
+    ["no-channel", { protocol: "ssh", shellKind: "posix" }],
+  ]);
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions });
+  const exec = ipcMain.handlers.get("netcatty:ai:exec");
+  const precheck = (sessionId, command, extra = {}) => exec(createFakeEvent(), {
+    sessionId, command, chatSessionId: "chat", commandTimeoutMs: 2000, precheck: true, ...extra,
+  });
+
+  // Passes even though the shell prompt is not ready: readiness is a send-time state.
+  assert.deepEqual(await precheck("ssh", "uptime"), { ok: true });
+  assert.match(
+    (await precheck("ssh", "echo forbidden-word", { commandBlocklist: ["forbidden-word"] })).error,
+    /^Command blocked by safety policy\. Pattern: /,
+  );
+  assert.match((await precheck("local-unknown", "uptime")).error, /AI execution is not supported/);
+  assert.match((await precheck("no-channel", "uptime")).error, /No terminal stream or SSH client available/);
+  assert.deepEqual(await precheck("ghost", "uptime"), { ok: false, error: "Session not found" });
+  assert.deepEqual(pty.writes, [], "a precheck never types into the terminal");
+});
+
+test("worker exec:cancel stops only the chat's foreground execs", async () => {
+  const pty = new FakePty();
+  const session = { protocol: "ssh", stream: pty, shellKind: "posix", _promptTrackTail: "", lastIdlePrompt: "" };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([["ssh", session]]) });
+  const pending = ipcMain.handlers.get("netcatty:ai:exec")(createFakeEvent(), {
+    sessionId: "ssh", chatSessionId: "chat-a", command: "echo hi", commandTimeoutMs: 5000,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const cancel = ipcMain.listeners?.get?.("netcatty:ai:exec:cancel") || ipcMain.handlers.get("netcatty:ai:exec:cancel");
+  assert.equal(typeof cancel, "function", "exec:cancel is registered");
+  cancel(createFakeEvent(), { chatSessionId: "other-chat" });
+  let settled = false;
+  pending.then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(settled, false, "another chat's cancel is ignored");
+  cancel(createFakeEvent(), { chatSessionId: "chat-a" });
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.match(result.error, /cancel/i);
+  assert.deepEqual(pty.writes, []);
+});
+
+test("worker precheck with probe:false opens no channel to the host; the full precheck still probes", async () => {
+  const make = () => {
+    const calls = { probe: 0 };
+    const session = {
+      protocol: "ssh", shellKind: "", stream: new FakePty(), _promptTrackTail: "", lastIdlePrompt: "",
+      _shellKindExecProbe: async () => { calls.probe += 1; return "/bin/bash\n"; },
+    };
+    const ipcMain = createFakeIpcMain();
+    registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([["ssh", session]]) });
+    return { calls, session, exec: (extra) => ipcMain.handlers.get("netcatty:ai:exec")(createFakeEvent(), {
+      sessionId: "ssh", command: "uptime", chatSessionId: "chat", commandTimeoutMs: 2000, precheck: true, ...extra,
+    }) };
+  };
+
+  const light = make();
+  assert.deepEqual(await light.exec({ probe: false }), { ok: true });
+  assert.equal(light.calls.probe, 0, "no remote command before approval");
+  assert.match(
+    (await light.exec({ probe: false, command: "echo forbidden-word", commandBlocklist: ["forbidden-word"] })).error,
+    /^Command blocked by safety policy\. Pattern: /,
+    "user patterns still apply without probing",
+  );
+  assert.equal(light.calls.probe, 0);
+  assert.deepEqual(light.session.stream.writes, []);
+
+  const full = make();
+  assert.deepEqual(await full.exec({}), { ok: true });
+  const probesAfterFirst = full.calls.probe;
+  assert.ok(probesAfterFirst >= 1, "after approval the shell kind is probed as for any exec");
+  assert.deepEqual(await full.exec({}), { ok: true });
+  assert.equal(full.calls.probe, probesAfterFirst, "the result is cached for the real exec");
+});
+
+test("worker collapseCarriageReturns preserves CR/CRLF/trailing-CR semantics and scales linearly on 256KB output", () => {
+  const cases = [
+    ["", ""],
+    ["plain\nline", "plain\nline"],
+    ["\r", ""],
+    ["\r\n", "\n"],
+    ["hello\r\nworld\r", "hello\nworld"],
+    ["10%\r50%\r100%\r\nnext\r", "100%\nnext"],
+    ["a\r\r\r\nb\rc\r", "a\nc"],
+    ["\r\ra\n\rb", "a\nb"],
+  ];
+  for (const [input, expected] of cases) {
+    assert.equal(collapseCarriageReturns(input), expected, `mismatch for ${JSON.stringify(input)}`);
+  }
+
+  const frameCount = 5000;
+  const frames = [];
+  for (let i = 0; i < frameCount; i += 1) {
+    frames.push(`Transfer [${"=".repeat(32)}] ${String(i).padStart(4, "0")}/${frameCount}`);
+  }
+  const stdout = `start\r\n${frames.join("\r")}\r`;
+  assert.ok(stdout.length > 256 * 1024);
+
+  const backgroundJobs = new Map([
+    ["job-cr", {
+      id: "job-cr",
+      sessionId: "ssh-1",
+      chatSessionId: "chat-cr",
+      command: "rsync -P src dst",
+      status: "completed",
+      startedAt: 1,
+      updatedAt: 2,
+      exitCode: 0,
+      error: null,
+      stdout,
+      outputBaseOffset: 0,
+      totalOutputChars: stdout.length,
+      outputTruncated: false,
+    }],
+  ]);
+  const poll = createWorkerAiJobPollHandler({ backgroundJobs });
+  const startedAt = Date.now();
+  const polled = poll(createFakeEvent(), { jobId: "job-cr", chatSessionId: "chat-cr", offset: 0 });
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(polled.ok, true);
+  assert.equal(polled.output, `start\n${frames[frameCount - 1]}`);
+  assert.ok(elapsedMs < 500, `expected linear worker jobPoll CR collapse on 256KB+ output, took ${elapsedMs}ms`);
+});

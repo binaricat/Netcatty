@@ -432,7 +432,7 @@ export const ruCoreMessages: Messages = {
   'settings.appearance.themeColor.dark': 'Палитра тёмной темы',
   'settings.appearance.customCss': 'Пользовательский CSS',
   'settings.appearance.customCss.desc':
-    'Добавьте пользовательский CSS, чтобы настроить внешний вид. Изменения применяются сразу. Выбранные верхние вкладки (`.top-tab[data-active="true"]`) читают `--top-tab-active-bg`, `--top-tab-active-fg` и `--top-tab-active-border`. Не задавайте их, чтобы сохранить текущий вид.',
+    'Добавьте пользовательский CSS, чтобы настроить внешний вид. Изменения применяются сразу.',
   'settings.appearance.customCss.help.ariaLabel': 'Справка по пользовательскому CSS',
   'settings.appearance.customCss.help.title': 'Руководство по пользовательскому CSS',
   'settings.appearance.customCss.help.body': `Основные области интерфейса помечены атрибутом \`data-section\` для CSS-селекторов. Изменения применяются сразу после правки.

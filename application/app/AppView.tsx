@@ -5,7 +5,11 @@ import { activeTabStore, toEditorTabId, useIsEditorTabActive } from '../state/ac
 import { editorTabStore, tabIsDirty } from '../state/editorTabStore';
 import { releaseEditorTabSaveCoordinator, saveEditorTab } from '../state/editorTabSave';
 import { focusEditorInWindow, popOutEditorTab } from '../state/editorWindowClient';
-import { useTerminalHostTreeLayoutWidth } from '../state/terminalHostTreeStore';
+import {
+  useTerminalHostTreeLayoutTransitionAnimated,
+  useTerminalHostTreeLayoutWidth,
+} from '../state/terminalHostTreeStore';
+import { TERMINAL_HOST_TREE_LEFT_TRANSITION } from '../state/terminalHostTreeAnimation';
 import { TopTabs } from '../../components/TopTabs';
 import { VaultView } from '../../components/VaultView';
 import { QuickAddSnippetDialog } from '../../components/QuickAddSnippetDialog';
@@ -67,12 +71,16 @@ const focusEditorWindowTab = (id: string) => { void focusEditorInWindow(id); };
 const TextEditorTabFallback = ({ tabId }: { tabId: string }) => {
   const isVisible = useIsEditorTabActive(tabId);
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
+  const hostTreeLayoutAnimated = useTerminalHostTreeLayoutTransitionAnimated();
   return (
     <div
       style={{
         ...(isVisible ? null : { pointerEvents: 'none', visibility: 'hidden' }),
         zIndex: 20,
         left: hostTreeLayoutWidth,
+        ...(isVisible && hostTreeLayoutAnimated
+          ? { transition: TERMINAL_HOST_TREE_LEFT_TRANSITION }
+          : null),
       }}
       className="netcatty-lazy-fade-in absolute top-0 right-0 bottom-0 min-h-0 flex flex-col bg-background"
       aria-hidden="true"

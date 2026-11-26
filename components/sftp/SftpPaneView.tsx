@@ -12,7 +12,8 @@ import { SftpPaneFileList } from "./SftpPaneFileList";
 import { SftpPaneToolbar } from "./SftpPaneToolbar";
 import { SftpPaneTreeView } from "./SftpPaneTreeView";
 import {
-  useActiveTabId,
+  useIsSftpPaneActive,
+  useIsSftpPaneFocused,
   useSftpConnectedHosts,
   useSftpDrag,
   useSftpHosts,
@@ -37,6 +38,7 @@ import { useGlobalSftpBookmarks } from "./hooks/useGlobalSftpBookmarks";
 import { useSftpHostViewMode } from "../../application/state/sftp/sftpHostViewModeStore";
 import { useSftpListDensity } from "../../application/state/sftp/sftpListDensityStore";
 import { sftpListOrderStore } from "./hooks/useSftpListOrderStore";
+import { sftpKeyboardSelectionStore } from "./hooks/useSftpKeyboardShortcuts";
 import { sftpTreeSelectionStore } from "../../application/state/sftp/sftpTreeSelectionStore";
 import { sftpClipboardUploadStore } from "./clipboardUpload";
 
@@ -54,8 +56,7 @@ interface SftpPaneWrapperProps {
 }
 
 const SftpPaneWrapper = memo<SftpPaneWrapperProps>(({ side, paneId, isFirstPane, children }) => {
-  const activeTabId = useActiveTabId(side);
-  const isActive = activeTabId ? paneId === activeTabId : isFirstPane;
+  const isActive = useIsSftpPaneActive(side, paneId, isFirstPane);
 
   const containerStyle: React.CSSProperties = isActive
     ? {}
@@ -76,13 +77,16 @@ interface SftpPaneViewProps {
   side: "left" | "right";
   pane: SftpPane;
   dialogActionScopeId: string;
-  isPaneFocused: boolean;
+  /** Explicit focus override (used by SftpSidePanel). When omitted, subscribes to sftpFocusStore only while active. */
+  isPaneFocused?: boolean;
   sftpDefaultViewMode: 'list' | 'tree';
   showHeader?: boolean;
   showEmptyHeader?: boolean;
-  onToggleShowHiddenFiles?: () => void;
+  onToggleShowHiddenFiles?: (side: "left" | "right", paneId: string) => void;
   onGoToTerminalCwd?: () => void;
   onLocatePathInTerminal?: () => void;
+  onInsertPathToTerminal?: (path: string) => void;
+  onCdInTerminal?: (dirPath: string) => void;
   followTerminalCwd?: boolean;
   onToggleFollowTerminalCwd?: () => void;
   /** When true, treat this pane as always active (used by SftpSidePanel which manages visibility itself) */
@@ -100,12 +104,18 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   onToggleShowHiddenFiles,
   onGoToTerminalCwd,
   onLocatePathInTerminal,
+  onInsertPathToTerminal,
+  onCdInTerminal,
   followTerminalCwd,
   onToggleFollowTerminalCwd,
   forceActive,
 }) => {
-  const activeTabId = useActiveTabId(side);
-  const isActive = forceActive || (activeTabId ? pane.id === activeTabId : true);
+  const isActive = useIsSftpPaneActive(side, pane.id, true, Boolean(forceActive));
+  const effectiveIsPaneFocused = useIsSftpPaneFocused(side, isActive, isPaneFocused);
+  const handleToggleShowHiddenFiles = useMemo(
+    () => (onToggleShowHiddenFiles ? () => onToggleShowHiddenFiles(side, pane.id) : undefined),
+    [onToggleShowHiddenFiles, side, pane.id],
+  );
 
   const callbacks = useSftpPaneCallbacks(side);
   const { draggedFiles, onDragStart, onDragEnd } = useSftpDrag();
@@ -517,6 +527,10 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     return () => sftpPaneViewModeStore.clear(pane.id);
   }, [pane.id, viewMode]);
 
+  useEffect(() => () => {
+    sftpKeyboardSelectionStore.clear(pane.id);
+  }, [pane.id]);
+
   // When connecting to a host, restore its saved view mode preference
   const prevHostIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -580,6 +594,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         t={t}
         pane={pane}
         onNavigateTo={callbacks.onNavigateTo}
+        onNavigateBack={callbacks.onNavigateBack}
+        onNavigateForward={callbacks.onNavigateForward}
         onSetFilter={callbacks.onSetFilter}
         onSetFilenameEncoding={callbacks.onSetFilenameEncoding}
         onRefresh={handleRefresh}
@@ -616,7 +632,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         onReorderBookmark={reorderBookmark}
         onRenameBookmark={renameBookmark}
         showHiddenFiles={pane.showHiddenFiles}
-        onToggleShowHiddenFiles={onToggleShowHiddenFiles}
+        onToggleShowHiddenFiles={handleToggleShowHiddenFiles}
         onGoToTerminalCwd={onGoToTerminalCwd}
         onLocatePathInTerminal={onLocatePathInTerminal}
         followTerminalCwd={followTerminalCwd}
@@ -664,6 +680,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
             onUploadExternalFiles={handleUploadExternalFiles}
             onUploadExternalFileList={handleUploadExternalFileList}
             onUploadExternalFolder={handleUploadExternalFolder}
+            onInsertPathToTerminal={onInsertPathToTerminal}
+            onCdInTerminal={onCdInTerminal}
             sorting={sortingControls}
             reloadRequest={treeReloadRequest}
           />
@@ -676,7 +694,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           t={t}
           pane={pane}
           side={side}
-          isPaneFocused={isPaneFocused}
+          isPaneFocused={effectiveIsPaneFocused}
           sorting={sortingControls}
           fileListRef={fileListRef}
           handleFileListScroll={handleFileListScroll}
@@ -714,6 +732,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           onEditPermissions={callbacks.onEditPermissions}
           onUploadExternalFileList={handleUploadExternalFileList}
           onUploadExternalFolder={handleUploadExternalFolder}
+          onInsertPathToTerminal={onInsertPathToTerminal}
+          onCdInTerminal={onCdInTerminal}
           isLocal={!!pane.connection?.isLocal}
           openRenameDialog={openRenameDialog}
           openDeleteConfirm={openDeleteConfirm}
@@ -805,7 +825,10 @@ const sftpPaneViewAreEqual = (
   if (prev.onToggleFollowTerminalCwd !== next.onToggleFollowTerminalCwd) return false;
   if (prev.onGoToTerminalCwd !== next.onGoToTerminalCwd) return false;
   if (prev.onLocatePathInTerminal !== next.onLocatePathInTerminal) return false;
+  if (prev.onInsertPathToTerminal !== next.onInsertPathToTerminal) return false;
+  if (prev.onCdInTerminal !== next.onCdInTerminal) return false;
   if (prev.onToggleShowHiddenFiles !== next.onToggleShowHiddenFiles) return false;
+  if (prev.forceActive !== next.forceActive) return false;
 
   return true;
 };

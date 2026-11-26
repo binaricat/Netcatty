@@ -65,6 +65,10 @@ const {
 const { enableSshNoDelay, enableTcpNoDelay } = require("./tcpNoDelay.cjs");
 const { createSshPingLatencyProbe } = require("./sshBridge/sshPingLatency.cjs");
 const {
+  formatChainHopAddress,
+  resolveChainHopAddress,
+} = require("./sshBridge/chainProgress.cjs");
+const {
   configureTerminalSessionDataEmitter,
 } = require("./emitTerminalSessionData.cjs");
 const {
@@ -279,6 +283,12 @@ function resetSessionDecoders(sessionId) {
   sessionDecoders.set(sessionId, decoders);
 }
 
+function clearSessionEncodingState(sessionId) {
+  if (!sessionId) return;
+  sessionEncodings.delete(sessionId);
+  sessionDecoders.delete(sessionId);
+}
+
 function getAuthCacheKey(username, hostname, port) {
   return `${username}@${hostname}:${port || 22}`;
 }
@@ -370,7 +380,8 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
 
   const sendProgress = (hop, total, label, status, error) => {
     if (!sender.isDestroyed()) {
-      sender.send("netcatty:chain:progress", { sessionId, hop, total, label, status, error });
+      const address = resolveChainHopAddress(jumpHosts, targetHost, targetPort, hop);
+      sender.send("netcatty:chain:progress", { sessionId, hop, total, label, status, error, address });
     }
   };
 
@@ -382,7 +393,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
       const jump = jumpHosts[i];
       const isFirst = i === 0;
       const isLast = i === jumpHosts.length - 1;
-      const hopLabel = jump.label || (jump.hostname.includes(':') && !jump.hostname.startsWith('[') ? `[${jump.hostname}]:${jump.port || 22}` : `${jump.hostname}:${jump.port || 22}`);
+      const hopLabel = jump.label || formatChainHopAddress(jump.hostname, jump.port);
 
       sendProgress(i + 1, totalHops + 1, hopLabel, 'connecting');
 
@@ -1546,4 +1557,8 @@ module.exports = {
   _canRetryWithEncryptedDefaultKeys: canRetryWithEncryptedDefaultKeys,
   _canFailedHopRetryWithEncryptedDefaultKeys: canFailedHopRetryWithEncryptedDefaultKeys,
   ensureMoshStatsConnection,
+  clearSessionEncodingState,
+  _getSessionDecoder: getSessionDecoder,
+  _sessionEncodings: sessionEncodings,
+  _sessionDecoders: sessionDecoders,
 };

@@ -65,6 +65,42 @@ const warnOnOutdatedOptimizeDep = (): Plugin => ({
   },
 });
 
+const WOFF2_SOURCE_RE = /url\(\s*['"]?[^)'"]+\.woff2(?:[?#][^)'"]*)?['"]?\s*\)/i;
+const TRAILING_WOFF_FALLBACK_RE = /,\s*url\(\s*['"]?[^)'"]+\.woff(?:[?#][^)'"]*)?['"]?\s*\)\s*format\(\s*['"]woff['"]\s*\)/gi;
+const LEADING_WOFF_FALLBACK_RE = /url\(\s*['"]?[^)'"]+\.woff(?:[?#][^)'"]*)?['"]?\s*\)\s*format\(\s*['"]woff['"]\s*\)\s*,\s*/gi;
+const FONTSOURCE_CSS_ID_RE = /(?:^|[\\/])node_modules[\\/]@fontsource[\\/].+\.css(?:\?.*)?$/i;
+
+export function isFontsourceStylesheetId(id: string): boolean {
+  return FONTSOURCE_CSS_ID_RE.test(id);
+}
+
+/**
+ * Electron/Chromium always supports WOFF2; strip redundant legacy `.woff`
+ * fallbacks from `@fontsource/*` stylesheets when a `.woff2` source is present
+ * so Vite does not emit unused `.woff` assets into `dist/assets/`.
+ */
+export function stripFontsourceWoffFallbacks(css: string): string {
+  return css.replace(/src\s*:[^;]+;/gi, (declaration) => {
+    if (!WOFF2_SOURCE_RE.test(declaration)) {
+      return declaration;
+    }
+    return declaration
+      .replace(TRAILING_WOFF_FALLBACK_RE, '')
+      .replace(LEADING_WOFF_FALLBACK_RE, '');
+  });
+}
+
+const stripFontsourceWoffPlugin = (): Plugin => ({
+  name: 'strip-fontsource-woff-fallbacks',
+  enforce: 'pre',
+  transform(code, id) {
+    if (!isFontsourceStylesheetId(id) || !code.includes('.woff')) return null;
+    const next = stripFontsourceWoffFallbacks(code);
+    if (next === code) return null;
+    return { code: next, map: null };
+  },
+});
+
 const VENDOR_CHUNK_PACKAGES: Array<[chunk: string, packages: string[]]> = [
   ['vendor-radix', ['@radix-ui/']],
   ['vendor-xterm', ['@xterm/']],
@@ -134,7 +170,7 @@ export default defineConfig(() => {
           },
         },
       },
-      plugins: [suppressMonacoSourcemapWarning(), devContentSecurityPolicyPlugin(), warnOnOutdatedOptimizeDep(), tailwindcss(), react()],
+      plugins: [suppressMonacoSourcemapWarning(), devContentSecurityPolicyPlugin(), warnOnOutdatedOptimizeDep(), stripFontsourceWoffPlugin(), tailwindcss(), react()],
       optimizeDeps: {
         include: [
           // Keep the renderer alias pre-bundled so dev serves ESM instead of raw CommonJS.
@@ -142,7 +178,11 @@ export default defineConfig(() => {
           '@/domain/sshPublicKey.shared.cjs',
           '@/domain/singleChannelSshBanner.shared.cjs',
           '@/domain/terminalPromptSecurity.shared.cjs',
+          '@/domain/terminalInterruptParsing.shared.cjs',
+          '@/domain/programmaticCommandLog.shared.cjs',
+          '@/domain/sdkSessionIdentity.shared.cjs',
           '@/domain/totpPrompt.shared.cjs',
+          '@/lib/localShell.cjs',
           '@/domain/pluginRuntimePolicy.cjs',
           '@/domain/pluginGitHubRepository.cjs',
           '@/domain/pluginPermissionDescriptions.cjs',
@@ -155,7 +195,6 @@ export default defineConfig(() => {
           '@ai-sdk/google',
           'streamdown',
           '@streamdown/cjk',
-          '@streamdown/code',
           'zod',
         ],
       },

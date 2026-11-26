@@ -41,6 +41,7 @@ import { resolveBridgeSshAgentAuth, resolveHostAuth } from "../../../domain/sshA
 import { connectionTotpFields } from "../../../domain/totpConfig";
 import { requiresFidoSshAgentAuth } from "../../../domain/fidoSsh";
 import {
+  formatHostPort,
   hostRestrictsExtraSshChannels,
   resolveHostKeepalive,
   resolveTelnetPassword,
@@ -210,6 +211,170 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     ctx.setChainProgress(null);
   };
 
+  const failSessionStart = (term: XTerm, message: string) => {
+    ctx.setError(message);
+    writeTerminalLine(ctx, term, `\r\n[${message}]`);
+    ctx.updateStatus("disconnected");
+  };
+
+  const validateHostProxyConfig = (term: XTerm): boolean => {
+    if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
+      failSessionStart(
+        term,
+        `Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`,
+      );
+      return false;
+    }
+    if (findMissingProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
+      failSessionStart(term, formatMissingProxyIdentityMessage(ctx.host.label || ctx.host.hostname));
+      return false;
+    }
+    if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
+      failSessionStart(term, formatIncompleteProxyIdentityMessage(ctx.host.label || ctx.host.hostname));
+      return false;
+    }
+    return true;
+  };
+
+  const validateJumpHostsProxyConfig = (term: XTerm): boolean => {
+    const unresolvedJumpProxyHost = ctx.resolvedChainHosts.find(
+      (jumpHost) => jumpHost.proxyProfileId && !jumpHost.proxyConfig,
+    );
+    if (unresolvedJumpProxyHost) {
+      failSessionStart(
+        term,
+        `Saved proxy for jump host "${unresolvedJumpProxyHost.label || unresolvedJumpProxyHost.hostname}" is missing. Open host settings and select a valid proxy.`,
+      );
+      return false;
+    }
+    const unresolvedJumpProxyIdentityHost = ctx.resolvedChainHosts.find((jumpHost) =>
+      findMissingProxyIdentityId(jumpHost.proxyConfig, ctx.identities),
+    );
+    if (unresolvedJumpProxyIdentityHost) {
+      failSessionStart(
+        term,
+        formatMissingProxyIdentityMessage(
+          unresolvedJumpProxyIdentityHost.label || unresolvedJumpProxyIdentityHost.hostname,
+        ),
+      );
+      return false;
+    }
+    const incompleteJumpProxyIdentityHost = ctx.resolvedChainHosts.find((jumpHost) =>
+      findIncompleteProxyIdentityId(jumpHost.proxyConfig, ctx.identities),
+    );
+    if (incompleteJumpProxyIdentityHost) {
+      failSessionStart(
+        term,
+        formatIncompleteProxyIdentityMessage(
+          incompleteJumpProxyIdentityHost.label || incompleteJumpProxyIdentityHost.hostname,
+        ),
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const hydrateAndResolveConnectAuth = async (
+    isCurrentAttempt: () => boolean,
+    options?: { clearKeyForPasswordAuth?: boolean },
+  ) => {
+    const pendingAuth = ctx.pendingAuthRef.current;
+    const pendingKeyHydration = hydrateConnectKeysIfNeeded(
+      ctx.keys,
+      collectConnectKeyIds(ctx.host, ctx.resolvedChainHosts, ctx.identities, pendingAuth),
+    );
+    const { keys, unreadableKeyIds } = pendingKeyHydration
+      ? await pendingKeyHydration
+      : { keys: ctx.keys, unreadableKeyIds: new Set<string>() };
+    if (pendingKeyHydration && !isCurrentAttempt()) return null;
+    const resolvedAuth = resolveHostAuth({
+      host: ctx.host,
+      keys,
+      identities: ctx.identities,
+      override: pendingAuth
+        ? {
+          authMethod: pendingAuth.authMethod,
+          username: pendingAuth.username,
+          password: pendingAuth.password,
+          keyId: pendingAuth.keyId,
+          passphrase: pendingAuth.passphrase,
+        }
+        : null,
+    });
+    const authMethod = resolvedAuth.authMethod;
+    const key = options?.clearKeyForPasswordAuth && authMethod === "password"
+      ? undefined
+      : resolvedAuth.key;
+    const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);
+    const effectivePassphrase = sanitizeCredentialValue(resolvedAuth.passphrase);
+    const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(resolvedAuth.password);
+    const hasEncryptedPrimaryKey = Boolean(
+      key && (unreadableKeyIds.has(key.id) || isEncryptedCredentialPlaceholder(key.privateKey)),
+    );
+    return {
+      pendingAuth,
+      keys,
+      unreadableKeyIds,
+      resolvedAuth,
+      authMethod,
+      key,
+      effectivePassword,
+      effectivePassphrase,
+      hasEncryptedPrimaryPassword,
+      hasEncryptedPrimaryKey,
+    };
+  };
+
+  const resolvePrimaryTransportKeyAuth = (
+    hydrated: NonNullable<Awaited<ReturnType<typeof hydrateAndResolveConnectAuth>>>,
+  ) => {
+    const {
+      resolvedAuth,
+      authMethod,
+      key,
+      effectivePassword,
+      hasEncryptedPrimaryPassword,
+      hasEncryptedPrimaryKey,
+    } = hydrated;
+    const allowsLocalIdentityFallback = !resolvedAuth.keyId;
+    const referenceKeyPath = key?.source === 'reference' ? key.filePath : undefined;
+    const identityFilePaths = authMethod === "password"
+      ? undefined
+      : referenceKeyPath
+        ? [referenceKeyPath]
+        : allowsLocalIdentityFallback
+          ? ctx.host.identityFilePaths
+          : undefined;
+    const agentAuth = resolveBridgeSshAgentAuth(ctx.host, key, authMethod);
+    const usesSystemAgent = agentAuth.useSshAgent === true;
+    const hasKeyMaterial = usesSystemAgent || (
+      (!!sanitizeCredentialValue(key?.privateKey) || !!identityFilePaths?.length)
+      && (authMethod !== "password" || ctx.host.useSshAgent === true)
+    );
+    const hasPassword = !!effectivePassword;
+    const needsCredentialReentry =
+      (authMethod === "password" && hasEncryptedPrimaryPassword && !hasPassword) ||
+      (authMethod !== "password" && authMethod !== "auto" && hasEncryptedPrimaryKey && !hasKeyMaterial && !hasPassword);
+    if (needsCredentialReentry) {
+      ctx.setError(null);
+      ctx.setNeedsAuth(true);
+      ctx.setAuthRetryMessage(
+        tr(
+          "terminal.auth.credentialsUnavailable",
+          "Saved credentials cannot be decrypted on this device. Please re-enter and save them again.",
+        ),
+      );
+      ctx.setAuthPassword("");
+      ctx.setStatus("connecting");
+    }
+    return {
+      identityFilePaths,
+      agentAuth,
+      usesSystemAgent,
+      needsCredentialReentry,
+    };
+  };
+
   const createAttemptGuards = (options?: TerminalSessionStartOptions) => {
     const bootEpoch = ctx.bootEpochRef?.current ?? 0;
     const isBootEpochCurrent = createBootAttemptGuard(ctx);
@@ -314,108 +479,37 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       const message = `${base} (${missingChainHostIds.slice(0, 2).join(", ")}${suffix})`;
       ctx.setNeedsAuth(false);
       ctx.setAuthRetryMessage(null);
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
+      failSessionStart(term, message);
       return;
     }
 
-    const pendingAuth = ctx.pendingAuthRef.current;
-    const pendingKeyHydration = hydrateConnectKeysIfNeeded(
-      ctx.keys,
-      collectConnectKeyIds(ctx.host, ctx.resolvedChainHosts, ctx.identities, pendingAuth),
-    );
-    const { keys, unreadableKeyIds } = pendingKeyHydration
-      ? await pendingKeyHydration
-      : { keys: ctx.keys, unreadableKeyIds: new Set<string>() };
-    if (pendingKeyHydration && !isCurrentAttempt()) return;
-    const resolvedAuth = resolveHostAuth({
-      host: ctx.host,
+    const hydratedAuth = await hydrateAndResolveConnectAuth(isCurrentAttempt);
+    if (!hydratedAuth) return;
+    const {
+      pendingAuth,
       keys,
-      identities: ctx.identities,
-      override: pendingAuth
-        ? {
-          authMethod: pendingAuth.authMethod,
-          username: pendingAuth.username,
-          password: pendingAuth.password,
-          keyId: pendingAuth.keyId,
-          passphrase: pendingAuth.passphrase,
-        }
-        : null,
-    });
-
+      unreadableKeyIds,
+      resolvedAuth,
+      key,
+      effectivePassword,
+      effectivePassphrase,
+      hasEncryptedPrimaryPassword,
+      hasEncryptedPrimaryKey,
+    } = hydratedAuth;
     const effectiveUsername = resolvedAuth.username || "root";
-    const key = resolvedAuth.key;
-    const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);
-    const effectivePassphrase = sanitizeCredentialValue(resolvedAuth.passphrase);
-    const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(resolvedAuth.password);
-    const hasEncryptedPrimaryKey = Boolean(
-      key && (unreadableKeyIds.has(key.id) || isEncryptedCredentialPlaceholder(key.privateKey)),
-    );
 
     const isAuthError = (err: unknown): boolean => {
       if (!(err instanceof Error)) return false;
       return isAuthFailureMessage(err.message);
     };
 
-    if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
-      const message = `Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`;
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
-    if (findMissingProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-      const message = formatMissingProxyIdentityMessage(ctx.host.label || ctx.host.hostname);
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
-    if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-      const message = formatIncompleteProxyIdentityMessage(ctx.host.label || ctx.host.hostname);
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
+    if (!validateHostProxyConfig(term)) return;
     const proxyConfig = ctx.host.proxyConfig
       ? resolveProxyConfigAuth(ctx.host.proxyConfig, ctx.identities)
       : undefined;
 
     const jumpHostsWithUnavailableCredentials: string[] = [];
-    const unresolvedJumpProxyHost = ctx.resolvedChainHosts.find((jumpHost) => jumpHost.proxyProfileId && !jumpHost.proxyConfig);
-    if (unresolvedJumpProxyHost) {
-      const message = `Saved proxy for jump host "${unresolvedJumpProxyHost.label || unresolvedJumpProxyHost.hostname}" is missing. Open host settings and select a valid proxy.`;
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
-    const unresolvedJumpProxyIdentityHost = ctx.resolvedChainHosts.find((jumpHost) =>
-      findMissingProxyIdentityId(jumpHost.proxyConfig, ctx.identities),
-    );
-    if (unresolvedJumpProxyIdentityHost) {
-      const message = formatMissingProxyIdentityMessage(
-        unresolvedJumpProxyIdentityHost.label || unresolvedJumpProxyIdentityHost.hostname,
-      );
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
-    const incompleteJumpProxyIdentityHost = ctx.resolvedChainHosts.find((jumpHost) =>
-      findIncompleteProxyIdentityId(jumpHost.proxyConfig, ctx.identities),
-    );
-    if (incompleteJumpProxyIdentityHost) {
-      const message = formatIncompleteProxyIdentityMessage(
-        incompleteJumpProxyIdentityHost.label || incompleteJumpProxyIdentityHost.hostname,
-      );
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
+    if (!validateJumpHostsProxyConfig(term)) return;
     const jumpHosts = ctx.resolvedChainHosts.map<NetcattyJumpHost>((jumpHost, index) => {
       const jumpAuth = resolveHostAuth({
         host: jumpHost,
@@ -549,12 +643,15 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         totalHops,
         currentHostLabel:
           jumpHosts[0]?.label || jumpHosts[0]?.hostname || ctx.host.hostname,
+        currentHostAddress: jumpHosts[0]?.hostname
+          ? formatHostPort(jumpHosts[0].hostname, jumpHosts[0].port || 22)
+          : undefined,
         connectionPhase: 'connecting',
       });
     }
 
     {
-      const unsub = ctx.terminalBackend.onChainProgress((sid, hop, total, label, status, error) => {
+      const unsub = ctx.terminalBackend.onChainProgress((sid, hop, total, label, status, error, address) => {
         // P1: Only process events for this session
         if (sid !== ctx.sessionId) return;
         // Disconnect/reconnect can leave two SSH starts sharing this UI
@@ -567,6 +664,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
             currentHop: hop,
             totalHops: total,
             currentHostLabel: label,
+            currentHostAddress: address,
             connectionPhase: status,
           });
         }
@@ -936,39 +1034,17 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     if (options?.signal?.aborted) return;
     const { isCurrentAttempt, ignoreStaleAttemptUi, bootEpoch } = createAttemptGuards(options);
     if (!ctx.terminalBackend.telnetAvailable()) {
-      ctx.setError("Telnet bridge unavailable. Please run the desktop build.");
-      writeTerminalLine(ctx, term, "\r\n[Telnet bridge unavailable. Please run the desktop build.]");
-      ctx.updateStatus("disconnected");
+      failSessionStart(term, "Telnet bridge unavailable. Please run the desktop build.");
       return;
     }
 
-    if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
-      const message = `Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`;
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
-    if (findMissingProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-      const message = formatMissingProxyIdentityMessage(ctx.host.label || ctx.host.hostname);
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
-    if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-      const message = formatIncompleteProxyIdentityMessage(ctx.host.label || ctx.host.hostname);
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
+    if (!validateHostProxyConfig(term)) return;
 
     if (hasUsableProxyConfig(ctx.host.proxyConfig)) {
-      const message = "Telnet does not support proxy connections. Use SSH for this host or remove the proxy from this connection.";
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
+      failSessionStart(
+        term,
+        "Telnet does not support proxy connections. Use SSH for this host or remove the proxy from this connection.",
+      );
       return;
     }
 
@@ -999,17 +1075,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         ? ctx.identities.find((identity) => identity.id === ctx.host.telnetIdentityId)
         : undefined;
       if (ctx.host.telnetIdentityId && !telnetIdentity) {
-        const message = "Telnet identity is missing. Open host settings and select a valid identity.";
-        ctx.setError(message);
-        writeTerminalLine(ctx, term, `\r\n[${message}]`);
-        ctx.updateStatus("disconnected");
+        failSessionStart(term, "Telnet identity is missing. Open host settings and select a valid identity.");
         return;
       }
       if (telnetIdentity && (!telnetIdentity.username?.trim() || telnetIdentity.password === undefined)) {
-        const message = "Telnet identity must include a username and password. Open host settings and select a password identity.";
-        ctx.setError(message);
-        writeTerminalLine(ctx, term, `\r\n[${message}]`);
-        ctx.updateStatus("disconnected");
+        failSessionStart(
+          term,
+          "Telnet identity must include a username and password. Open host settings and select a password identity.",
+        );
         return;
       }
       const telnetUsername = telnetIdentity
@@ -1027,9 +1100,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         );
         ctx.setNeedsAuth(false);
         ctx.setAuthRetryMessage(null);
-        ctx.setError(message);
-        writeTerminalLine(ctx, term, `\r\n[${message}]`);
-        ctx.updateStatus("disconnected");
+        failSessionStart(term, message);
         return;
       }
       const commandToRun = resolveStartupCommand(ctx);
@@ -1131,9 +1202,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     if (options?.signal?.aborted) return;
     const { isCurrentAttempt, ignoreStaleAttemptUi, bootEpoch } = createAttemptGuards(options);
     if (!ctx.terminalBackend.moshAvailable()) {
-      ctx.setError("Mosh bridge unavailable. Please run the desktop build.");
-      writeTerminalLine(ctx, term, "\r\n[Mosh bridge unavailable. Please run the desktop build.]");
-      ctx.updateStatus("disconnected");
+      failSessionStart(term, "Mosh bridge unavailable. Please run the desktop build.");
       return;
     }
 
@@ -1143,111 +1212,50 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     let cancelPendingStartupCommand: (() => void) | undefined;
 
     try {
-      const stopMosh = (message: string) => {
-        ctx.setError(message);
-        writeTerminalLine(ctx, term, `\r\n[${message}]`);
-        ctx.updateStatus("disconnected");
-      };
-
-      if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
-        stopMosh(`Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`);
-        return;
-      }
-      if (findMissingProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-        stopMosh(formatMissingProxyIdentityMessage(ctx.host.label || ctx.host.hostname));
-        return;
-      }
-      if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-        stopMosh(formatIncompleteProxyIdentityMessage(ctx.host.label || ctx.host.hostname));
-        return;
-      }
+      if (!validateHostProxyConfig(term)) return;
 
       const hasConfiguredJumpHostChain =
         (ctx.host.hostChain?.hostIds?.length || 0) > 0 ||
         ctx.resolvedChainHosts.length > 0;
       if (hasConfiguredJumpHostChain) {
-        stopMosh("Mosh does not support jump host chains. Use SSH for this host or remove the jump hosts from this connection.");
+        failSessionStart(
+          term,
+          "Mosh does not support jump host chains. Use SSH for this host or remove the jump hosts from this connection.",
+        );
         return;
       }
 
-      const unresolvedJumpProxyHost = ctx.resolvedChainHosts.find((jumpHost) => jumpHost.proxyProfileId && !jumpHost.proxyConfig);
-      if (unresolvedJumpProxyHost) {
-        stopMosh(`Saved proxy for jump host "${unresolvedJumpProxyHost.label || unresolvedJumpProxyHost.hostname}" is missing. Open host settings and select a valid proxy.`);
-        return;
-      }
+      if (!validateJumpHostsProxyConfig(term)) return;
 
       const hasConfiguredProxy =
         hasUsableProxyConfig(ctx.host.proxyConfig) ||
         ctx.resolvedChainHosts.some((jumpHost) => hasUsableProxyConfig(jumpHost.proxyConfig));
       if (hasConfiguredProxy) {
-        stopMosh("Mosh does not support proxy connections. Use SSH for this host or remove the proxy from this connection.");
-        return;
-      }
-
-      const pendingAuth = ctx.pendingAuthRef.current;
-      const pendingKeyHydration = hydrateConnectKeysIfNeeded(
-        ctx.keys,
-        collectConnectKeyIds(ctx.host, ctx.resolvedChainHosts, ctx.identities, pendingAuth),
-      );
-      const { keys, unreadableKeyIds } = pendingKeyHydration
-        ? await pendingKeyHydration
-        : { keys: ctx.keys, unreadableKeyIds: new Set<string>() };
-      if (pendingKeyHydration && !isCurrentAttempt()) return;
-      const resolvedAuth = resolveHostAuth({
-        host: ctx.host,
-        keys,
-        identities: ctx.identities,
-        override: pendingAuth
-          ? {
-            authMethod: pendingAuth.authMethod,
-            username: pendingAuth.username,
-            password: pendingAuth.password,
-            keyId: pendingAuth.keyId,
-            passphrase: pendingAuth.passphrase,
-          }
-          : null,
-      });
-      const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);
-      const effectivePassphrase = sanitizeCredentialValue(resolvedAuth.passphrase);
-      const authMethod = resolvedAuth.authMethod;
-      const key = authMethod === "password" ? undefined : resolvedAuth.key;
-      const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(resolvedAuth.password);
-      const hasEncryptedPrimaryKey = Boolean(
-        key && (unreadableKeyIds.has(key.id) || isEncryptedCredentialPlaceholder(key.privateKey)),
-      );
-      const allowsLocalIdentityFallback = !resolvedAuth.keyId;
-      const moshReferenceKeyPath = key?.source === 'reference' ? key.filePath : undefined;
-      const moshIdentityFilePaths = authMethod === "password"
-        ? undefined
-        : moshReferenceKeyPath
-          ? [moshReferenceKeyPath]
-          : allowsLocalIdentityFallback
-            ? ctx.host.identityFilePaths
-            : undefined;
-      const moshAgentAuth = resolveBridgeSshAgentAuth(ctx.host, key, authMethod);
-      const usesSystemAgent = moshAgentAuth.useSshAgent === true;
-      const hasKeyMaterial = usesSystemAgent || (
-        (!!sanitizeCredentialValue(key?.privateKey) || !!moshIdentityFilePaths?.length)
-        && (authMethod !== "password" || ctx.host.useSshAgent === true)
-      );
-      const hasPassword = !!effectivePassword;
-      const needsCredentialReentry =
-        (authMethod === "password" && hasEncryptedPrimaryPassword && !hasPassword) ||
-        (authMethod !== "password" && authMethod !== "auto" && hasEncryptedPrimaryKey && !hasKeyMaterial && !hasPassword);
-
-      if (needsCredentialReentry) {
-        ctx.setError(null);
-        ctx.setNeedsAuth(true);
-        ctx.setAuthRetryMessage(
-          tr(
-            "terminal.auth.credentialsUnavailable",
-            "Saved credentials cannot be decrypted on this device. Please re-enter and save them again.",
-          ),
+        failSessionStart(
+          term,
+          "Mosh does not support proxy connections. Use SSH for this host or remove the proxy from this connection.",
         );
-        ctx.setAuthPassword("");
-        ctx.setStatus("connecting");
         return;
       }
+
+      const hydratedAuth = await hydrateAndResolveConnectAuth(isCurrentAttempt, {
+        clearKeyForPasswordAuth: true,
+      });
+      if (!hydratedAuth) return;
+      const {
+        resolvedAuth,
+        authMethod,
+        key,
+        effectivePassword,
+        effectivePassphrase,
+      } = hydratedAuth;
+      const {
+        identityFilePaths: moshIdentityFilePaths,
+        agentAuth: moshAgentAuth,
+        usesSystemAgent,
+        needsCredentialReentry,
+      } = resolvePrimaryTransportKeyAuth(hydratedAuth);
+      if (needsCredentialReentry) return;
 
       const moshEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
 
@@ -1397,30 +1405,16 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     }
 
     try {
-      const stopEt = (message: string) => {
-        ctx.setError(message);
-        writeTerminalLine(ctx, term, `\r\n[${message}]`);
-        ctx.updateStatus("disconnected");
-      };
-
-      if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
-        stopEt(`Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`);
-        return;
-      }
-      if (findMissingProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-        stopEt(formatMissingProxyIdentityMessage(ctx.host.label || ctx.host.hostname));
-        return;
-      }
-      if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-        stopEt(formatIncompleteProxyIdentityMessage(ctx.host.label || ctx.host.hostname));
-        return;
-      }
+      if (!validateHostProxyConfig(term)) return;
 
       if (hasUsableProxyConfig(ctx.host.proxyConfig)) {
-        stopEt(tr(
-          "terminal.et.proxyUnsupported",
-          "EternalTerminal does not currently support Netcatty proxy settings. Use SSH or remove the proxy for this host.",
-        ));
+        failSessionStart(
+          term,
+          tr(
+            "terminal.et.proxyUnsupported",
+            "EternalTerminal does not currently support Netcatty proxy settings. Use SSH or remove the proxy for this host.",
+          ),
+        );
         return;
       }
 
@@ -1430,10 +1424,13 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       // a single (or zero) hop.
       const configuredChainHostCount = ctx.host.hostChain?.hostIds?.length ?? 0;
       if (configuredChainHostCount > 1 || ctx.resolvedChainHosts.length > 1) {
-        stopEt(tr(
-          "terminal.et.multiJumpUnsupported",
-          "EternalTerminal currently supports at most one jump host in Netcatty.",
-        ));
+        failSessionStart(
+          term,
+          tr(
+            "terminal.et.multiJumpUnsupported",
+            "EternalTerminal currently supports at most one jump host in Netcatty.",
+          ),
+        );
         return;
       }
 
@@ -1449,98 +1446,32 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         const suffix = missingChainHostIds.length > 2
           ? ` +${missingChainHostIds.length - 2}`
           : "";
-        stopEt(`${base} (${missingChainHostIds.slice(0, 2).join(", ")}${suffix})`);
+        failSessionStart(term, `${base} (${missingChainHostIds.slice(0, 2).join(", ")}${suffix})`);
         return;
       }
 
-      const unresolvedJumpProxyHost = ctx.resolvedChainHosts.find((jumpHost) => jumpHost.proxyProfileId && !jumpHost.proxyConfig);
-      if (unresolvedJumpProxyHost) {
-        stopEt(`Saved proxy for jump host "${unresolvedJumpProxyHost.label || unresolvedJumpProxyHost.hostname}" is missing. Open host settings and select a valid proxy.`);
-        return;
-      }
-      const unresolvedJumpProxyIdentityHost = ctx.resolvedChainHosts.find((jumpHost) =>
-        findMissingProxyIdentityId(jumpHost.proxyConfig, ctx.identities),
-      );
-      if (unresolvedJumpProxyIdentityHost) {
-        stopEt(formatMissingProxyIdentityMessage(
-          unresolvedJumpProxyIdentityHost.label || unresolvedJumpProxyIdentityHost.hostname,
-        ));
-        return;
-      }
-      const incompleteJumpProxyIdentityHost = ctx.resolvedChainHosts.find((jumpHost) =>
-        findIncompleteProxyIdentityId(jumpHost.proxyConfig, ctx.identities),
-      );
-      if (incompleteJumpProxyIdentityHost) {
-        stopEt(formatIncompleteProxyIdentityMessage(
-          incompleteJumpProxyIdentityHost.label || incompleteJumpProxyIdentityHost.hostname,
-        ));
-        return;
-      }
+      if (!validateJumpHostsProxyConfig(term)) return;
 
-      const pendingAuth = ctx.pendingAuthRef.current;
-      const pendingKeyHydration = hydrateConnectKeysIfNeeded(
-        ctx.keys,
-        collectConnectKeyIds(ctx.host, ctx.resolvedChainHosts, ctx.identities, pendingAuth),
-      );
-      const { keys, unreadableKeyIds } = pendingKeyHydration
-        ? await pendingKeyHydration
-        : { keys: ctx.keys, unreadableKeyIds: new Set<string>() };
-      if (pendingKeyHydration && !isCurrentAttempt()) return;
-      const resolvedAuth = resolveHostAuth({
-        host: ctx.host,
-        keys,
-        identities: ctx.identities,
-        override: pendingAuth
-          ? {
-            authMethod: pendingAuth.authMethod,
-            username: pendingAuth.username,
-            password: pendingAuth.password,
-            keyId: pendingAuth.keyId,
-            passphrase: pendingAuth.passphrase,
-          }
-          : null,
+      const hydratedAuth = await hydrateAndResolveConnectAuth(isCurrentAttempt, {
+        clearKeyForPasswordAuth: true,
       });
-      const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);
-      const effectivePassphrase = sanitizeCredentialValue(resolvedAuth.passphrase);
-      const authMethod = resolvedAuth.authMethod;
-      const key = authMethod === "password" ? undefined : resolvedAuth.key;
-      const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(resolvedAuth.password);
-      const hasEncryptedPrimaryKey = Boolean(
-        key && (unreadableKeyIds.has(key.id) || isEncryptedCredentialPlaceholder(key.privateKey)),
-      );
-      const allowsLocalIdentityFallback = !resolvedAuth.keyId;
-      const etReferenceKeyPath = key?.source === 'reference' ? key.filePath : undefined;
-      const etIdentityFilePaths = authMethod === "password"
-        ? undefined
-        : etReferenceKeyPath
-          ? [etReferenceKeyPath]
-          : allowsLocalIdentityFallback
-            ? ctx.host.identityFilePaths
-            : undefined;
-      const etAgentAuth = resolveBridgeSshAgentAuth(ctx.host, key, authMethod);
-      const usesSystemAgent = etAgentAuth.useSshAgent === true;
-      const hasKeyMaterial = usesSystemAgent || (
-        (!!sanitizeCredentialValue(key?.privateKey) || !!etIdentityFilePaths?.length)
-        && (authMethod !== "password" || ctx.host.useSshAgent === true)
-      );
-      const hasPassword = !!effectivePassword;
-      const needsCredentialReentry =
-        (authMethod === "password" && hasEncryptedPrimaryPassword && !hasPassword) ||
-        (authMethod !== "password" && authMethod !== "auto" && hasEncryptedPrimaryKey && !hasKeyMaterial && !hasPassword);
-
-      if (needsCredentialReentry) {
-        ctx.setError(null);
-        ctx.setNeedsAuth(true);
-        ctx.setAuthRetryMessage(
-          tr(
-            "terminal.auth.credentialsUnavailable",
-            "Saved credentials cannot be decrypted on this device. Please re-enter and save them again.",
-          ),
-        );
-        ctx.setAuthPassword("");
-        ctx.setStatus("connecting");
-        return;
-      }
+      if (!hydratedAuth) return;
+      const {
+        keys,
+        unreadableKeyIds,
+        resolvedAuth,
+        authMethod,
+        key,
+        effectivePassword,
+        effectivePassphrase,
+      } = hydratedAuth;
+      const {
+        identityFilePaths: etIdentityFilePaths,
+        agentAuth: etAgentAuth,
+        usesSystemAgent,
+        needsCredentialReentry,
+      } = resolvePrimaryTransportKeyAuth(hydratedAuth);
+      if (needsCredentialReentry) return;
 
       const jumpHostsWithUnavailableCredentials: string[] = [];
       const unsupportedJumpProxies: string[] = [];
@@ -1620,10 +1551,13 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       });
 
       if (unsupportedJumpProxies.length > 0) {
-        stopEt(tr(
-          "terminal.et.proxyUnsupported",
-          "EternalTerminal does not currently support Netcatty proxy settings. Use SSH or remove the proxy for this host.",
-        ));
+        failSessionStart(
+          term,
+          tr(
+            "terminal.et.proxyUnsupported",
+            "EternalTerminal does not currently support Netcatty proxy settings. Use SSH or remove the proxy for this host.",
+          ),
+        );
         return;
       }
 
@@ -1636,7 +1570,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           "terminal.auth.jumpCredentialsUnavailable",
           "A jump host has saved credentials that cannot be decrypted on this device. Open host settings and re-enter them.",
         );
-        stopEt(`${base} (${jumpList}${suffix})`);
+        failSessionStart(term, `${base} (${jumpList}${suffix})`);
         return;
       }
 

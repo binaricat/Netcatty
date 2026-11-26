@@ -37,6 +37,7 @@ import { EMPTY_ACTIVE_FORMATS } from "./noteEditorTypes";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { ToolbarOverflowMenu, useToolbarOverflowClose } from "../ui/toolbar-item-layout";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 
 export interface NoteToolbarProps {
@@ -102,21 +103,30 @@ const NoteToolbarPopover: React.FC<{
   children: React.ReactNode;
 }> = ({ label, icon, collapsed, contentClassName, children }) => {
   const closeOverflow = useToolbarOverflowClose();
+  const triggerButton = (
+    <button
+      type="button"
+      className={collapsed ? overflowItemClass : toolbarButtonClass}
+      aria-label={label}
+      data-toolbar-overflow-keep-open="true"
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      {icon}
+      {collapsed && <span>{label}</span>}
+    </button>
+  );
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={collapsed ? overflowItemClass : toolbarButtonClass}
-          title={label}
-          aria-label={label}
-          data-toolbar-overflow-keep-open="true"
-          onMouseDown={(event) => event.preventDefault()}
-        >
-          {icon}
-          {collapsed && <span>{label}</span>}
-        </button>
-      </PopoverTrigger>
+      {collapsed ? (
+        <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{label}</TooltipContent>
+        </Tooltip>
+      )}
       <PopoverContent
         align="start"
         className={contentClassName}
@@ -411,9 +421,9 @@ export const NoteToolbar: React.FC<NoteToolbarProps> = ({
       );
     }
     const active = "format" in item && activeFormats[item.format];
-    return (
+    const actionButton = (
       <button
-        key={item.id}
+        key={collapsed ? item.id : undefined}
         type="button"
         className={cn(
           collapsed ? overflowItemClass : toolbarButtonClass,
@@ -421,12 +431,18 @@ export const NoteToolbar: React.FC<NoteToolbarProps> = ({
         )}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => onAction?.(item.id)}
-        title={label}
         aria-label={label}
       >
         <Icon size={14} />
         {collapsed && <span>{label}</span>}
       </button>
+    );
+    if (collapsed) return actionButton;
+    return (
+      <Tooltip key={item.id}>
+        <TooltipTrigger asChild>{actionButton}</TooltipTrigger>
+        <TooltipContent side="bottom">{label}</TooltipContent>
+      </Tooltip>
     );
   };
 

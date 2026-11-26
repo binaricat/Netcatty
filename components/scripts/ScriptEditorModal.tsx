@@ -6,7 +6,7 @@ import { DEFAULT_SCRIPT_TEMPLATE } from '@/domain/snippetScript.ts';
 import { scheduleWindowInputFocus } from '@/application/state/windowInputFocus';
 import { SelectHostDialog } from '@/components/SelectHostDialog';
 import { SelectGroupDialog } from '@/components/SelectGroupDialog';
-import { ScriptCodeEditor } from './ScriptCodeEditor';
+import { LazyScriptCodeEditor } from './LazyScriptCodeEditor';
 import { ScriptMetaFields } from './ScriptMetaFields';
 import { SnippetTargetsSection } from '@/components/snippets/SnippetTargetsSection';
 import { resolveSnippetTargetGroupsForSave } from '@/domain/snippetTargets.ts';
@@ -169,7 +169,7 @@ export const ScriptEditorModal: React.FC<ScriptEditorModalProps> = ({
 
             <div className="flex-1 min-h-0 relative">
               {open ? (
-                <ScriptCodeEditor
+                <LazyScriptCodeEditor
                   value={editorValue}
                   onChange={(command) => onChange({ ...snippet, command })}
                   language={language}

@@ -336,15 +336,31 @@ function createDefaultPluginHostRpcRegistry(options) {
     validateParams: (params) => options.assertStorageParams(params),
   });
   registry.registerRequest("storage.keys", async (params, context) => {
-    return { keys: options.database.listKeys(context.pluginId) };
+    const keys = options.database.listKeys(context.pluginId);
+    const prefix = params?.prefix;
+    return {
+      keys: typeof prefix === "string" && prefix.length > 0
+        ? keys.filter((key) => key.startsWith(prefix))
+        : keys,
+    };
   }, {
     metadata: { capability: "storage", mutating: false, permission: "storage" },
     authorization: { permission: "storage", resources: ["*"], reason: "List plugin storage keys" },
     validateParams: (params) => {
-      if (params && (typeof params !== "object" || Array.isArray(params) || Object.keys(params).length > 0)) {
-        throw new TypeError("storage.keys does not accept parameters");
+      if (params === undefined || params === null) return {};
+      if (typeof params !== "object" || Array.isArray(params)) {
+        throw new TypeError("storage.keys parameters must be an object");
       }
-      return params;
+      const keys = Object.keys(params);
+      if (keys.some((key) => key !== "prefix")) {
+        throw new TypeError("storage.keys only accepts an optional prefix parameter");
+      }
+      if (params.prefix !== undefined) {
+        if (typeof params.prefix !== "string" || params.prefix.length > 256 || params.prefix.includes("\0")) {
+          throw new TypeError("storage.keys prefix is invalid");
+        }
+      }
+      return params.prefix === undefined ? {} : { prefix: params.prefix };
     },
   });
   registry.registerNotification("log.write", async (params, context) => {

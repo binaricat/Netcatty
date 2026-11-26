@@ -324,3 +324,18 @@ test("resolveSettingsPlatform maps Electron-style platform strings", () => {
   assert.equal(resolveSettingsPlatform("Linux x86_64"), "linux");
   assert.equal(resolveSettingsPlatform(""), "linux");
 });
+
+test("settings search finds the SFTP default download folder from the real locales", () => {
+  const tZhReal = (key: string) => zhCN[key] ?? key;
+  const tEnReal = (key: string) => en[key] ?? key;
+  for (const [t, queries] of [
+    [tZhReal, ["默认下载文件夹", "下载位置", "下载目录"]],
+    [tEnReal, ["default download folder", "download location", "Downloads folder"]],
+  ] as const) {
+    for (const query of queries) {
+      const hit = filterSettingsSearchCatalog(query, t).find((hit) => hit.entry.id === "sftp-default-download-directory");
+      assert.ok(hit, `${query} should find sftp-default-download-directory`);
+      assert.equal(hit.entry.tab, "file-associations");
+    }
+  }
+});

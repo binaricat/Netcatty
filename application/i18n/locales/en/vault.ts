@@ -421,6 +421,8 @@ export const enVaultMessages: Messages = {
   'sftp.encoding.auto': 'Auto',
   'sftp.encoding.utf8': 'UTF-8',
   'sftp.encoding.gb18030': 'GB18030',
+  'sftp.goBack': 'Go back',
+  'sftp.goForward': 'Go forward',
   'sftp.goHome': 'Go to home',
   'sftp.goRoot': 'Go to root',
   'sftp.folderName': 'Folder name',
@@ -491,6 +493,9 @@ export const enVaultMessages: Messages = {
 
   // SFTP File Opener
   'sftp.context.copyPath': 'Copy file path',
+  'sftp.context.insertPathToTerminal': 'Insert path into terminal',
+  'sftp.context.cdInTerminal': 'Open in terminal (cd)',
+  'sftp.terminal.insertBlockedUnsafeQuote': 'Cannot insert path while the terminal cursor is inside an unclosed quote or escape',
   'sftp.context.openWithDefault': 'Open with system default',
   'sftp.context.openWith': 'Open with...',
   'sftp.context.edit': 'Edit',
@@ -614,6 +619,13 @@ export const enVaultMessages: Messages = {
   'settings.sftp.packedDownload': 'Packed downloads',
   'settings.sftp.packedDownload.enable': 'Pack folders and multiple items for download',
   'settings.sftp.packedDownload.enableDesc': 'Download the selection in one stream and restore its original layout on this device. If the server cannot pack it, download files individually.',
+  'settings.sftp.downloadLocation': 'Download location',
+  'settings.sftp.downloadLocation.directory': 'Default download folder',
+  'settings.sftp.downloadLocation.directoryDesc': 'SFTP download dialogs open in this folder. If it is not set or no longer exists, the system Downloads folder is used.',
+  'settings.sftp.downloadLocation.systemDefault': 'System Downloads folder',
+  'settings.sftp.downloadLocation.browse': 'Browse…',
+  'settings.sftp.downloadLocation.reset': 'Use the system Downloads folder',
+  'settings.sftp.downloadLocation.select': 'Choose default download folder',
 
   'settings.sftp.skipUnchanged.enable': 'Skip unchanged files',
   'settings.sftp.skipUnchanged.enableDesc': 'Skip files whose size and modification time already match the destination (rsync-style). Disabled when replacing a folder into a staging path.',

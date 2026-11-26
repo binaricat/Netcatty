@@ -102,6 +102,9 @@ const CATTY_CAPABILITY_DENYLIST = new Set([
   "session.cancel",
   "session.resume",
   "session.get",
+  // Fan-out is MCP-only for now: Catty has no completed-write replay for it and
+  // its SDK approval gate would stack on the bridge's fresh approval.
+  "terminal.executeBulk",
 ]);
 
 function isCattyOnlyCapability(capability) {

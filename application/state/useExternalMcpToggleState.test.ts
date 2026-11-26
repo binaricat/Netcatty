@@ -787,4 +787,130 @@ describe('External MCP manual enable privacy gate', () => {
       restoreStorage();
     }
   });
+
+  it('ref-counts a single 3s poller across multiple mounted hooks, pauses when hidden, and syncs on visible', async (t) => {
+    const React = await import('react');
+    const { act, create } = await import('react-test-renderer');
+    const { useExternalMcpToggleState } = await import('./useExternalMcpToggleState.ts');
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 10_000 });
+    const restoreStorage = installMemoryLocalStorage();
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+    const previousAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+    const events = new EventTarget();
+    const visibilityListeners = new Set<() => void>();
+    let visibilityState: DocumentVisibilityState = 'visible';
+    let statusCalls = 0;
+    let runtimeEnabled = true;
+
+    const bridge = {
+      externalMcpGetStatus: async () => {
+        statusCalls += 1;
+        return { ok: true, enabled: runtimeEnabled, error: null };
+      },
+    };
+
+    Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { value: true, configurable: true });
+    Object.defineProperty(globalThis, 'window', {
+      value: {
+        netcatty: bridge,
+        location: { hash: '#/settings' },
+        addEventListener: events.addEventListener.bind(events),
+        removeEventListener: events.removeEventListener.bind(events),
+        dispatchEvent: events.dispatchEvent.bind(events),
+        setInterval,
+        clearInterval,
+      },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        get visibilityState() { return visibilityState; },
+        get hidden() { return visibilityState === 'hidden'; },
+        addEventListener(type: string, listener: () => void) {
+          if (type === 'visibilitychange') visibilityListeners.add(listener);
+        },
+        removeEventListener(type: string, listener: () => void) {
+          if (type === 'visibilitychange') visibilityListeners.delete(listener);
+        },
+      },
+    });
+
+    const setVisibility = async (next: DocumentVisibilityState) => {
+      visibilityState = next;
+      await act(async () => {
+        for (const listener of [...visibilityListeners]) listener();
+      });
+    };
+
+    let hookA!: ReturnType<typeof useExternalMcpToggleState>;
+    let hookB!: ReturnType<typeof useExternalMcpToggleState>;
+    const CaptureA = () => { hookA = useExternalMcpToggleState(); return null; };
+    const CaptureB = () => { hookB = useExternalMcpToggleState(); return null; };
+    const DualMount = ({ showSecond }: { showSecond: boolean }) => (
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(CaptureA),
+        showSecond ? React.createElement(CaptureB) : null,
+      )
+    );
+
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      resetExternalMcpStartupReadyForTests();
+      globalThis.localStorage.setItem(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'true');
+
+      // Mount two instances simultaneously (AppView + Settings > AI): only 1 immediate poll + 1 3s interval
+      await act(async () => {
+        renderer = create(React.createElement(DualMount, { showSecond: true }));
+      });
+      assert.equal(hookA.enabled, true);
+      assert.equal(hookB.enabled, true);
+      assert.equal(statusCalls, 1, 'mounting two hooks must share one initial poll');
+
+      await act(async () => t.mock.timers.tick(EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS));
+      assert.equal(statusCalls, 2, 'one 3s tick must fire exactly one status check across both hooks');
+
+      // Unmounting the second instance keeps the shared poller running
+      await act(async () => {
+        renderer!.update(React.createElement(DualMount, { showSecond: false }));
+      });
+      await act(async () => t.mock.timers.tick(EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS));
+      assert.equal(statusCalls, 3);
+
+      // Re-mount second instance, then hide document: polling pauses completely
+      await act(async () => {
+        renderer!.update(React.createElement(DualMount, { showSecond: true }));
+      });
+      await setVisibility('hidden');
+      await act(async () => t.mock.timers.tick(30_000));
+      assert.equal(statusCalls, 3, 'hidden document must not poll externalMcpGetStatus');
+
+      // Runtime idles off while hidden; returning to visible immediately catches up and updates both hooks
+      runtimeEnabled = false;
+      await setVisibility('visible');
+      assert.equal(statusCalls, 4, 'returning to visible must immediately check runtime status');
+      assert.equal(hookA.enabled, false);
+      assert.equal(hookB.enabled, false);
+      assert.equal(readExternalMcpStoredEnabled(), false);
+
+      // Once disabled, polling stops completely
+      await act(async () => t.mock.timers.tick(30_000));
+      assert.equal(statusCalls, 4, 'disabled switch must stop polling');
+    } finally {
+      if (renderer) await act(async () => renderer!.unmount());
+      assert.equal(visibilityListeners.size, 0, 'visibility listener must detach when ref-count reaches 0');
+      resetExternalMcpStartupReadyForTests();
+      if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument);
+      else Reflect.deleteProperty(globalThis, 'document');
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else Reflect.deleteProperty(globalThis, 'window');
+      if (previousAct) Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', previousAct);
+      else Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+      restoreStorage();
+      t.mock.timers.reset();
+    }
+  });
 });

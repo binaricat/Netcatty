@@ -717,11 +717,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         setBrowserMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
       }
 
-      setSidePanelOpenTabs(prev => {
-        const next = new Map(prev);
-        next.set(tabId, targetPanel);
-        return next;
-      });
+      selectSidePanelToolForTab(tabId, targetPanel);
     };
 
     const explicitSftpAutoOpen =
@@ -764,7 +760,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
 
     applyAutoOpen();
-  }, [applyWorkspaceLayoutPresetForSession, hasDefaultLayoutSftpPane, onUpdateSessionStatus, setSidePanelOpenTabs, sidePanelOpenTabsRef, terminalBackend]);
+  }, [applyWorkspaceLayoutPresetForSession, hasDefaultLayoutSftpPane, onUpdateSessionStatus, selectSidePanelToolForTab, sidePanelOpenTabsRef, terminalBackend]);
 
   const handleSessionExit = useCallback((sessionId: string, evt: TerminalSessionExitEvent) => {
     const intent = resolveTerminalSessionExitIntent(
@@ -1178,11 +1174,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
     sftpPaneClosedTabIdsRef.current.delete(tabId);
 
-    setSidePanelOpenTabs(prev => {
-      const next = new Map(prev);
-      next.set(tabId, 'sftp');
-      return next;
-    });
+    selectSidePanelToolForTab(tabId, 'sftp');
 
     setSftpHostForTab(prev => {
       const next = new Map(prev);
@@ -1247,7 +1239,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       ]);
       return next;
     });
-  }, [closeTerminalSidePanelTab, resolveSftpOpenTarget, setSidePanelOpenTabs, sidePanelLayoutsRef, sidePanelOpenTabsRef]);
+  }, [closeTerminalSidePanelTab, resolveSftpOpenTarget, selectSidePanelToolForTab, sidePanelLayoutsRef, sidePanelOpenTabsRef]);
 
   const handlePendingUploadHandled = useCallback((tabId: string, requestId: string) => {
     setSftpPendingUploadsForTab(prev => {
@@ -2054,13 +2046,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     markSidePanelSubTabOpened(tabId, 'scripts');
     startTransition(() => {
-      setSidePanelOpenTabs(prev => {
-        const next = new Map(prev);
-        next.set(tabId, 'scripts');
-        return next;
-      });
+      selectSidePanelToolForTab(tabId, 'scripts');
     });
-  }, [handleCloseSidePanel, markSidePanelSubTabOpened, setSidePanelOpenTabs, sidePanelOpenTabsRef]);
+  }, [handleCloseSidePanel, markSidePanelSubTabOpened, selectSidePanelToolForTab, sidePanelOpenTabsRef]);
 
   // Toggle the whole side panel (new ⌘/Ctrl+\ shortcut). Close if open; if
   // closed, reopen the tab's last sub-panel, defaulting to SFTP (when a host is
@@ -2097,6 +2085,40 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSwitchSidePanelTab('ai');
   }, [handleSwitchSidePanelTab]);
 
+  // Focus an already-open terminal or workspace hosting an active AI chat and
+  // ensure its AI side panel is visible, instead of moving/interrupting it.
+  const handleFocusAIScopeTarget = useCallback((target: {
+    type: 'terminal' | 'workspace';
+    targetId: string;
+  }): boolean => {
+    let tabId: string | null = null;
+    if (target.type === 'workspace') {
+      const workspace = workspacesRef.current.find((candidate) => candidate.id === target.targetId);
+      if (!workspace) return false;
+      tabId = workspace.id;
+    } else {
+      const terminal = sessionsRef.current.find((candidate) => candidate.id === target.targetId);
+      // Reject hidden/popped-out terminals (no main-window tab) and workspace
+      // members (focused via their owning `workspace:<id>` scope so the active
+      // chat shown in the workspace matches the clicked row).
+      if (!terminal || terminal.hiddenFromTabs || terminal.workspaceId) return false;
+      tabId = terminal.id;
+    }
+    setMagnifiedPane((current) => (
+      current?.tabId === tabId
+      && !(current.target.kind === 'side-panel' && current.target.tool === 'ai')
+        ? null
+        : current
+    ));
+    activeTabStore.setActiveTabId(tabId);
+    if (prepareSidePanelTool(tabId, 'ai')) {
+      startTransition(() => {
+        selectSidePanelToolForTab(tabId, 'ai');
+      });
+    }
+    return true;
+  }, [prepareSidePanelTool, selectSidePanelToolForTab]);
+
   const handleOpenSystem = useCallback(() => {
     handleSwitchSidePanelTab('system');
   }, [handleSwitchSidePanelTab]);
@@ -2124,8 +2146,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         .catch((error: unknown) => toast.error(error instanceof Error ? error.message : String(error)));
     }
     setBrowserMountedTabIds((previous) => addMountedSidePanelTabId(previous, tabId));
-    setSidePanelOpenTabs((previous) => new Map(previous).set(tabId, 'browser'));
-  }), [onConnectToHost, setSidePanelOpenTabs]);
+    selectSidePanelToolForTab(tabId, 'browser');
+  }), [onConnectToHost, selectSidePanelToolForTab]);
 
   useEffect(() => {
     setBrowserMountedTabIds((previous) => {
@@ -2164,12 +2186,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return next;
     });
     setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
-    setSidePanelOpenTabs((prev) => {
-      const next = new Map(prev);
-      next.set(tabId, 'notes');
-      return next;
-    });
-  }, [setSidePanelOpenTabs]);
+    selectSidePanelToolForTab(tabId, 'notes');
+  }, [selectSidePanelToolForTab]);
 
   const handleOpenHostFromNotes = useCallback((host: Host, source?: { noteId?: string }) => {
     const sourceNoteId = source?.noteId;
@@ -2715,6 +2733,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleOpenScripts,
     handleOpenTheme,
     handleOpenAI,
+    handleFocusAIScopeTarget,
     handleOpenSystem,
     handleOpenNotes,
     getActiveTerminalSessionId,

@@ -26,13 +26,17 @@ function readIsOpen(): boolean {
 
 class TerminalHostTreeStore {
   private isOpen = readIsOpen();
-  /** Live sidebar width (0 when collapsed) for top-tab alignment. */
+  /** Target sidebar width (0 when collapsed or hidden behind root pages) for top-tab and surface alignment. */
   private layoutWidth = 0;
+  /** Whether layout consumers should animate transitions to `layoutWidth` (false for instant snaps and drag resize). */
+  private layoutTransitionAnimated = false;
   private listeners = new Set<Listener>();
 
   getIsOpen = () => this.isOpen;
 
   getLayoutWidth = () => this.layoutWidth;
+
+  getLayoutTransitionAnimated = () => this.layoutTransitionAnimated;
 
   setIsOpen = (open: boolean) => {
     if (this.isOpen === open) return;
@@ -44,10 +48,17 @@ class TerminalHostTreeStore {
     this.listeners.forEach((listener) => listener());
   };
 
-  setLayoutWidth = (width: number) => {
+  setLayoutWidth = (width: number, animated = false) => {
     const next = Math.max(0, Math.round(width));
-    if (this.layoutWidth === next) return;
+    if (this.layoutWidth === next && this.layoutTransitionAnimated === animated) return;
     this.layoutWidth = next;
+    this.layoutTransitionAnimated = animated;
+    this.listeners.forEach((listener) => listener());
+  };
+
+  setLayoutTransitionAnimated = (animated: boolean) => {
+    if (this.layoutTransitionAnimated === animated) return;
+    this.layoutTransitionAnimated = animated;
     this.listeners.forEach((listener) => listener());
   };
 
@@ -80,5 +91,13 @@ export const useTerminalHostTreeLayoutWidth = () => {
     terminalHostTreeStore.subscribe,
     terminalHostTreeStore.getLayoutWidth,
     terminalHostTreeStore.getLayoutWidth,
+  );
+};
+
+export const useTerminalHostTreeLayoutTransitionAnimated = (): boolean => {
+  return useSyncExternalStore(
+    terminalHostTreeStore.subscribe,
+    terminalHostTreeStore.getLayoutTransitionAnimated,
+    terminalHostTreeStore.getLayoutTransitionAnimated,
   );
 };

@@ -517,15 +517,62 @@ test("VaultHostListSection preserves grouped totals while virtualizing rendered 
 });
 
 test("VaultHostListSection exposes hostname copy in host context menus, not as a hover button", () => {
-  const source = readFileSync(new URL("./VaultHostListSection.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /data-vault-host-copy-hostname-button/);
-  assert.doesNotMatch(source, /renderHostCopyHostnameButton/);
-  assert.match(source, /terminal\.statusbar\.copyHostname\.label/);
-  assert.match(source, /handleCopyHostname\(host\)/);
-  assert.match(source, /!isPluginHostProtocol\(host\.protocol\)/);
+  const sectionSource = readFileSync(new URL("./VaultHostListSection.tsx", import.meta.url), "utf8");
+  const cardSource = readFileSync(new URL("./VaultHostCard.tsx", import.meta.url), "utf8");
+  const combinedSource = `${sectionSource}\n${cardSource}`;
+  assert.doesNotMatch(combinedSource, /data-vault-host-copy-hostname-button/);
+  assert.doesNotMatch(combinedSource, /renderHostCopyHostnameButton/);
+  assert.match(cardSource, /terminal\.statusbar\.copyHostname\.label/);
+  assert.match(cardSource, /onCopyHostname\(host\)/);
+  assert.match(cardSource, /!isPluginHostProtocol\(host\.protocol\)/);
 });
 
 test("VaultHostListSection opens dual-pane SFTP from host context menus", () => {
-  const source = readFileSync(new URL("./VaultHostListSection.tsx", import.meta.url), "utf8");
-  assert.match(source, /OpenDualPaneSftpMenuItem/);
+  const cardSource = readFileSync(new URL("./VaultHostCard.tsx", import.meta.url), "utf8");
+  assert.match(cardSource, /OpenDualPaneSftpMenuItem/);
+});
+
+test("VaultHostListSection preserves section-specific card differences across pinned, recent, grouped, and main", () => {
+  const managedMain = { ...makeHost("managed-main", "Managed Main"), managedSourceId: "src-1", pinned: true };
+  const ungroupedHost = { ...makeHost("ungrouped-host", "Ungrouped Host"), managedSourceId: "src-2" };
+
+  const gridMarkup = renderHostList({
+    viewMode: "grid",
+    displayedGroups: [],
+    displayedHosts: [managedMain, pinnedHost, recentHost],
+    pinnedHosts: [pinnedHost],
+    recentHosts: [{ ...recentHost, pinned: true }],
+    showRecentHosts: true,
+    visibleDisplayedHosts: [managedMain],
+    isMultiSelectMode: true,
+    selectedHostIds: new Set([managedMain.id]),
+  });
+
+  // Pinned card shows star even when host.pinned is undefined, no managed badge, checkbox wrapper has no aria-hidden.
+  const pinnedIdx = gridMarkup.indexOf('data-vault-grid-item="pinned:pinned-host"');
+  const recentIdx = gridMarkup.indexOf('data-vault-grid-item="recent:recent-host"');
+  const mainIdx = gridMarkup.indexOf('data-vault-grid-item="main:managed-main"');
+  assert.ok(pinnedIdx >= 0 && recentIdx > pinnedIdx && mainIdx > recentIdx);
+  const pinnedSlice = gridMarkup.slice(pinnedIdx, recentIdx);
+  const recentSlice = gridMarkup.slice(recentIdx, mainIdx);
+  const mainSlice = gridMarkup.slice(mainIdx);
+
+  assert.match(pinnedSlice, /text-amber-400 fill-amber-400/);
+  assert.match(pinnedSlice, /<div class="shrink-0"><svg[^>]*lucide-square/);
+  assert.doesNotMatch(pinnedSlice, /<div class="shrink-0" aria-hidden="true">/);
+  assert.doesNotMatch(recentSlice, /text-amber-400 fill-amber-400/);
+  assert.match(mainSlice, /text-amber-400 fill-amber-400/);
+  assert.match(mainSlice, /<div class="shrink-0" aria-hidden="true">/);
+  assert.match(mainSlice, />managed</);
+
+  const groupedMarkup = renderHostList({
+    viewMode: "grid",
+    displayedGroups: [],
+    displayedHosts: [ungroupedHost],
+    groupedDisplayHosts: [{ name: "", hosts: [ungroupedHost] }],
+    sortMode: "group",
+    visibleDisplayedHosts: [],
+  });
+  assert.match(groupedMarkup, /data-vault-grid-item="grouped:__ungrouped__:ungrouped-host"/);
+  assert.match(groupedMarkup, />managed</);
 });

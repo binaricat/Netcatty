@@ -5,18 +5,43 @@ import { TerminalLayerFocusSidebarSection } from './TerminalLayerFocusSidebarSec
 import { TerminalLayerSidePanelSection } from './TerminalLayerSidePanelSection';
 import { TerminalLayerWorkspaceSection } from './TerminalLayerWorkspaceSection';
 import { terminalLayerViewCtxEqual } from './terminalLayerViewMemo';
-import { useTerminalHostTreeLayoutWidth } from '../../application/state/terminalHostTreeStore';
+import {
+  useTerminalHostTreeLayoutTransitionAnimated,
+  useTerminalHostTreeLayoutWidth,
+} from '../../application/state/terminalHostTreeStore';
+import { TERMINAL_HOST_TREE_LEFT_TRANSITION } from '../../application/state/terminalHostTreeAnimation';
 import { resolveTerminalLayerSurfaceStyle } from '../terminalPaneVisibility';
 import type { PluginSidebarHostActions } from '../../application/state/usePluginTerminalSidebar';
 
 type TerminalLayerViewContext = Record<string, any> & PluginSidebarHostActions;
 
+export function getTerminalLayerViewStyle({
+  isTerminalLayerVisible,
+  hibernateHiddenTabs,
+  hostTreeLayoutWidth,
+  hostTreeLayoutAnimated,
+}: {
+  isTerminalLayerVisible: boolean;
+  hibernateHiddenTabs: boolean;
+  hostTreeLayoutWidth: number;
+  hostTreeLayoutAnimated: boolean;
+}): React.CSSProperties {
+  const surfaceStyle = resolveTerminalLayerSurfaceStyle(
+    isTerminalLayerVisible,
+    hibernateHiddenTabs,
+  );
+  return {
+    ...surfaceStyle,
+    left: hostTreeLayoutWidth,
+    transition: isTerminalLayerVisible && hostTreeLayoutAnimated
+      ? TERMINAL_HOST_TREE_LEFT_TRANSITION
+      : 'none',
+  };
+}
+
 function TerminalLayerViewInner({ ctx }: { ctx: TerminalLayerViewContext }) {
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
-  const surfaceStyle = resolveTerminalLayerSurfaceStyle(
-    ctx.isTerminalLayerVisible,
-    ctx.hibernateHiddenTabs,
-  );
+  const hostTreeLayoutAnimated = useTerminalHostTreeLayoutTransitionAnimated();
 
   const isBottomDock = ctx.sidePanelPosition === 'bottom';
 
@@ -26,10 +51,12 @@ function TerminalLayerViewInner({ ctx }: { ctx: TerminalLayerViewContext }) {
       className={`absolute inset-0 bg-background flex min-h-0${isBottomDock ? ' flex-col' : ''}`}
       data-section="terminal-workspace"
       inert={ctx.isTerminalLayerVisible ? undefined : true}
-      style={{
-        ...surfaceStyle,
-        left: hostTreeLayoutWidth,
-      }}
+      style={getTerminalLayerViewStyle({
+        isTerminalLayerVisible: ctx.isTerminalLayerVisible,
+        hibernateHiddenTabs: ctx.hibernateHiddenTabs,
+        hostTreeLayoutWidth,
+        hostTreeLayoutAnimated,
+      })}
     >
       {/* Keep TerminalLayerSidePanelSection at a stable tree position (first
           child) so cycling between side and bottom docks reorders it via flex

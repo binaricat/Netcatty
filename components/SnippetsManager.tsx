@@ -2,15 +2,16 @@ import { CheckSquare, ChevronDown, Clock, Copy, Download, Edit2, FileCode, Folde
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useStoredViewMode } from '../application/state/useStoredViewMode';
+import { useSnippetShortkeyRecorder } from '../application/state/useSnippetShortkeyRecorder';
 import { STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE } from '../infrastructure/config/storageKeys';
-import { cn, isMacPlatform } from '../lib/utils';
+import { buildTextFilesZipBlob } from '../lib/textZip';
+import { cn } from '../lib/utils';
 import { Host, ProxyProfile, ShellHistoryEntry, Snippet, SSHKey } from '../types';
 import {
   getShellHistorySnapshot,
   subscribeShellHistory,
 } from '../application/state/shellHistoryStore';
-import { findActiveSystemShortcutConflict } from '../domain/activeKeyBindings';
-import { HotkeyScheme, KeyBinding, keyEventToString, keyStringToKeyboardEvent, ManagedSource, matchesKeyBinding } from '../domain/models';
+import { HotkeyScheme, KeyBinding, ManagedSource } from '../domain/models';
 import {
   buildSnippetExportPayload,
   combineSnippetImportPayloads,
@@ -227,94 +228,14 @@ export const SNIPPET_IMPORT_SAMPLE_FILES: SnippetImportSampleFile[] = [
   },
 ];
 
-const crcTable = Array.from({ length: 256 }, (_, index) => {
-  let value = index;
-  for (let bit = 0; bit < 8; bit += 1) {
-    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-  }
-  return value >>> 0;
-});
-
-const crc32 = (bytes: Uint8Array): number => {
-  let crc = 0xffffffff;
-  bytes.forEach((byte) => {
-    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  });
-  return (crc ^ 0xffffffff) >>> 0;
-};
-
-const pushUint16 = (parts: number[], value: number) => {
-  parts.push(value & 0xff, (value >>> 8) & 0xff);
-};
-
-const pushUint32 = (parts: number[], value: number) => {
-  parts.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
-};
-
-export const buildSnippetImportSamplesZip = (files: SnippetImportSampleFile[] = SNIPPET_IMPORT_SAMPLE_FILES): Blob => {
-  const encoder = new TextEncoder();
-  const chunks: Array<Uint8Array> = [];
-  const centralDirectory: Uint8Array[] = [];
-  let offset = 0;
-
-  files.forEach((file) => {
-    const nameBytes = encoder.encode(file.name);
-    const contentBytes = encoder.encode(`${file.content}\n`);
-    const checksum = crc32(contentBytes);
-
-    const localHeader: number[] = [];
-    pushUint32(localHeader, 0x04034b50);
-    pushUint16(localHeader, 20);
-    pushUint16(localHeader, 0);
-    pushUint16(localHeader, 0);
-    pushUint16(localHeader, 0);
-    pushUint16(localHeader, 0);
-    pushUint32(localHeader, checksum);
-    pushUint32(localHeader, contentBytes.length);
-    pushUint32(localHeader, contentBytes.length);
-    pushUint16(localHeader, nameBytes.length);
-    pushUint16(localHeader, 0);
-    const localChunk = new Uint8Array([...localHeader, ...nameBytes, ...contentBytes]);
-    chunks.push(localChunk);
-
-    const centralHeader: number[] = [];
-    pushUint32(centralHeader, 0x02014b50);
-    pushUint16(centralHeader, 20);
-    pushUint16(centralHeader, 20);
-    pushUint16(centralHeader, 0);
-    pushUint16(centralHeader, 0);
-    pushUint16(centralHeader, 0);
-    pushUint16(centralHeader, 0);
-    pushUint32(centralHeader, checksum);
-    pushUint32(centralHeader, contentBytes.length);
-    pushUint32(centralHeader, contentBytes.length);
-    pushUint16(centralHeader, nameBytes.length);
-    pushUint16(centralHeader, 0);
-    pushUint16(centralHeader, 0);
-    pushUint16(centralHeader, 0);
-    pushUint16(centralHeader, 0);
-    pushUint32(centralHeader, 0);
-    pushUint32(centralHeader, offset);
-    centralDirectory.push(new Uint8Array([...centralHeader, ...nameBytes]));
-
-    offset += localChunk.length;
-  });
-
-  const centralDirectorySize = centralDirectory.reduce((total, chunk) => total + chunk.length, 0);
-  const endRecord: number[] = [];
-  pushUint32(endRecord, 0x06054b50);
-  pushUint16(endRecord, 0);
-  pushUint16(endRecord, 0);
-  pushUint16(endRecord, files.length);
-  pushUint16(endRecord, files.length);
-  pushUint32(endRecord, centralDirectorySize);
-  pushUint32(endRecord, offset);
-  pushUint16(endRecord, 0);
-
-  return new Blob([...chunks, ...centralDirectory, new Uint8Array(endRecord)], {
-    type: "application/zip",
-  });
-};
+export const buildSnippetImportSamplesZip = (
+  files: SnippetImportSampleFile[] = SNIPPET_IMPORT_SAMPLE_FILES,
+): Blob => buildTextFilesZipBlob(
+  files.map((file) => ({
+    name: file.name,
+    content: `${file.content}\n`,
+  })),
+);
 
 type SnippetsT = ReturnType<typeof useI18n>['t'];
 
@@ -611,105 +532,21 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   const historyScrollRef = useRef<HTMLDivElement>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  const [isRecordingShortkey, setIsRecordingShortkey] = useState(false);
-  const [shortkeyError, setShortkeyError] = useState<string | null>(null);
-
-  const existingShortkeys = useMemo(() => (
-    snippets.filter(s => Boolean(s.shortkey) && s.id !== editingSnippet.id)
-  ), [snippets, editingSnippet.id]);
-
-  const isMac = useMemo(() => (
-    hotkeyScheme === 'mac' || (hotkeyScheme === 'disabled' && isMacPlatform())
-  ), [hotkeyScheme]);
-
-  const normalizeKeyString = useCallback((value: string) => (
-    value.toLowerCase().replace(/\s+/g, '')
-  ), []);
-
-  const validateShortkey = useCallback((key: string): string | null => {
-    if (!key) return null;
-
-    const systemConflict = findActiveSystemShortcutConflict(key, hotkeyScheme, keyBindings);
-    if (systemConflict) {
-      const nameKey = `settings.shortcuts.binding.${systemConflict.id}`;
-      const name = t(nameKey) !== nameKey ? t(nameKey) : systemConflict.label;
-      return t('snippets.shortkey.error.systemConflict', { name });
-    }
-
-    const syntheticEvent = keyStringToKeyboardEvent(key);
-    if (syntheticEvent) {
-      for (const snippet of existingShortkeys) {
-        if (snippet.shortkey && matchesKeyBinding(syntheticEvent, snippet.shortkey, isMac)) {
-          return t('snippets.shortkey.error.snippetConflict', { name: snippet.label });
-        }
-      }
-    } else {
-      const normalizedKey = normalizeKeyString(key);
-      const conflictingSnippet = existingShortkeys.find(snippet => (
-        snippet.shortkey && normalizeKeyString(snippet.shortkey) === normalizedKey
-      ));
-      if (conflictingSnippet) {
-        return t('snippets.shortkey.error.snippetConflict', { name: conflictingSnippet.label });
-      }
-    }
-
-    return null;
-  }, [
-    existingShortkeys,
+  const {
+    isRecordingShortkey,
+    setIsRecordingShortkey,
+    shortkeyError,
+    setShortkeyError,
+  } = useSnippetShortkeyRecorder({
+    snippets,
+    editingSnippetId: editingSnippet.id,
     hotkeyScheme,
-    isMac,
     keyBindings,
-    normalizeKeyString,
     t,
-  ]);
-
-  useEffect(() => {
-    if (!isRecordingShortkey) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // App lock overlay installs later; skip while locked so password keys
-      // never mutate shortkeys (Codex P2).
-      if (isAppLockOverlayActive()) return;
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.key === 'Escape') {
-        setIsRecordingShortkey(false);
-        setShortkeyError(null);
-        return;
-      }
-
-      if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return;
-
-      const keyString = keyEventToString(e, isMac);
-      
-      const error = validateShortkey(keyString);
-      if (error) {
-        setShortkeyError(error);
-        return;
-      }
-      
-      setShortkeyError(null);
+    onCapture: (keyString) => {
       setEditingSnippet(prev => ({ ...prev, shortkey: keyString }));
-      setIsRecordingShortkey(false);
-    };
-
-    const handleClick = () => {
-      setIsRecordingShortkey(false);
-      setShortkeyError(null);
-    };
-
-    const timer = setTimeout(() => {
-      window.addEventListener('click', handleClick, true);
-    }, 100);
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('keydown', handleKeyDown, true);
-      window.removeEventListener('click', handleClick, true);
-    };
-  }, [isRecordingShortkey, isMac, validateShortkey]);
+    },
+  });
 
   const handleEdit = useCallback((snippet?: Snippet, asScript = false) => {
     if (snippet) {

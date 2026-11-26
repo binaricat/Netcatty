@@ -8,6 +8,7 @@
  * and detached terminal popups) shares the same clear semantics.
  */
 
+import { tokenizeShellLike } from "../../domain/shellTokenizer";
 import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
 import {
   STORAGE_KEY_COMMAND_HISTORY,
@@ -497,55 +498,6 @@ function normalizeArgumentToken(token: string): string {
     .replace(/['"]$/, "")
     .replace(/\\ /g, " ")
     .toLowerCase();
-}
-
-function tokenizeShellLike(input: string): string[] {
-  const tokens: string[] = [];
-  let current = "";
-  let inSingleQuote = false;
-  let inDoubleQuote = false;
-  let escaped = false;
-
-  for (let i = 0; i < input.length; i++) {
-    const ch = input[i];
-
-    if (escaped) {
-      current += ch;
-      escaped = false;
-      continue;
-    }
-
-    if (ch === "\\") {
-      escaped = true;
-      current += ch;
-      continue;
-    }
-
-    if (ch === "'" && !inDoubleQuote) {
-      inSingleQuote = !inSingleQuote;
-      current += ch;
-      continue;
-    }
-
-    if (ch === '"' && !inSingleQuote) {
-      inDoubleQuote = !inDoubleQuote;
-      current += ch;
-      continue;
-    }
-
-    if (ch === " " && !inSingleQuote && !inDoubleQuote) {
-      if (current.length > 0) {
-        tokens.push(current);
-        current = "";
-      }
-      continue;
-    }
-
-    current += ch;
-  }
-
-  tokens.push(current);
-  return tokens;
 }
 
 /**

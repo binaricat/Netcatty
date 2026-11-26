@@ -147,6 +147,9 @@ const MACOS_ROOT_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~|\/|[^\s:#$>
 const POWERLEVEL10K_PROMPT_PATTERN =
   /^(?:[^\s@]+@[^\s:]+\s+)?[^\s❯][^❯\r\n]*\s+❯$/;
 
+const POWERLINE_PROMPT_PATTERN =
+  /^\s*(?:[\uE0B0-\uE0B7]\s*)?(?:[^\s@\uE0B0-\uE0B7]+@[^\s:\uE0B0-\uE0B7]+|[~/])[^\r\n]*[\uE0B0-\uE0B7]$/;
+
 // Oh My Zsh default theme (robbyrussell): leading ➜ (U+279C) then cwd (%c),
 // optionally ` git:(branch)` and a dirty/clean marker. Idle forms look like
 // `➜  ~`, `➜  netcatty`, `➜  ~ git:(main)`, `➜  ~ git:(main) ✗`.
@@ -166,21 +169,29 @@ function isDefaultCmdPromptLine(line) {
   return CMD_PROMPT_PATTERN.test(String(line || "").replace(/\s+$/, ""));
 }
 
+function stripLeadingDecorativeToken(line) {
+  // Optional short decorative token, stripped only for recognition (#4354).
+  return line.replace(/^\s*[^\s\w\p{L}\p{N}@:#$\\\/>\[\]().]{1,4}\s+/u, "");
+}
+
 function isDefaultPosixPromptLine(line) {
   const normalized = String(line || "").replace(/\s+$/, "");
   // Optional virtualenv / conda / BT-panel style env name prefix: "(name) "
   // before the shell prompt. Recognition only; callers still return the full
   // prompt line so suffix matching sees the visible prefix (#3947).
   const withoutEnvPrefix = normalized.replace(/^\([^()\n\r]+\)\s+/, "");
-  return (
-    POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    BRACKET_TIME_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    PAREN_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    ALPINE_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    MACOS_ROOT_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    ZSH_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    POWERLEVEL10K_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN.test(withoutEnvPrefix)
+  return [withoutEnvPrefix, stripLeadingDecorativeToken(withoutEnvPrefix)].some(
+    (prompt) => (
+      POSIX_PROMPT_PATTERN.test(prompt) ||
+      BRACKET_TIME_POSIX_PROMPT_PATTERN.test(prompt) ||
+      PAREN_POSIX_PROMPT_PATTERN.test(prompt) ||
+      ALPINE_PROMPT_PATTERN.test(prompt) ||
+      MACOS_ROOT_PROMPT_PATTERN.test(prompt) ||
+      ZSH_PROMPT_PATTERN.test(prompt) ||
+      POWERLEVEL10K_PROMPT_PATTERN.test(prompt) ||
+      POWERLINE_PROMPT_PATTERN.test(prompt) ||
+      OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN.test(prompt)
+    ),
   );
 }
 

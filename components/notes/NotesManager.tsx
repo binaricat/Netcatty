@@ -1955,14 +1955,19 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                   >
                     <Hash size={12} className="opacity-70" />
                     <span className={noteMetadataLabelClass}>{tag}</span>
-                    <button
-                      type="button"
-                      className="-mr-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
-                      onClick={() => removeTagFromNote(selectedNoteView.id, tag)}
-                      title={t("notes.tag.remove")}
-                    >
-                      <X size={10} />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="-mr-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                          onClick={() => removeTagFromNote(selectedNoteView.id, tag)}
+                          aria-label={t("notes.tag.remove")}
+                        >
+                          <X size={10} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{t("notes.tag.remove")}</TooltipContent>
+                    </Tooltip>
                   </span>
                 ))}
 

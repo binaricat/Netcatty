@@ -22,6 +22,10 @@ test('visible log view leaves room for the terminal host sidebar', () => {
   assert.deepEqual(getLogViewWrapperStyle(true, 220), {
     left: 220,
   });
+  assert.deepEqual(getLogViewWrapperStyle(true, 220, true), {
+    left: 220,
+    transition: 'left 220ms cubic-bezier(0.4, 0, 0.2, 1)',
+  });
 });
 
 test('hidden log view remains hidden while preserving host sidebar offset', () => {
@@ -75,4 +79,11 @@ test('terminal layer force-mounts immediately when a hidden MCP session exists',
   assert.match(appMountsSource, /hasHiddenSession = props\.sessions\.some\(\(session\) => session\.hiddenFromTabs\)/);
   assert.match(appMountsSource, /useState\(isVisible \|\| hasHiddenSession\)/);
   assert.match(appMountsSource, /if \(isVisible \|\| hasHiddenSession\) setShouldMount\(true\)/);
+});
+
+test('AppMounts narrows active-tab subscriptions instead of using useActiveTabId', () => {
+  assert.doesNotMatch(appMountsSource, /\buseActiveTabId\b/);
+  assert.match(appMountsSource, /const isVisible = useIsTabActive\(logView\.id\);/);
+  assert.match(appMountsSource, /const isTerminalSurfaceActive = useIsTerminalSurfaceActive\(sessionIds, workspaceIds\);/);
+  assert.match(appMountsSource, /<LazyLoadBoundary name="Terminal" resetKey=\{isVisible \? "active" : "idle"\}>/);
 });

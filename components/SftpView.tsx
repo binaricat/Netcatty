@@ -52,11 +52,30 @@ import { Loader2 } from "lucide-react";
 
 // Import context hooks
 import { SftpContextProvider, activeTabStore } from "./sftp";
+import { useIsSftpSideFocused } from "./sftp/SftpContext";
 import { useSftpViewPaneCallbacks } from "./sftp/hooks/useSftpViewPaneCallbacks";
 import { useSftpViewTabs } from "./sftp/hooks/useSftpViewTabs";
 import { useSftpKeyboardShortcuts } from "./sftp/hooks/useSftpKeyboardShortcuts";
-import { sftpFocusStore, SftpFocusedSide, useSftpFocusedSide } from "../application/state/sftp/sftpFocusStore";
+import { sftpFocusStore, SftpFocusedSide } from "../application/state/sftp/sftpFocusStore";
 import { keepOnlyActivePaneSelections, keepOnlyPaneSelections } from "./sftp/hooks/selectionScope";
+
+const SftpPaneFocusIndicator = memo<{ side: SftpFocusedSide }>(({ side }) => {
+  const isFocused = useIsSftpSideFocused(side);
+  if (!isFocused) return null;
+  return (
+    <div
+      className="absolute top-0 left-0 z-50 pointer-events-none"
+      style={{
+        width: 0,
+        height: 0,
+        borderStyle: 'solid',
+        borderWidth: '12px 12px 0 0',
+        borderColor: 'hsl(var(--primary)) transparent transparent transparent',
+      }}
+    />
+  );
+});
+SftpPaneFocusIndicator.displayName = "SftpPaneFocusIndicator";
 
 
 // Wrapper component that subscribes to activeTabId for CSS visibility
@@ -288,12 +307,8 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     isActive,
   });
 
-  // Subscribe to focused side for visual indicator
-  const focusedSide = useSftpFocusedSide();
   const [magnifiedSide, setMagnifiedSide] = useState<SftpFocusedSide | null>(null);
-  const focusedSideRef = useRef(focusedSide);
   const magnifiedSideRef = useRef(magnifiedSide);
-  focusedSideRef.current = focusedSide;
   magnifiedSideRef.current = magnifiedSide;
   const [isWideSplit, setIsWideSplit] = useState(true);
   const [showMagnificationHint, setShowMagnificationHint] = useState(false);
@@ -329,7 +344,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
       },
       focus: () => {
         if (globalActiveTabStore.getActiveTabId() !== 'sftp' || magnifiedSideRef.current) return false;
-        setMagnifiedSide(focusedSideRef.current);
+        setMagnifiedSide(sftpFocusStore.getFocusedSide());
         return true;
       },
       restore: () => {
@@ -339,7 +354,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
       },
       toggle: () => {
         if (globalActiveTabStore.getActiveTabId() !== 'sftp') return false;
-        setMagnifiedSide((current) => current ? null : focusedSideRef.current);
+        setMagnifiedSide((current) => current ? null : sftpFocusStore.getFocusedSide());
         return true;
       },
     };
@@ -632,18 +647,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
             onFocusCapture={() => handlePaneFocus("left")}
           >
             {/* Focus indicator triangle */}
-            {focusedSide === "left" && (
-              <div
-                className="absolute top-0 left-0 z-50 pointer-events-none"
-                style={{
-                  width: 0,
-                  height: 0,
-                  borderStyle: 'solid',
-                  borderWidth: '12px 12px 0 0',
-                  borderColor: 'hsl(var(--primary)) transparent transparent transparent',
-                }}
-              />
-            )}
+            <SftpPaneFocusIndicator side="left" />
             {/* Left side tab bar - only show when there are tabs */}
             {leftTabsInfo.length > 0 && (
               <SftpTabBar
@@ -669,11 +673,10 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
                     side="left"
                     pane={pane}
                     dialogActionScopeId={dialogActionScopeIdRef.current}
-                    isPaneFocused={focusedSide === "left"}
                     sftpDefaultViewMode={sftpDefaultViewMode}
                     showHeader
                     showEmptyHeader={false}
-                    onToggleShowHiddenFiles={() => handleToggleHiddenFiles("left", pane.id)}
+                    onToggleShowHiddenFiles={handleToggleHiddenFiles}
                   />
                 </SftpPaneWrapper>
               ))}
@@ -697,18 +700,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
             onFocusCapture={() => handlePaneFocus("right")}
           >
             {/* Focus indicator triangle */}
-            {focusedSide === "right" && (
-              <div
-                className="absolute top-0 left-0 z-50 pointer-events-none"
-                style={{
-                  width: 0,
-                  height: 0,
-                  borderStyle: 'solid',
-                  borderWidth: '12px 12px 0 0',
-                  borderColor: 'hsl(var(--primary)) transparent transparent transparent',
-                }}
-              />
-            )}
+            <SftpPaneFocusIndicator side="right" />
             {/* Right side tab bar - only show when there are tabs */}
             {rightTabsInfo.length > 0 && (
               <SftpTabBar
@@ -734,11 +726,10 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
                     side="right"
                     pane={pane}
                     dialogActionScopeId={dialogActionScopeIdRef.current}
-                    isPaneFocused={focusedSide === "right"}
                     sftpDefaultViewMode={sftpDefaultViewMode}
                     showHeader
                     showEmptyHeader={false}
-                    onToggleShowHiddenFiles={() => handleToggleHiddenFiles("right", pane.id)}
+                    onToggleShowHiddenFiles={handleToggleHiddenFiles}
                   />
                 </SftpPaneWrapper>
               ))}

@@ -482,7 +482,7 @@ export const zhCNCoreMessages: Messages = {
   'settings.appearance.themeColor.dark': '深色主题',
   'settings.appearance.customCss': '自定义 CSS',
   'settings.appearance.customCss.desc':
-    '使用自定义 CSS 个性化界面，修改会立即生效。选中的顶部标签（`.top-tab[data-active="true"]`）会读取 `--top-tab-active-bg`、`--top-tab-active-fg` 和 `--top-tab-active-border`。不设置则保持当前外观。',
+    '使用自定义 CSS 个性化界面，修改会立即生效。',
   'settings.appearance.customCss.help.ariaLabel': '自定义 CSS 说明',
   'settings.appearance.customCss.help.title': '自定义 CSS 说明',
   'settings.appearance.customCss.help.body': `主要 UI 区块都暴露了 \`data-section\` 属性，供你用 CSS 定位。编辑后会立即生效。
@@ -1167,6 +1167,8 @@ Vaults 标签保持扁平，不使用这块背景。
   'sftp.encoding.auto': '自动',
   'sftp.encoding.utf8': 'UTF-8',
   'sftp.encoding.gb18030': 'GB18030',
+  'sftp.goBack': '后退',
+  'sftp.goForward': '前进',
   'sftp.goHome': '返回主目录',
   'sftp.goRoot': '回到根目录',
   'sftp.folderName': '文件夹名称',

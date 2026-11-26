@@ -14,6 +14,7 @@ const MCP_BRIDGE_BUILTIN_CAPABILITY_IDS = [
   "attachment.read",
   "harness.terminal.read_context",
   "terminal.execute",
+  "terminal.executeBulk",
   "sftp.list",
   "sftp.read",
   "sftp.write",

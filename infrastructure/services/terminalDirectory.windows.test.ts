@@ -207,3 +207,89 @@ test('real Windows terminal bridge strips reports and invalidates runspace cwd o
   assert.equal(session.directoryIntegration.read().success, false, 'direct AI/snippet PTY writes invalidate reports too');
   await waitFor(() => session.directoryIntegration.read().success);
 });
+
+test('native CMD lists and changes directories through the original ConPTY session', {
+  skip: !enabled, timeout: 60000,
+}, async t => {
+  const bridge = require('../../electron/bridges/terminalBridge.cjs');
+  const tempDir = require('../../electron/bridges/tempDirBridge.cjs');
+  const { readLocalSessionCwd } = require('../../electron/bridges/localSessionCwd.cjs');
+  tempDir.ensureTempDir();
+  const fixture = fs.realpathSync.native(fs.mkdtempSync(tempDir.getTempFilePath('native-cmd-directory-')));
+  const id = 'bridge-native-cmd';
+  const target = path.join(fixture, 'space & (parentheses) ^ \u4e2d');
+  const expandable = path.join(fixture, '%PATH%!');
+  fs.mkdirSync(target);
+  fs.mkdirSync(expandable);
+  const sessions = new Map();
+  let output = '';
+  let proc: import('node-pty').IPty | undefined;
+  let exited = Promise.resolve();
+  t.after(async () => {
+    proc?.kill();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([exited, new Promise<void>(resolve => { timer = setTimeout(resolve, 5000); })]);
+    clearTimeout(timer);
+    await fs.promises.rm(fixture, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+  const sender = Object.assign(new EventEmitter(), { id: 113, isDestroyed: () => false,
+    send(channel: string, payload: { data?: string }) { if (channel === 'netcatty:data') output += payload.data ?? ''; } });
+  bridge.init({ sessions, electronModule: { webContents: { fromId: () => sender } } });
+  await bridge.startLocalSession({ sender }, { sessionId: id, shell: process.env.ComSpec || 'cmd.exe',
+    shellArgs: ['/d', '/e:on', '/v:on'], cwd: fixture, cols: 250 });
+  const session = sessions.get(id);
+  proc = session.proc;
+  exited = new Promise<void>(resolve => { proc!.onExit(() => resolve()); });
+  const read = () => readLocalSessionCwd(session);
+  const waitFor = async (condition: () => boolean | Promise<boolean>) => {
+    const deadline = Date.now() + 12000;
+    while (Date.now() < deadline) {
+      if (await condition()) return;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert.fail(output.slice(-2000));
+  };
+  const send = (data: string) => bridge.writeToSession({}, { sessionId: id, data });
+  const io = createTerminalDirectoryIO({
+    getSessionPwd: async () => read(),
+    listLocalDir: async (cwd: string) => fs.readdirSync(cwd, { withFileTypes: true }).map(entry => ({ name: entry.name, type: entry.isDirectory() ? 'directory' : 'file' })),
+    realpathLocal: async (cwd: string) => fs.realpathSync.native(cwd),
+    writeToSession: (_id: string, data: string) => send(data),
+  } as unknown as NetcattyBridge, id, { local: true, hostname: 'localhost', username: '', pathFlavor: 'win32', windowsShell: 'cmd' });
+  const controller = createTerminalDirectoryController({ sessionId: id, io, isCurrent: () => true, isReady: () => true,
+    target: { authority: id, pathFlavor: 'win32' }, publish: () => {},
+    buildChangeCommand: value => directoryChangeCommand(value, 'cmd', 'win32') });
+  const signal = new AbortController().signal;
+  t.after(() => controller.dispose());
+  await waitFor(async () => (await read()).cwd === fixture);
+  const outputStart = output.length;
+  send('doskey cd=echo CMD_ALIAS\r');
+  await waitFor(async () => output.slice(outputStart).includes(fixture + '>') && (await read()).cwd === fixture);
+  assert.deepEqual((await controller.list(fixture, signal)).entries.map(entry => entry.path).sort(), [expandable, target].sort());
+  await assert.rejects(controller.change(expandable, signal, () => assert.fail('unsafe path was sent')), { code: 'unsupportedPath' });
+  await controller.change(target, signal, () => {});
+  assert.equal(await controller.refresh(), target);
+  await controller.change(fixture, signal, () => {});
+  assert.equal(await controller.refresh(), fixture);
+
+  // A nested CMD inherits the private prompt, but cannot authorize operations.
+  send('cmd /d\r');
+  const nestedStart = output.length;
+  await waitFor(() => output.slice(nestedStart).includes('(c) Microsoft Corporation'));
+  await waitFor(() => output.slice(nestedStart).includes(fixture + '>'));
+  assert.equal((await read()).success, false);
+  await assert.rejects(io.list(fixture), { code: 'cmdIntegrationUnavailable' });
+  send('exit\r');
+  await waitFor(async () => (await read()).cwd === fixture);
+  assert.ok(!output.includes('NetcattyCmdDirectory='));
+
+  // A temporary drive proves that /d switches the active drive as well as cwd.
+  const drive = 'ZYXWVUT'.split('').map(letter => letter + ':').find(candidate => !fs.existsSync(candidate + '\\'));
+  assert.ok(drive, 'available temporary drive');
+  execFileSync('subst.exe', [drive, fixture]);
+  try {
+    await controller.change(drive + '\\', signal, () => {});
+    assert.equal(await controller.refresh(), drive + '\\');
+    await controller.change(fixture, signal, () => {});
+  } finally { execFileSync('subst.exe', [drive, '/d']); }
+});

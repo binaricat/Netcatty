@@ -421,6 +421,8 @@ export const esVaultMessages: Messages = {
   'sftp.encoding.auto': 'Auto',
   'sftp.encoding.utf8': 'UTF-8',
   'sftp.encoding.gb18030': 'GB18030',
+  'sftp.goBack': 'Ir atrás',
+  'sftp.goForward': 'Ir adelante',
   'sftp.goHome': 'Ir al inicio',
   'sftp.goRoot': 'Ir a la raíz',
   'sftp.folderName': 'Nombre de la carpeta',
@@ -491,6 +493,9 @@ export const esVaultMessages: Messages = {
 
   // SFTP File Opener
   'sftp.context.copyPath': 'Copiar ruta del archivo',
+  'sftp.context.insertPathToTerminal': 'Insertar ruta en la terminal',
+  'sftp.context.cdInTerminal': 'Abrir en la terminal (cd)',
+  'sftp.terminal.insertBlockedUnsafeQuote': 'No se puede insertar la ruta mientras el cursor de la terminal esté dentro de una comilla o secuencia de escape sin cerrar',
   'sftp.context.openWithDefault': 'Abrir con la aplicación predeterminada del sistema',
   'sftp.context.openWith': 'Abrir con...',
   'sftp.context.edit': 'Editar',
@@ -614,6 +619,13 @@ export const esVaultMessages: Messages = {
   'settings.sftp.packedDownload': 'Descargas empaquetadas',
   'settings.sftp.packedDownload.enable': 'Empaquetar carpetas y selecciones múltiples para descargar',
   'settings.sftp.packedDownload.enableDesc': 'Descarga la selección en una sola transferencia y restaura su estructura original en este dispositivo. Si el servidor no puede empaquetarla, los archivos se descargan por separado.',
+  'settings.sftp.downloadLocation': 'Ubicación de descarga',
+  'settings.sftp.downloadLocation.directory': 'Carpeta de descarga predeterminada',
+  'settings.sftp.downloadLocation.directoryDesc': 'Los diálogos de descarga SFTP se abren en esta carpeta. Si no está configurada o ya no existe, se usa la carpeta Descargas del sistema.',
+  'settings.sftp.downloadLocation.systemDefault': 'Carpeta Descargas del sistema',
+  'settings.sftp.downloadLocation.browse': 'Examinar…',
+  'settings.sftp.downloadLocation.reset': 'Usar la carpeta Descargas del sistema',
+  'settings.sftp.downloadLocation.select': 'Elegir la carpeta de descarga predeterminada',
 
   'settings.sftp.skipUnchanged.enable': 'Omitir archivos sin cambios',
   'settings.sftp.skipUnchanged.enableDesc': 'Omite los archivos cuyo tamaño y hora de modificación ya coinciden con el destino (estilo rsync). Deshabilitado al reemplazar una carpeta en una ruta de staging.',

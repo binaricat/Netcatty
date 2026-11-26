@@ -28,8 +28,20 @@ export function fingerprintMessages(messages: ModelMessage[]): string {
   return (hash >>> 0).toString(36);
 }
 
+const DEFAULT_MAX_SESSIONS = 32;
+
 export class TwoPassCompactionCache {
   private readonly entries = new Map<string, CacheEntry>();
+  private readonly maxSessions: number;
+
+  constructor(maxSessions = DEFAULT_MAX_SESSIONS) {
+    this.maxSessions = Math.max(1, Math.floor(maxSessions));
+  }
+
+  private touch(chatSessionId: string, entry: CacheEntry): void {
+    this.entries.delete(chatSessionId);
+    this.entries.set(chatSessionId, entry);
+  }
 
   start(
     chatSessionId: string,
@@ -44,6 +56,7 @@ export class TwoPassCompactionCache {
       && messages.length >= current.prefixLength
       && fingerprintMessages(messages.slice(0, current.prefixLength)) === current.fingerprint
     ) {
+      this.touch(chatSessionId, current);
       return false;
     }
     const protectedTail = Math.max(10, Math.ceil(messages.length * 0.05));
@@ -57,14 +70,21 @@ export class TwoPassCompactionCache {
       && current.prefixLength === prefixLength
       && current.fingerprint === fingerprint
     ) {
+      this.touch(chatSessionId, current);
       return false;
     }
+    this.entries.delete(chatSessionId);
     this.entries.set(chatSessionId, {
       modelId,
       prefixLength,
       fingerprint,
       notePromise: producer(prefix).then(note => note.slice(0, 12_000)).catch(() => ''),
     });
+    while (this.entries.size > this.maxSessions) {
+      const oldestKey = this.entries.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.entries.delete(oldestKey);
+    }
     return true;
   }
 
@@ -84,6 +104,11 @@ export class TwoPassCompactionCache {
       return undefined;
     }
     const note = await entry.notePromise;
+    // Only delete if this exact entry is still current; preserve any concurrent
+    // re-prime that replaced the slot while awaiting notePromise.
+    if (this.entries.get(chatSessionId) === entry) {
+      this.entries.delete(chatSessionId);
+    }
     return note ? { note, prefixLength: entry.prefixLength } : undefined;
   }
 

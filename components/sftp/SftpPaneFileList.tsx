@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppWindow, Archive, ArrowDown, ArrowRight, ArrowUp, ChevronDown, ClipboardCopy, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2, Unplug, Upload } from "lucide-react";
+import { AppWindow, Archive, ArrowDown, ArrowRight, ArrowUp, ChevronDown, ClipboardCopy, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Terminal, TerminalSquare, Trash2, Unplug, Upload } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   ContextMenu,
@@ -73,6 +73,8 @@ interface SftpPaneFileListProps {
   onEditPermissions?: (entry: SftpFileEntry) => void;
   onUploadExternalFileList?: (fileList: FileList, targetPath?: string) => Promise<void> | void;
   onUploadExternalFolder?: (targetPath?: string) => Promise<void> | void;
+  onInsertPathToTerminal?: (path: string) => void;
+  onCdInTerminal?: (dirPath: string) => void;
   // Whether this pane is rendering a local filesystem. Upload menu items only
   // make sense for remote (SFTP) panes, so they are suppressed when isLocal.
   isLocal?: boolean;
@@ -165,6 +167,8 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   onEditPermissions,
   onUploadExternalFileList,
   onUploadExternalFolder,
+  onInsertPathToTerminal,
+  onCdInTerminal,
   isLocal = false,
   openRenameDialog,
   openDeleteConfirm,
@@ -431,6 +435,26 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
               <ClipboardCopy size={14} className="mr-2" />{" "}
               {t("sftp.context.copyPath")}
             </ContextMenuItem>
+            {onInsertPathToTerminal && (
+              <ContextMenuItem
+                onClick={() => {
+                  onInsertPathToTerminal(joinPath(pane.connection.currentPath, entry.name));
+                }}
+              >
+                <TerminalSquare size={14} className="mr-2" />{" "}
+                {t("sftp.context.insertPathToTerminal")}
+              </ContextMenuItem>
+            )}
+            {onCdInTerminal && isNavigableDirectory(entry) && (
+              <ContextMenuItem
+                onClick={() => {
+                  onCdInTerminal(joinPath(pane.connection.currentPath, entry.name));
+                }}
+              >
+                <Terminal size={14} className="mr-2" />{" "}
+                {t("sftp.context.cdInTerminal")}
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator />
             {(() => {
               const sourceParent = getParentPath(joinPath(pane.connection?.currentPath ?? "", entry.name));
@@ -539,6 +563,8 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       onRefresh,
       onUploadExternalFileList,
       onUploadExternalFolder,
+      onInsertPathToTerminal,
+      onCdInTerminal,
       uploadEnabled,
       folderUploadEnabled,
       openDeleteConfirm,
@@ -801,6 +827,14 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
           <ContextMenuItem onClick={() => void onUploadExternalFolder(undefined)}>
             <Upload size={14} className="mr-2" />{t("sftp.context.uploadFolder")}
           </ContextMenuItem>
+        )}
+        {onCdInTerminal && pane.connection?.currentPath && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={() => onCdInTerminal(pane.connection.currentPath)}>
+              <Terminal size={14} className="mr-2" />{t("sftp.context.cdInTerminal")}
+            </ContextMenuItem>
+          </>
         )}
       </ContextMenuContent>
     </ContextMenu>

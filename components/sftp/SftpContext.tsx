@@ -6,10 +6,11 @@
  * callback reference changes.
  */
 
-import React, { createContext, useContext, useMemo, useSyncExternalStore } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import type { SftpConnectedHostEntry } from "../../domain/sftpConnectedHosts";
 import type { SftpArchiveCreationOptions, SftpArchiveCreationResult, SftpArchiveCreationTarget } from "../../domain/sftpArchiveCreation";
 import type { SftpConnectOptions } from "../../application/state/sftp/useSftpConnections";
+import { sftpFocusStore } from "../../application/state/sftp/sftpFocusStore";
 import { Host, SftpFileEntry, SftpFilenameEncoding } from "../../types";
 
 export interface SftpTransferSource {
@@ -35,6 +36,8 @@ export interface SftpPaneCallbacks {
     onDisconnect: () => Promise<boolean>;
     onPrepareSelection: () => void;
     onNavigateTo: (path: string) => void;
+    onNavigateBack: () => void;
+    onNavigateForward: () => void;
     onNavigateUp: () => void;
     onRefresh: () => void;
     onRefreshTab: (tabId: string) => void;
@@ -115,6 +118,67 @@ export const useActiveTabId = (side: "left" | "right"): string | null => {
         activeTabStore.subscribe,
         () => (side === "left" ? activeTabStore.getLeftActiveTabId() : activeTabStore.getRightActiveTabId()),
         () => (side === "left" ? activeTabStore.getLeftActiveTabId() : activeTabStore.getRightActiveTabId()),
+    );
+};
+
+const noopSubscribe = () => () => {};
+
+// Boolean selector for whether a specific pane is active on its side.
+// Prevents inactive panes from re-rendering when switching between other tabs.
+export const useIsSftpPaneActive = (
+    side: "left" | "right",
+    paneId: string,
+    fallbackWhenNull: boolean,
+    forceActive = false,
+): boolean => {
+    const getSnapshot = useCallback(() => {
+        if (forceActive) return true;
+        const activeTabId =
+            side === "left"
+                ? activeTabStore.getLeftActiveTabId()
+                : activeTabStore.getRightActiveTabId();
+        return activeTabId ? paneId === activeTabId : fallbackWhenNull;
+    }, [forceActive, side, paneId, fallbackWhenNull]);
+
+    return useSyncExternalStore(
+        forceActive ? noopSubscribe : activeTabStore.subscribe,
+        getSnapshot,
+        getSnapshot,
+    );
+};
+
+// Boolean selector for whether a side (left or right) is focused in sftpFocusStore.
+export const useIsSftpSideFocused = (side: "left" | "right"): boolean => {
+    const getSnapshot = useCallback(
+        () => sftpFocusStore.getFocusedSide() === side,
+        [side],
+    );
+    return useSyncExternalStore(
+        sftpFocusStore.subscribe,
+        getSnapshot,
+        getSnapshot,
+    );
+};
+
+// Boolean selector for pane focus gated by active state so inactive panes do not
+// re-render when clicking left <-> right. When `explicitFocused` is provided
+// (e.g. SftpSidePanel's local focus state), it overrides the shared store.
+export const useIsSftpPaneFocused = (
+    side: "left" | "right",
+    isActive: boolean,
+    explicitFocused?: boolean,
+): boolean => {
+    const shouldSubscribe = explicitFocused === undefined && isActive;
+    const getSnapshot = useCallback(() => {
+        if (explicitFocused !== undefined) return explicitFocused;
+        if (!isActive) return false;
+        return sftpFocusStore.getFocusedSide() === side;
+    }, [explicitFocused, isActive, side]);
+
+    return useSyncExternalStore(
+        shouldSubscribe ? sftpFocusStore.subscribe : noopSubscribe,
+        getSnapshot,
+        getSnapshot,
     );
 };
 
@@ -215,9 +279,11 @@ interface SftpContextProviderProps {
     children: React.ReactNode;
 }
 
+const EMPTY_CONNECTED_HOSTS: SftpConnectedHostEntry[] = [];
+
 export const SftpContextProvider: React.FC<SftpContextProviderProps> = ({
     hosts,
-    connectedHosts = [],
+    connectedHosts = EMPTY_CONNECTED_HOSTS,
     writableHosts,
     updateHosts,
     draggedFiles,

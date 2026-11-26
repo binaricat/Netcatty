@@ -179,7 +179,7 @@ import {
   isIdleShellReadyForCommandInjection,
   isShellPromptReadyForInsertion,
 } from "../domain/terminalCommandInjectionReady";
-import { detectPrompt } from "./terminal/autocomplete/promptDetector";
+import { detectPrompt, getPromptLineTextAfterCursor } from "./terminal/autocomplete/promptDetector";
 import type { SensitiveInputActiveRef } from "./terminal/autocomplete/terminalAutocompletePrompt";
 import {
   applyUserCursorPreference,
@@ -632,22 +632,37 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const onTerminalDataCaptureRef = useRef(onTerminalDataCapture);
   const onSessionExitRef = useRef(onSessionExit);
   const commandBufferRef = useRef<string>("");
-  useEffect(() => registerTerminalCommandInjectionReadyReader(sessionId, (options) => {
-    const term = termRef.current;
-    if (!term) return false;
-    const prompt = detectPrompt(term);
-    const readiness = {
-      sensitiveInputActive: passwordPromptActiveRef.current,
-      hasLiveTerminal: true,
-      alternateScreenActive: isTerminalAlternateScreenActive(term),
-      isAtPrompt: prompt.isAtPrompt,
-      userInputLength: prompt.userInput.length,
-      pendingTypedInputLength: commandBufferRef.current.length,
-    };
-    return options?.allowDraft
-      ? isShellPromptReadyForInsertion(readiness)
-      : isIdleShellReadyForCommandInjection(readiness);
-  }), [sessionId]);
+  useEffect(() => registerTerminalCommandInjectionReadyReader(
+    sessionId,
+    (options) => {
+      const term = termRef.current;
+      if (!term) return false;
+      const prompt = detectPrompt(term);
+      const readiness = {
+        sensitiveInputActive: passwordPromptActiveRef.current,
+        hasLiveTerminal: true,
+        alternateScreenActive: isTerminalAlternateScreenActive(term),
+        isAtPrompt: prompt.isAtPrompt,
+        userInputLength: prompt.userInput.length,
+        pendingTypedInputLength: commandBufferRef.current.length,
+        afterCursorInputLength: getPromptLineTextAfterCursor(term).trim().length,
+      };
+      return options?.allowDraft
+        ? isShellPromptReadyForInsertion(readiness)
+        : isIdleShellReadyForCommandInjection(readiness);
+    },
+    () => {
+      const term = termRef.current;
+      if (!term) return null;
+      const prompt = detectPrompt(term);
+      if (!prompt.isAtPrompt) return null;
+      return {
+        promptText: prompt.promptText,
+        userInput: prompt.userInput,
+        pendingTypedInput: commandBufferRef.current,
+      };
+    },
+  ), [sessionId]);
   const promptLineBreakStateRef = useRef<PromptLineBreakState>(createPromptLineBreakState());
   const [hasMouseTracking, setHasMouseTracking] = useState(false);
   const mouseTrackingRef = useRef(false);
@@ -698,7 +713,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   isRendererActiveRef.current = isRendererActive;
   const pendingOutputScrollRef = useRef(false);
   const reflowReadingPositionRef = useRef(createTerminalReflowReadingPosition());
-  const lastFittedSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const lastFittedSizeRef = useRef<{ width: number; height: number; dpr?: number } | null>(null);
   const fontWeightFixupDoneRef = useRef(false);
 
   const captureTerminalLogData = useCallback((data: string) => {
@@ -1005,6 +1020,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     currentHop: number;
     totalHops: number;
     currentHostLabel: string;
+    currentHostAddress?: string;
     connectionPhase: string;
   } | null>(null);
   const [isConnectionAwaitingUserInput, setIsConnectionAwaitingUserInput] = useState(false);
@@ -3243,9 +3259,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       return;
     }
 
+    const dpr = typeof window !== "undefined" && typeof window.devicePixelRatio === "number" && window.devicePixelRatio > 0
+      ? window.devicePixelRatio
+      : 1;
+
     if (!options?.force) {
       const lastSize = lastFittedSizeRef.current;
-      if (lastSize && lastSize.width === width && lastSize.height === height) {
+      if (lastSize && lastSize.width === width && lastSize.height === height && (lastSize.dpr ?? 1) === dpr) {
         autocompleteRepositionRef.current?.();
         return;
       }
@@ -3370,7 +3390,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           }
         }
 
-        lastFittedSizeRef.current = { width, height };
+        lastFittedSizeRef.current = { width, height, dpr };
         // addon-fit 0.11 clears the renderer before resizing, which can show
         // as a one-frame WebGL blink during layout changes. Resize directly
         // using the proposed dimensions to preserve the existing behavior

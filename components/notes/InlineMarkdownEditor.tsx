@@ -52,6 +52,7 @@ import {
 import { buildSshNoteLinkOpenHost } from "../../domain/sshDeepLink";
 import { copyToClipboard } from "../keychain/utils";
 import { toast } from "../ui/toast";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 import { FixedSizeVirtualList, type FixedSizeVirtualListHandle } from "../ui/FixedSizeVirtualList";
 import type { Host } from "../../types";
@@ -2119,18 +2120,25 @@ export const InlineMarkdownEditor = React.memo(
         />
       )}
       {editorMode === "edit" && linkAction && (
-        <button
-          type="button"
-          data-note-link-action="true"
-          title={`打开 ${linkAction.label}`}
-          className="absolute z-40 flex h-7 w-7 items-center justify-center rounded-md bg-popover text-muted-foreground shadow-sm hover:bg-secondary hover:text-foreground"
-          style={{ left: linkAction.left, top: linkAction.top }}
-          onPointerDown={(event) => activateLinkAction(event, linkAction)}
-          onMouseDown={(event) => activateLinkAction(event, linkAction)}
-          onClick={(event) => activateLinkAction(event, linkAction)}
-        >
-          <ExternalLink size={14} />
-        </button>
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                data-note-link-action="true"
+                aria-label={`打开 ${linkAction.label}`}
+                className="absolute z-40 flex h-7 w-7 items-center justify-center rounded-md bg-popover text-muted-foreground shadow-sm hover:bg-secondary hover:text-foreground"
+                style={{ left: linkAction.left, top: linkAction.top }}
+                onPointerDown={(event) => activateLinkAction(event, linkAction)}
+                onMouseDown={(event) => activateLinkAction(event, linkAction)}
+                onClick={(event) => activateLinkAction(event, linkAction)}
+              >
+                <ExternalLink size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">{`打开 ${linkAction.label}`}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       )}
       {hostPicker.open && (
         <div

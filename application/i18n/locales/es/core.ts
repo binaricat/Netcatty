@@ -475,7 +475,7 @@ export const esCoreMessages: Messages = {
   'settings.appearance.themeColor.dark': 'Paleta oscura',
   'settings.appearance.customCss': 'CSS personalizado',
   'settings.appearance.customCss.desc':
-    'Agrega CSS personalizado para personalizar la apariencia de la aplicación. Los cambios se aplican de inmediato. Las pestañas superiores seleccionadas (`.top-tab[data-active="true"]`) leen `--top-tab-active-bg`, `--top-tab-active-fg` y `--top-tab-active-border`. Si no las defines, se conserva el aspecto actual.',
+    'Agrega CSS personalizado para personalizar la apariencia de la aplicación. Los cambios se aplican de inmediato.',
   'settings.appearance.customCss.help.ariaLabel': 'Ayuda de CSS personalizado',
   'settings.appearance.customCss.help.title': 'Guía de CSS personalizado',
   'settings.appearance.customCss.help.body': `Las principales regiones de la interfaz exponen un atributo \`data-section\` que puedes usar como destino. Los cambios se aplican en cuanto editas el CSS.

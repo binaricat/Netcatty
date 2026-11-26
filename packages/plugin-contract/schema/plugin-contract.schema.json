@@ -56,7 +56,7 @@
     "RpcLimits": {
       "description": "Host-enforced byte limit for one JSON-RPC control message. Larger payloads must use a stream.",
       "const": {
-        "maxJsonBytes": 1048576
+        "maxJsonBytes": 8388608
       }
     },
     "SafeUnsignedInteger": {
@@ -576,9 +576,41 @@
             },
             "kind": {
               "const": "network.stream.connectViaHost"
+            },
+            "durable": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "hostBindingToken",
+            "endpoint"
+          ],
+          "properties": {
+            "kind": {
+              "const": "network.stream.connectViaHost"
+            },
+            "hostBindingToken": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 256,
+              "pattern": "^[A-Za-z0-9._-]+$"
+            },
+            "endpoint": {
+              "$ref": "#/$defs/ByteStreamEndpoint"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/HostByteStreamConfirmRequest"
+        },
+        {
+          "$ref": "#/$defs/HostByteStreamTlsConfirmRequest"
         }
       ]
     },
@@ -820,12 +852,14 @@
     "HostInteractionLimits": {
       "const": {
         "textBytes": 4096,
-        "requestBytes": 65536,
+        "clipboardBytes": 4194304,
+        "requestBytes": 4259840,
         "items": 100,
         "pendingPerRuntime": 1,
         "pendingTotal": 8,
-        "requestsPerMinute": 10,
-        "timeoutMs": 60000
+        "requestsPerMinute": 60,
+        "timeoutMs": 60000,
+        "fileMaxBytes": 67108864
       }
     },
     "HostInteractionFeature": {
@@ -957,7 +991,7 @@
         },
         "text": {
           "type": "string",
-          "maxLength": 4096,
+          "maxLength": 4194304,
           "pattern": "^[^\\u0000]*$"
         }
       },
@@ -1013,7 +1047,7 @@
               "oneOf": [
                 {
                   "type": "string",
-                  "maxLength": 4096,
+                  "maxLength": 4194304,
                   "pattern": "^[^\\u0000]*$"
                 },
                 {
@@ -1035,6 +1069,25 @@
         },
         {
           "$ref": "#/$defs/ByteStreamConnectionDescriptor"
+        },
+        {
+          "type": "object",
+          "required": [
+            "cancelled",
+            "approved"
+          ],
+          "properties": {
+            "cancelled": {
+              "const": false
+            },
+            "approved": {
+              "const": true
+            },
+            "remember": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },
@@ -1085,6 +1138,9 @@
           ]
         },
         "scriptsRun": {
+          "type": "boolean"
+        },
+        "remember": {
           "type": "boolean"
         }
       },
@@ -1202,6 +1258,14 @@
               "$ref": "#/$defs/VaultHostEditFields"
             }
           ]
+        },
+        "durableHostId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "autoCommit": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -1556,14 +1620,14 @@
     },
     "ByteStreamLimits": {
       "const": {
-        "connectionsPerRuntime": 4,
-        "connectionsTotal": 64,
+        "connectionsPerRuntime": 24,
+        "connectionsTotal": 128,
         "chunkBytes": 65536,
         "bufferBytes": 65536,
-        "connectionBytes": 8388608,
+        "connectionBytes": 536870912,
         "connectMs": 10000,
-        "idleMs": 30000,
-        "lifetimeMs": 120000
+        "idleMs": 1800000,
+        "lifetimeMs": 28800000
       }
     },
     "ByteStreamEndpoint": {
@@ -1581,6 +1645,23 @@
       "properties": {
         "endpoint": {
           "$ref": "#/$defs/ByteStreamEndpoint"
+        },
+        "allowLocal": {
+          "type": "boolean"
+        },
+        "allowSelfSigned": {
+          "type": "boolean"
+        },
+        "caPem": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        },
+        "servername": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[A-Za-z0-9.-]+$"
         }
       },
       "additionalProperties": false
@@ -1623,6 +1704,12 @@
         },
         "windowBytes": {
           "const": 65536
+        },
+        "hostBindingToken": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         }
       },
       "additionalProperties": false
@@ -1964,10 +2051,7 @@
     "PermissionDeclaration": {
       "oneOf": [
         {
-          "$ref": "#/$defs/PluginPermission",
-          "not": {
-            "const": "network.stream"
-          }
+          "$ref": "#/$defs/PluginPermission"
         },
         {
           "$ref": "#/$defs/PermissionResourceDeclaration"
@@ -2591,14 +2675,14 @@
             },
             "mutations": {
               "type": "array",
-              "maxItems": 2048,
+              "maxItems": 4096,
               "items": {
                 "$ref": "#/$defs/JsonValue"
               }
             },
             "css": {
               "type": "string",
-              "maxLength": 65536
+              "maxLength": 131072
             }
           },
           "additionalProperties": false
@@ -2653,12 +2737,16 @@
             "compositionend",
             "dismiss",
             "submit",
-            "reset"
+            "reset",
+            "dblclick",
+            "contextmenu",
+            "scroll",
+            "widget"
           ]
         },
         "value": {
           "type": "string",
-          "maxLength": 8192
+          "maxLength": 131072
         },
         "checked": {
           "type": "boolean"
@@ -2695,6 +2783,47 @@
             "type": "string",
             "maxLength": 8192
           }
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "scrollTop": {
+          "type": "number",
+          "minimum": 0
+        },
+        "scrollLeft": {
+          "type": "number",
+          "minimum": 0
+        },
+        "clientHeight": {
+          "type": "number",
+          "minimum": 0
+        },
+        "clientWidth": {
+          "type": "number",
+          "minimum": 0
+        },
+        "selectionStart": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 131072
+        },
+        "selectionEnd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 131072
+        },
+        "widgetEvent": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$"
+        },
+        "detail": {
+          "$ref": "#/$defs/JsonValue"
         }
       },
       "additionalProperties": false
@@ -8664,35 +8793,387 @@
     },
     "HostByteStreamLimits": {
       "const": {
-        "connectionsPerRuntime": 4,
-        "connectionsTotal": 64,
+        "connectionsPerRuntime": 24,
+        "connectionsTotal": 128,
         "chunkBytes": 65536,
         "bufferBytes": 65536,
-        "connectionBytes": 67108864,
+        "connectionBytes": 536870912,
         "connectMs": 120000,
-        "idleMs": 300000,
-        "lifetimeMs": 1800000
+        "idleMs": 1800000,
+        "lifetimeMs": 28800000
       }
     },
     "HostByteStreamConnectRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "target",
+            "expectedRevision",
+            "endpoint"
+          ],
+          "properties": {
+            "target": {
+              "$ref": "#/$defs/VaultHostRef"
+            },
+            "expectedRevision": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+              "minLength": 1
+            },
+            "endpoint": {
+              "$ref": "#/$defs/ByteStreamEndpoint"
+            },
+            "durable": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "hostBindingToken",
+            "endpoint"
+          ],
+          "properties": {
+            "hostBindingToken": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 256,
+              "pattern": "^[A-Za-z0-9._-]+$"
+            },
+            "endpoint": {
+              "$ref": "#/$defs/ByteStreamEndpoint"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ByteStreamUpgradeTlsRequest": {
       "type": "object",
       "required": [
-        "target",
-        "expectedRevision",
-        "endpoint"
+        "handleId"
       ],
       "properties": {
-        "target": {
-          "$ref": "#/$defs/VaultHostRef"
-        },
-        "expectedRevision": {
+        "handleId": {
           "type": "string",
-          "maxLength": 128,
-          "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
-          "minLength": 1
+          "format": "uuid"
+        },
+        "servername": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[A-Za-z0-9.-]+$"
+        },
+        "allowSelfSigned": {
+          "type": "boolean"
+        },
+        "caPem": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      },
+      "additionalProperties": false
+    },
+    "ByteStreamUpgradeTlsResult": {
+      "type": "object",
+      "required": [
+        "upgraded",
+        "authorized"
+      ],
+      "properties": {
+        "upgraded": {
+          "const": true
+        },
+        "authorized": {
+          "type": "boolean"
+        },
+        "protocol": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "fingerprint256": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "subject": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostBindingRevokeParams": {
+      "type": "object",
+      "required": [
+        "hostBindingToken"
+      ],
+      "properties": {
+        "hostBindingToken": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostByteStreamConfirmRequest": {
+      "type": "object",
+      "required": [
+        "kind",
+        "endpoint",
+        "host",
+        "port",
+        "transport",
+        "isLocal"
+      ],
+      "properties": {
+        "kind": {
+          "const": "network.stream.confirm"
         },
         "endpoint": {
           "$ref": "#/$defs/ByteStreamEndpoint"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "transport": {
+          "enum": [
+            "tcp",
+            "tls"
+          ]
+        },
+        "isLocal": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostByteStreamTlsConfirmRequest": {
+      "type": "object",
+      "required": [
+        "kind",
+        "endpoint",
+        "fingerprint256",
+        "subject",
+        "issuer",
+        "validTo",
+        "reason"
+      ],
+      "properties": {
+        "kind": {
+          "const": "network.stream.tlsConfirm"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/ByteStreamEndpoint"
+        },
+        "servername": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "fingerprint256": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "subject": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "issuer": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "validTo": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostFileDialogFilter": {
+      "type": "object",
+      "required": [
+        "name",
+        "extensions"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "pattern": "^(\\*|[A-Za-z0-9][A-Za-z0-9._-]{0,31})$"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostOpenFileRequest": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "filters": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/HostFileDialogFilter"
+          }
+        },
+        "readAs": {
+          "enum": [
+            "bytes",
+            "utf8"
+          ]
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostSaveFileRequest": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "defaultName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f/\\\\]+$"
+        },
+        "filters": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/HostFileDialogFilter"
+          }
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 5592408
+        },
+        "encoding": {
+          "enum": [
+            "base64",
+            "utf8"
+          ]
+        },
+        "deferredWrite": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostFileHandleReadRequest": {
+      "type": "object",
+      "required": [
+        "handleId"
+      ],
+      "properties": {
+        "handleId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 67108864
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4194304
+        },
+        "encoding": {
+          "enum": [
+            "base64",
+            "utf8"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostFileHandleWriteRequest": {
+      "type": "object",
+      "required": [
+        "handleId",
+        "data"
+      ],
+      "properties": {
+        "handleId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 5592408
+        },
+        "encoding": {
+          "enum": [
+            "base64",
+            "utf8"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "replace",
+            "append"
+          ]
+        },
+        "commit": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostFileHandleCloseRequest": {
+      "type": "object",
+      "required": [
+        "handleId"
+      ],
+      "properties": {
+        "handleId": {
+          "type": "string",
+          "format": "uuid"
         }
       },
       "additionalProperties": false

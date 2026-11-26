@@ -138,47 +138,11 @@ export type PendingTerminalSelectionForAI = {
   text: string;
 };
 
-export function hexToHslToken(hex: string): string {
-  const normalized = hex.startsWith('#') ? hex : `#${hex}`;
-  const r = parseInt(normalized.slice(1, 3), 16) / 255;
-  const g = parseInt(normalized.slice(3, 5), 16) / 255;
-  const b = parseInt(normalized.slice(5, 7), 16) / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  let h = 0;
-  let s = 0;
-  const l = (max + min) / 2;
-
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r:
-        h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-        break;
-      case g:
-        h = ((b - r) / d + 2) / 6;
-        break;
-      default:
-        h = ((r - g) / d + 4) / 6;
-        break;
-    }
-  }
-
-  return `${Math.round(h * 3600) / 10} ${Math.round(s * 1000) / 10}% ${Math.round(l * 1000) / 10}%`;
-}
-
-export function adjustLightnessToken(hsl: string, delta: number): string {
-  const parts = hsl.split(/\s+/);
-  const newL = Math.max(0, Math.min(100, parseFloat(parts[2]) + delta));
-  return `${parts[0]} ${parts[1]} ${Math.round(newL * 10) / 10}%`;
-}
-
-export function adjustSaturationToken(hsl: string, factor: number): string {
-  const parts = hsl.split(/\s+/);
-  const newS = Math.max(0, Math.min(100, parseFloat(parts[1]) * factor));
-  return `${parts[0]} ${Math.round(newS * 10) / 10}% ${parts[2]}`;
-}
+export {
+  adjustLightnessToken,
+  adjustSaturationToken,
+  hexToHslToken,
+} from '../../domain/colorContrast';
 
 export const clearTerminalPreviewVars = (sessionId: string | null) => {
   if (!sessionId || typeof document === 'undefined') return;
@@ -305,6 +269,8 @@ interface AIChatPanelsHostProps {
   onOpenVaultSnippetFromChat?: (snippetId: string) => void;
   /** Issue #4098 phase 2: pin the AI chat a workspace scope is anchored to. */
   onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void;
+  /** Focus an already-open terminal or workspace hosting an active AI chat. */
+  onFocusAIScopeTarget?: (target: { type: 'terminal' | 'workspace'; targetId: string }) => boolean;
   /** Live workspaces, threaded to AI chats for `/chats` scope titles. */
   workspaces?: Workspace[] | null;
 }
@@ -475,6 +441,7 @@ function aiChatPanelsHostAreEqual(
   if (prev.onOpenVaultSectionFromChat !== next.onOpenVaultSectionFromChat) return false;
   if (prev.onOpenVaultSnippetFromChat !== next.onOpenVaultSnippetFromChat) return false;
   if (prev.onSetWorkspaceAnchorChat !== next.onSetWorkspaceAnchorChat) return false;
+  if (prev.onFocusAIScopeTarget !== next.onFocusAIScopeTarget) return false;
   if (prev.workspaces !== next.workspaces) return false;
   if (prev.activeTabId === next.activeTabId) return true;
 
@@ -517,6 +484,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   onOpenVaultSectionFromChat,
   onOpenVaultSnippetFromChat,
   onSetWorkspaceAnchorChat,
+  onFocusAIScopeTarget,
   workspaces,
 }) => {
   const aiConfig = useContext(AIConfigContext);
@@ -688,6 +656,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     focusedSessionId={context.focusedSessionId}
                     workspaces={aiPanelWorkspaces}
                     onSetWorkspaceAnchorChat={onSetWorkspaceAnchorChat}
+                    onFocusAIScopeTarget={onFocusAIScopeTarget}
                     terminalSessions={context.terminalSessions}
                     appTerminalSessions={appTerminalSessions}
                     liveScopeTargetIds={liveScopeTargetIds}
@@ -1674,12 +1643,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",
         isVisible && "z-10",
-        isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl",
+        magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl",
       )}
       style={{
         ...style,
-        borderColor: isMagnified && magnifiedSurfaceBounds ? sessionAppearanceTheme.colors.cursor : undefined,
-        borderWidth: isMagnified && magnifiedSurfaceBounds
+        borderColor: magnifiedSurfaceBounds ? sessionAppearanceTheme.colors.cursor : undefined,
+        borderWidth: magnifiedSurfaceBounds
           ? resolveMagnifiedChromeBorderWidth(magnifiedDevicePixelRatio)
           : undefined,
       }}

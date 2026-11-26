@@ -514,8 +514,12 @@ export function applyVaultHostUpdate(
     if (nextProxyProfileId && !options.proxyProfiles?.some((profile) => profile.id === nextProxyProfileId)) {
       return { ok: false, error: `Proxy profile "${nextProxyProfileId}" was not found.` };
     }
-    updated.proxyProfileId = nextProxyProfileId;
+    // Mirror the Host Details proxy panel: a selected profile replaces any
+    // one-off proxy and the explicit direct choice; an empty value removes
+    // every host proxy setting so the group and global default apply again.
+    updated.proxyProfileId = nextProxyProfileId || undefined;
     updated.proxyConfig = undefined;
+    updated.directProxy = undefined;
   }
   if (startupCommand.provided) {
     if (typeof startupCommand.value !== 'string') return { ok: false, error: 'startupCommand must be a string.' };

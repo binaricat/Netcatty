@@ -93,6 +93,24 @@ test("host totp setup stays on the shared setting row and opens a dialog", async
     const passwordAt = sections.indexOf("hostDetails.password.placeholder");
     const totpAt = sections.indexOf("<HostTotpFields");
     assert.ok(passwordAt > 0 && totpAt > passwordAt);
+
+    // Custom prompt pattern validation loads re2js on demand and rejects invalid patterns.
+    const patternInput = dom.window.document.getElementById("host-totp-pattern") as HTMLInputElement | null;
+    assert.ok(patternInput);
+    const valueSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
+    assert.ok(valueSetter);
+    await act(async () => {
+      valueSetter.call(patternInput, "[unclosed");
+      patternInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    const saveButton = [...dom.window.document.querySelectorAll("button")]
+      .find((node) => node.textContent?.includes("common.save"));
+    assert.ok(saveButton);
+    await act(async () => {
+      saveButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    assert.ok(dom.window.document.body.textContent?.includes("hostDetails.totp.error.pattern"));
   } finally {
     await act(async () => { root.unmount(); });
     await new Promise((resolve) => setTimeout(resolve, 50));

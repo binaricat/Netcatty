@@ -5,18 +5,45 @@ import React from "react";
 import { act, create } from "react-test-renderer";
 import { sidePanelLiveStore, SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT } from "../../application/state/sidePanelLiveStore.ts";
 import { createEmptyWorkspaceRoot } from "../../domain/workspace.ts";
+import { resolveMagnifiedChromeBorderWidth } from "../../domain/paneMagnification.ts";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { TerminalLayerWorkspaceSection } from "./TerminalLayerWorkspaceSection.tsx";
 
-test("magnified terminal panes use the resolved terminal accent for border chrome", () => {
+test("terminal pane chrome follows retained surface bounds through restore", () => {
   const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
   const paneSource = source.slice(source.indexOf('data-section="terminal-split-pane"'), source.indexOf("<Terminal\n"));
 
-  assert.match(paneSource, /isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl"/);
-  assert.match(paneSource, /borderColor: isMagnified && magnifiedSurfaceBounds \? sessionAppearanceTheme\.colors\.cursor : undefined/);
-  assert.match(paneSource, /borderWidth: isMagnified && magnifiedSurfaceBounds/);
-  assert.match(paneSource, /resolveMagnifiedChromeBorderWidth\(magnifiedDevicePixelRatio\)/);
+  assert.match(paneSource, /^\s*magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl",$/m);
+  assert.match(paneSource, /borderColor: magnifiedSurfaceBounds \? sessionAppearanceTheme\.colors\.cursor : undefined/);
+  assert.match(paneSource, /borderWidth: magnifiedSurfaceBounds\s*\? resolveMagnifiedChromeBorderWidth\(magnifiedDevicePixelRatio\)\s*: undefined/);
+});
+
+test("restoring terminal chrome keeps its width and color until surface bounds clear", () => {
+  const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
+  const paneSource = source.slice(source.indexOf('data-section="terminal-split-pane"'), source.indexOf("<Terminal\n"));
+  const styleSource = paneSource.match(/style=\{\{([\s\S]*?)\}\}/);
+  assert.ok(styleSource);
+  const resolveStyle = new Function(
+    "style", "isMagnified", "magnifiedSurfaceBounds", "sessionAppearanceTheme",
+    "magnifiedDevicePixelRatio", "resolveMagnifiedChromeBorderWidth",
+    `return ({${styleSource[1]}});`,
+  );
+  const bounds = { left: 0, top: 80, width: 1200, height: 800 };
+  const theme = { colors: { cursor: "#0088ff" } };
+
+  for (const dpr of [1, 2]) {
+    const magnified = resolveStyle({}, true, bounds, theme, dpr, resolveMagnifiedChromeBorderWidth);
+    const restoring = resolveStyle({}, false, bounds, theme, dpr, resolveMagnifiedChromeBorderWidth);
+    assert.deepEqual(restoring, magnified);
+    assert.equal(restoring.borderColor, theme.colors.cursor);
+    assert.equal(restoring.borderWidth, dpr === 1 ? 2 : 1);
+    for (const isMagnified of [false, true]) {
+      const cleared = resolveStyle({}, isMagnified, null, theme, dpr, resolveMagnifiedChromeBorderWidth);
+      assert.equal(cleared.borderColor, undefined);
+      assert.equal(cleared.borderWidth, undefined);
+    }
+  }
 });
 
 test("magnified terminal panes snap overlay bounds to the device-pixel grid", () => {

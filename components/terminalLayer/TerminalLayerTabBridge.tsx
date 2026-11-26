@@ -495,6 +495,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     handleFontWeightChangeForFocusedSession: themeState.handleFontWeightChangeForFocusedSession,
     handleFontWeightResetForFocusedSession: themeState.handleFontWeightResetForFocusedSession,
     handleOpenAI: s.handleOpenAI,
+    handleFocusAIScopeTarget: s.handleFocusAIScopeTarget,
     handleOpenNotes: s.handleOpenNotes,
     getActiveTerminalSessionId: s.getActiveTerminalSessionId,
     handleSwitchSidePanelTab: s.handleSwitchSidePanelTab,

@@ -1,8 +1,47 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import React from 'react';
 import { AsidePanel } from './ui/aside-panel';
-import { createDomRenderer, dispatchDomEvent, installDomEnvironment } from './test-support/renderReactDom';
+import { createDomRenderer, dispatchDomEvent, installDomEnvironment, runWithAct } from './test-support/renderReactDom';
+
+function installManualRaf(win: Window & typeof globalThis) {
+  let nextId = 1;
+  const scheduled = new Map<number, FrameRequestCallback>();
+  const cancelledIds: number[] = [];
+  let requestCount = 0;
+
+  const originalRequest = win.requestAnimationFrame;
+  const originalCancel = win.cancelAnimationFrame;
+
+  win.requestAnimationFrame = (cb: FrameRequestCallback) => {
+    requestCount += 1;
+    const id = nextId++;
+    scheduled.set(id, cb);
+    return id;
+  };
+  win.cancelAnimationFrame = (id: number) => {
+    cancelledIds.push(id);
+    scheduled.delete(id);
+  };
+
+  return {
+    get requestCount() { return requestCount; },
+    get pendingCount() { return scheduled.size; },
+    cancelledIds,
+    async flushNext() {
+      const entries = Array.from(scheduled.entries());
+      scheduled.clear();
+      await runWithAct(() => {
+        for (const [, cb] of entries) cb(16);
+      });
+    },
+    restore() {
+      win.requestAnimationFrame = originalRequest;
+      win.cancelAnimationFrame = originalCancel;
+    },
+  };
+}
 
 async function fixture(t: test.TestContext, layout: 'inline' | 'overlay' = 'inline') {
   const env = installDomEnvironment();
@@ -34,7 +73,7 @@ async function fixture(t: test.TestContext, layout: 'inline' | 'overlay' = 'inli
     else Reflect.deleteProperty(globalThis, 'localStorage');
     env.cleanup();
   });
-  return { writes, render, unmount: () => renderer.unmount(),
+  return { writes, panel, render, unmount: () => renderer.unmount(),
     start: () => pointer(separator, 'pointerdown', 100),
     move: (x: number) => pointer(env.window, 'pointermove', x),
     up: (x: number) => pointer(env.window, 'pointerup', x),
@@ -78,4 +117,89 @@ test('overlay resizing retains its existing desired-width behavior', async (t) =
   const f = await fixture(t, 'overlay');
   await f.start(); await f.move(120); await f.up(120);
   assert.deepEqual(f.writes, [700]);
+});
+
+test('rapid pointermove events coalesce into one requestAnimationFrame using the latest width', async (t) => {
+  const f = await fixture(t);
+  const raf = installManualRaf(f.env.window);
+  t.after(() => raf.restore());
+
+  await f.start();
+  // Fire 4 rapid moves within a single frame: 378 + (100 - x).
+  await f.move(110); // 368
+  await f.move(120); // 358
+  await f.move(130); // 348
+  await f.move(140); // 338
+
+  assert.equal(raf.requestCount, 1, 'multiple pointermove events in one frame must schedule only one rAF');
+  assert.equal(raf.pendingCount, 1);
+  assert.equal(
+    f.panel.style.width,
+    'min(720px, var(--aside-inline-max-width, 720px))',
+    'panel width must not re-render synchronously before the animation frame fires',
+  );
+
+  await raf.flushNext();
+  assert.equal(raf.pendingCount, 0);
+  assert.equal(
+    f.panel.style.width,
+    'min(338px, var(--aside-inline-max-width, 338px))',
+    'flushed frame must apply the latest clamped width from the coalesced moves',
+  );
+
+  await f.up(140);
+  assert.deepEqual(f.writes, [338]);
+});
+
+test('pointerup cancels any pending rAF before committing the final width', async (t) => {
+  const f = await fixture(t);
+  const raf = installManualRaf(f.env.window);
+  t.after(() => raf.restore());
+
+  await f.start();
+  await f.move(150); // schedules rAF for 328px
+  assert.equal(raf.pendingCount, 1);
+
+  // Release at 110 (368px) before the queued rAF runs.
+  await f.up(110);
+  assert.equal(raf.cancelledIds.length, 1, 'cleanup on pointerup must cancel the pending rAF');
+  assert.equal(raf.pendingCount, 0);
+  assert.deepEqual(f.writes, [368]);
+  assert.equal(
+    f.panel.style.width,
+    'min(368px, var(--aside-inline-max-width, 368px))',
+  );
+});
+
+for (const mode of ['cancel', 'hidden', 'unmounted'] as const) {
+  test(`${mode} cancels a pending drag rAF so no stale width commits afterward`, async (t) => {
+    const f = await fixture(t);
+    const raf = installManualRaf(f.env.window);
+    t.after(() => raf.restore());
+
+    await f.start();
+    await f.move(140);
+    assert.equal(raf.pendingCount, 1);
+
+    if (mode === 'cancel') await f.cancel(140);
+    else if (mode === 'hidden') await f.render(false);
+    else await f.unmount();
+
+    assert.equal(raf.cancelledIds.length, 1, `${mode} must cancel pending rAF`);
+    assert.equal(raf.pendingCount, 0);
+    assert.deepEqual(f.writes, []);
+  });
+}
+
+test('split-panel-enter animates compositor-only transform and opacity without width reflow', () => {
+  const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
+  const start = css.indexOf('@keyframes split-panel-enter');
+  const end = css.indexOf('/* Security-key prompts', start);
+  assert.ok(start !== -1 && end > start);
+  const block = css.slice(start, end);
+
+  assert.match(block, /transform:\s*translateX\(/);
+  assert.match(block, /will-change:\s*transform,\s*opacity;/);
+  assert.doesNotMatch(block, /\bwidth\s*:/);
+  assert.doesNotMatch(block, /\bmin-width\s*:/);
 });

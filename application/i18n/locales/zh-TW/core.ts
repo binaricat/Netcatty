@@ -482,7 +482,7 @@ export const zhTWCoreMessages: Messages = {
   'settings.appearance.themeColor.dark': '深色主題',
   'settings.appearance.customCss': '自訂 CSS',
   'settings.appearance.customCss.desc':
-    '使用自訂 CSS 個人化介面，修改會立即生效。選取的頂部分頁（`.top-tab[data-active="true"]`）會讀取 `--top-tab-active-bg`、`--top-tab-active-fg` 和 `--top-tab-active-border`。不設定則維持目前外觀。',
+    '使用自訂 CSS 個人化介面，修改會立即生效。',
   'settings.appearance.customCss.help.ariaLabel': '自訂 CSS 說明',
   'settings.appearance.customCss.help.title': '自訂 CSS 說明',
   'settings.appearance.customCss.help.body': `主要 UI 區塊都公開了 \`data-section\` 屬性，供你用 CSS 定位。編輯後會立即生效。
@@ -1167,6 +1167,8 @@ Vaults 分頁維持扁平，不使用這塊背景。
   'sftp.encoding.auto': '自動',
   'sftp.encoding.utf8': 'UTF-8',
   'sftp.encoding.gb18030': 'GB18030',
+  'sftp.goBack': '後退',
+  'sftp.goForward': '前進',
   'sftp.goHome': '返回主目錄',
   'sftp.goRoot': '回到根目錄',
   'sftp.folderName': '資料夾名稱',

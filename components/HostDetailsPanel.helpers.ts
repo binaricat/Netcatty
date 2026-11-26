@@ -159,6 +159,23 @@ export const prepareProxyConfigForSave = (params: {
   };
 };
 
+export const mapProxySaveErrorKey = (error: ProxySaveValidationError): string => {
+  switch (error) {
+    case "port":
+      return "proxyProfiles.error.port";
+    case "required":
+      return "hostDetails.proxyPanel.error.required";
+    case "missingSaved":
+      return "hostDetails.proxyPanel.missingSaved";
+    case "missingIdentity":
+      return "hostDetails.proxyPanel.missingIdentity";
+    case "incompleteIdentity":
+      return "hostDetails.proxyPanel.incompleteIdentity";
+    case "unreadableIdentity":
+      return "hostDetails.proxyPanel.unreadableIdentity";
+  }
+};
+
 
 export const EMPTY_CUSTOM_PROXY_DRAFT: ProxyConfig = { type: "http", host: "", port: 8080 };
 

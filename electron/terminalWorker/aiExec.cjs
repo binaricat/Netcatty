@@ -16,13 +16,24 @@ const {
 } = require("../bridges/ai/sessionShellKind.cjs");
 const {
   checkBlocklistForShell,
+  checkBlocklistCommonOnly,
   resolveSessionBlocklistShellKind,
 } = require("../bridges/ai/commandSafety.cjs");
+const {
+  DEFAULT_MAX_BACKGROUND_JOB_OUTPUT_CHARS,
+  DEFAULT_BACKGROUND_JOB_RETENTION_MS,
+  DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS,
+  refreshRunningJobSnapshot: refreshRunningWorkerJobSnapshot,
+  storeCompletedJobOutput: sharedStoreCompletedJobOutput,
+  pruneCompletedBackgroundJobs: sharedPruneCompletedBackgroundJobs,
+  collapseCarriageReturns,
+  serializeBackgroundJob: sharedSerializeBackgroundJob,
+} = require("../bridges/ai/backgroundJobOutput.cjs");
 
 const DEFAULT_BACKGROUND_JOB_TIMEOUT_MS = 60 * 60 * 1000;
-const DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS = 30 * 1000;
-const BACKGROUND_JOB_RETENTION_MS = 10 * 60 * 1000;
-const MAX_BACKGROUND_JOB_OUTPUT_CHARS = 256 * 1024;
+const BACKGROUND_JOB_POLL_INTERVAL_MS = DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS;
+const BACKGROUND_JOB_RETENTION_MS = DEFAULT_BACKGROUND_JOB_RETENTION_MS;
+const MAX_BACKGROUND_JOB_OUTPUT_CHARS = DEFAULT_MAX_BACKGROUND_JOB_OUTPUT_CHARS;
 const EXECUTION_GUARD_ERROR = "AI privacy session is unavailable or its settings changed; start a new chat";
 
 async function checkWorkerExecution(event, activePtyExecs, chatSessionId) {
@@ -77,146 +88,16 @@ function createWorkerBackgroundJobId() {
   return `job_${Date.now().toString(36)}_${crypto.randomBytes(6).toString("hex")}`;
 }
 
-function readWorkerJobSnapshot(job) {
-  if (!job) {
-    return {
-      stdout: "",
-      outputBaseOffset: 0,
-      totalOutputChars: 0,
-      outputTruncated: false,
-    };
-  }
-  if (job.status === "running" || job.status === "stopping") {
-    const snapshot = job.handle?.getSnapshot?.();
-    if (snapshot) {
-      const stdout = String(snapshot.stdout || "");
-      const outputBaseOffset = Math.max(0, Number(snapshot.outputBaseOffset) || 0);
-      const totalOutputChars = Math.max(outputBaseOffset + stdout.length, Number(snapshot.totalOutputChars) || 0);
-      return {
-        stdout,
-        outputBaseOffset,
-        totalOutputChars,
-        outputTruncated: Boolean(snapshot.outputTruncated),
-      };
-    }
-  }
-  const stdout = String(job.stdout || "");
-  const outputBaseOffset = Math.max(0, Number(job.outputBaseOffset) || 0);
-  const totalOutputChars = Math.max(outputBaseOffset + stdout.length, Number(job.totalOutputChars) || 0);
-  return {
-    stdout,
-    outputBaseOffset,
-    totalOutputChars,
-    outputTruncated: Boolean(job.outputTruncated),
-  };
-}
-
-function createWorkerOutputWindow(stdout) {
-  const fullText = String(stdout || "");
-  const totalOutputChars = fullText.length;
-  const outputBaseOffset = Math.max(0, totalOutputChars - MAX_BACKGROUND_JOB_OUTPUT_CHARS);
-  return {
-    stdout: outputBaseOffset > 0 ? fullText.slice(outputBaseOffset) : fullText,
-    outputBaseOffset,
-    totalOutputChars,
-    outputTruncated: outputBaseOffset > 0,
-  };
-}
-
-function refreshRunningWorkerJobSnapshot(job) {
-  if (!job || (job.status !== "running" && job.status !== "stopping")) return;
-  const snapshot = readWorkerJobSnapshot(job);
-  job.stdout = snapshot.stdout;
-  job.outputBaseOffset = snapshot.outputBaseOffset;
-  job.totalOutputChars = snapshot.totalOutputChars;
-  job.outputTruncated = snapshot.outputTruncated;
-}
-
 function storeCompletedWorkerJobOutput(job, stdout, metadata = null) {
-  if (metadata && typeof metadata === "object") {
-    const normalizedStdout = String(metadata.stdout ?? stdout ?? "");
-    const outputBaseOffset = Math.max(0, Number(metadata.outputBaseOffset) || 0);
-    const totalOutputChars = Math.max(outputBaseOffset + normalizedStdout.length, Number(metadata.totalOutputChars) || 0);
-    job.stdout = normalizedStdout;
-    job.outputBaseOffset = outputBaseOffset;
-    job.totalOutputChars = totalOutputChars;
-    job.outputTruncated = Boolean(metadata.outputTruncated);
-    job.handle = null;
-    return;
-  }
-  const window = createWorkerOutputWindow(stdout);
-  job.stdout = window.stdout;
-  job.outputBaseOffset = window.outputBaseOffset;
-  job.totalOutputChars = window.totalOutputChars;
-  job.outputTruncated = window.outputTruncated;
-  job.handle = null;
+  sharedStoreCompletedJobOutput(job, stdout, metadata, MAX_BACKGROUND_JOB_OUTPUT_CHARS);
 }
 
 function pruneCompletedWorkerJobs(backgroundJobs, now = Date.now()) {
-  for (const [jobId, job] of backgroundJobs) {
-    if (job.status === "running" || job.status === "stopping") continue;
-    const updatedAt = Number(job.updatedAt) || 0;
-    if (updatedAt > 0 && now - updatedAt > BACKGROUND_JOB_RETENTION_MS) {
-      backgroundJobs.delete(jobId);
-    }
-  }
-}
-
-function collapseCarriageReturns(text) {
-  if (!text || text.indexOf("\r") === -1) return text;
-  let result = "";
-  let crPending = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (ch === "\r") {
-      crPending = true;
-      continue;
-    }
-    if (ch === "\n") {
-      crPending = false;
-      result += ch;
-      continue;
-    }
-    if (crPending) {
-      const lastNl = result.lastIndexOf("\n");
-      result = lastNl >= 0 ? result.slice(0, lastNl + 1) : "";
-      crPending = false;
-    }
-    result += ch;
-  }
-  return result;
+  sharedPruneCompletedBackgroundJobs(backgroundJobs, now, BACKGROUND_JOB_RETENTION_MS);
 }
 
 function serializeWorkerJob(job, offset = 0) {
-  if (job.status === "running" || job.status === "stopping") {
-    refreshRunningWorkerJobSnapshot(job);
-  }
-  const stdout = job.stdout || "";
-  const outputBaseOffset = job.outputBaseOffset || 0;
-  const totalOutputChars = Math.max(outputBaseOffset + stdout.length, job.totalOutputChars || 0);
-  const numericOffset = Math.max(0, Number(offset) || 0);
-  const relativeOffset = numericOffset <= outputBaseOffset
-    ? 0
-    : Math.min(numericOffset - outputBaseOffset, stdout.length);
-  return {
-    ok: true,
-    jobId: job.id,
-    sessionId: job.sessionId,
-    command: job.command,
-    status: job.status,
-    completed: job.status !== "running" && job.status !== "stopping",
-    exitCode: job.exitCode,
-    error: job.error,
-    ...(job.code ? { code: job.code } : {}),
-    startedAt: job.startedAt,
-    updatedAt: job.updatedAt,
-    output: collapseCarriageReturns(stdout.slice(relativeOffset)),
-    nextOffset: totalOutputChars,
-    totalOutputChars,
-    outputBaseOffset,
-    outputTruncated: Boolean(job.outputTruncated),
-    recommendedPollIntervalMs: DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS,
-  };
+  return sharedSerializeBackgroundJob(job, offset, BACKGROUND_JOB_POLL_INTERVAL_MS);
 }
 
 function getScopedWorkerJob(backgroundJobs, jobId, chatSessionId) {
@@ -259,7 +140,22 @@ function createWorkerAiExecHandler({
       sessionMeta,
       enforceWallTimeout,
       commandBlocklist,
+      // terminal_execute_bulk validates every target before sending to any of them:
+      // run every deterministic check below, then stop without touching the session.
+      precheck,
+      probe,
     } = payload;
+    // A precheck with probe:false must not open any channel to the host.
+    const noProbe = precheck === true && probe === false;
+    const checkBlocklist = (cmd, session) => {
+      if (!noProbe) {
+        return checkBlocklistForShell(cmd, resolveSessionBlocklistShellKind(session), commandBlocklist);
+      }
+      const knownKind = resolveSessionBlocklistShellKind(session);
+      return knownKind
+        ? checkBlocklistForShell(cmd, knownKind, commandBlocklist)
+        : checkBlocklistCommonOnly(cmd, commandBlocklist);
+    };
     const session = sessions?.get(sessionId);
     if (!session) {
       return { ok: false, error: "Session not found" };
@@ -281,6 +177,7 @@ function createWorkerAiExecHandler({
     const ptyStream = session.stream || session.pty || session.proc;
 
     if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
+      if (precheck === true) return { ok: true };
       const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
       if (blocked) return blocked;
       return execViaRawPty(ptyStream, command, {
@@ -295,19 +192,18 @@ function createWorkerAiExecHandler({
       // Remote sessions may not set shellKind at connect time; probe once so
       // fish login shells get the fish wrapper (issue #1854). Cancellable so
       // Stop during the probe window does not still type the command.
-      const probed = await ensureSessionShellKindForExec(session, {
-        trackForCancellation: activePtyExecs,
-        chatSessionId,
-      });
-      if (!probed.ok) return probed;
-      const safety = checkBlocklistForShell(
-        command,
-        resolveSessionBlocklistShellKind(session),
-        commandBlocklist,
-      );
+      if (!noProbe) {
+        const probed = await ensureSessionShellKindForExec(session, {
+          trackForCancellation: activePtyExecs,
+          chatSessionId,
+        });
+        if (!probed.ok) return probed;
+      }
+      const safety = checkBlocklist(command, session);
       if (safety.blocked) {
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
       }
+      if (precheck === true) return { ok: true };
       const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
       if (blocked) return blocked;
       return execViaPty(ptyStream, command, {
@@ -359,19 +255,18 @@ function createWorkerAiExecHandler({
 
     const sshClient = session.sshClient || session.conn;
     if (!session.singleChannelSsh && sshClient && typeof sshClient.exec === "function") {
-      const probed = await ensureSessionShellKindForExec(session, {
-        trackForCancellation: activePtyExecs,
-        chatSessionId,
-      });
-      if (!probed.ok) return probed;
-      const safety = checkBlocklistForShell(
-        command,
-        resolveSessionBlocklistShellKind(session),
-        commandBlocklist,
-      );
+      if (!noProbe) {
+        const probed = await ensureSessionShellKindForExec(session, {
+          trackForCancellation: activePtyExecs,
+          chatSessionId,
+        });
+        if (!probed.ok) return probed;
+      }
+      const safety = checkBlocklist(command, session);
       if (safety.blocked) {
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
       }
+      if (precheck === true) return { ok: true };
       const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
       if (blocked) return blocked;
       return execViaChannel(sshClient, command, {
@@ -385,6 +280,7 @@ function createWorkerAiExecHandler({
       if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
         return { ok: false, error: "Serial file transfer is already in progress" };
       }
+      if (precheck === true) return { ok: true };
       const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
       if (blocked) return blocked;
       return execViaRawPty(session.serialPort, command, {
@@ -710,9 +606,14 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
     cancelPtyExecsForSession(activePtyExecs, payload.chatSessionId);
     cancelWorkerBackgroundJobsForSession(backgroundJobs, payload.chatSessionId);
   });
+  // Foreground execs only; background jobs of the same chat keep running.
+  ipcMain.on("netcatty:ai:exec:cancel", (_event, payload = {}) => {
+    cancelPtyExecsForSession(activePtyExecs, payload.chatSessionId);
+  });
 }
 
 module.exports = {
+  collapseCarriageReturns,
   cancelWorkerBackgroundJobsForSession,
   cancelPtyExecsForSession,
   createWorkerAiExecHandler,

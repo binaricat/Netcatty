@@ -458,11 +458,31 @@ function ensureTrayPanelWindow() {
     console.log(`[TrayPanel:renderer:${level}] ${message}`);
   });
 
-  trayPanelWindow.on("blur", () => {
+  const panelWin = trayPanelWindow;
+
+  panelWin.on("blur", () => {
     try {
-      trayPanelWindow?.hide();
+      if (trayPanelWindow === panelWin) {
+        hideTrayPanel();
+      }
     } catch {
       // ignore
+    }
+  });
+
+  panelWin.on("hide", () => {
+    if (trayPanelWindow === panelWin) {
+      trayPanelShowWhenReady = false;
+      clearTrayPanelRefreshTimer();
+    }
+  });
+
+  panelWin.on("closed", () => {
+    if (trayPanelWindow === panelWin) {
+      clearTrayPanelRefreshTimer();
+      trayPanelWindow = null;
+      trayPanelReady = false;
+      trayPanelShowWhenReady = false;
     }
   });
 
@@ -508,6 +528,13 @@ function readCursorPoint() {
   }
 }
 
+function clearTrayPanelRefreshTimer() {
+  if (trayPanelRefreshTimer) {
+    clearInterval(trayPanelRefreshTimer);
+    trayPanelRefreshTimer = null;
+  }
+}
+
 function showTrayPanel(eventBounds) {
   if (!tray) return;
   const { screen } = electronModule;
@@ -545,7 +572,7 @@ function showTrayPanel(eventBounds) {
 
   pushTrayMenuDataToPanel();
 
-  if (trayPanelRefreshTimer) clearInterval(trayPanelRefreshTimer);
+  clearTrayPanelRefreshTimer();
   trayPanelRefreshTimer = setInterval(() => {
     try {
       if (!trayPanelWindow || trayPanelWindow.isDestroyed() || !trayPanelWindow.isVisible()) return;
@@ -558,13 +585,13 @@ function showTrayPanel(eventBounds) {
 
 function hideTrayPanel() {
   trayPanelShowWhenReady = false;
+  clearTrayPanelRefreshTimer();
   if (trayPanelWindow && !trayPanelWindow.isDestroyed()) {
-    trayPanelWindow.hide();
-  }
-
-  if (trayPanelRefreshTimer) {
-    clearInterval(trayPanelRefreshTimer);
-    trayPanelRefreshTimer = null;
+    try {
+      trayPanelWindow.hide();
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -1286,6 +1313,8 @@ function setTrayMenuData(data) {
  * Destroy the system tray icon
  */
 function destroyTray() {
+  hideTrayPanel();
+  unbindWindowsTrayScaleListener();
   if (tray) {
     try {
       tray.destroy();
@@ -1530,10 +1559,7 @@ function cleanup() {
     }
   }
 
-  if (trayPanelRefreshTimer) {
-    clearInterval(trayPanelRefreshTimer);
-    trayPanelRefreshTimer = null;
-  }
+  clearTrayPanelRefreshTimer();
 
   if (trayPanelWindow && !trayPanelWindow.isDestroyed()) {
     try {

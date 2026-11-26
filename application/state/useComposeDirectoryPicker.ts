@@ -109,9 +109,10 @@ export function useComposeDirectoryPicker(sessionId: string) {
 
   const filtered = useMemo(() => filterDirectories(entries, query, showHidden), [entries, query, showHidden]);
   const cwdError = controller?.getCwdError() ?? null;
+  const waitsForCwd = error === 'unknown' || error === 'integrationUnavailable' || error === 'cmdIntegrationUnavailable' || error === 'nonFilesystem';
   return { cwd, home, pathFlavor, open, setOpen, query, setQuery, showHidden, setShowHidden, entries: filtered,
     parent: cwd ? directoryParent(cwd, pathFlavor) : null, loading, pending,
-    error: cwdError ?? (cwd && (error === 'unknown' || error === 'integrationUnavailable' || error === 'nonFilesystem') ? null : error),
+    error: cwdError ?? (cwd && waitsForCwd ? null : error),
     available: !!controller?.capabilities.listDirectories && !!controller.capabilities.changeDirectory && !!controller.capabilities.confirmChange,
     refresh, reload: load, change };
 }

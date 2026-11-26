@@ -3,6 +3,7 @@ import { sliceHead } from '../textBoundaries';
 
 const MAX_DECISIONS = 15;
 const MAX_BLOCKERS = 10;
+const DEFAULT_MAX_SESSIONS = 64;
 
 export interface ActiveTerminalJobState {
   sessionId?: string;
@@ -69,9 +70,28 @@ function terminalJobDefinitelyGone(result: Record<string, unknown> | undefined, 
 
 export class SessionStateStore {
   private readonly bySession = new Map<string, CattySessionState>();
+  private readonly maxSessions: number;
+
+  constructor(maxSessions = DEFAULT_MAX_SESSIONS) {
+    this.maxSessions = Math.max(1, Math.floor(maxSessions));
+  }
+
+  private setSessionState(chatSessionId: string, state: CattySessionState): void {
+    this.bySession.delete(chatSessionId);
+    this.bySession.set(chatSessionId, state);
+    while (this.bySession.size > this.maxSessions) {
+      const oldestKey = this.bySession.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.bySession.delete(oldestKey);
+    }
+  }
 
   get(chatSessionId: string): CattySessionState {
-    return this.bySession.get(chatSessionId) ?? emptyState();
+    const existing = this.bySession.get(chatSessionId);
+    if (!existing) return emptyState();
+    this.bySession.delete(chatSessionId);
+    this.bySession.set(chatSessionId, existing);
+    return existing;
   }
 
   clear(chatSessionId: string): void {
@@ -83,7 +103,7 @@ export class SessionStateStore {
     const state = { ...this.get(chatSessionId) };
     state.userGoal = sliceHead(goal.trim(), 500);
     state.updatedAt = Date.now();
-    this.bySession.set(chatSessionId, state);
+    this.setSessionState(chatSessionId, state);
   }
 
   mergeFromAssistantContent(chatSessionId: string, content: string): void {
@@ -103,7 +123,7 @@ export class SessionStateStore {
         };
       }
     }
-    this.bySession.set(chatSessionId, state);
+    this.setSessionState(chatSessionId, state);
   }
 
   mergeFileChanges(chatSessionId: string, paths: string[]): void {
@@ -113,7 +133,7 @@ export class SessionStateStore {
       state.editedFiles,
     );
     state.updatedAt = Date.now();
-    this.bySession.set(chatSessionId, state);
+    this.setSessionState(chatSessionId, state);
   }
 
   mergePlan(chatSessionId: string, items: Array<{ text: string; completed: boolean }>): void {
@@ -123,7 +143,7 @@ export class SessionStateStore {
       completed: item.completed,
     }));
     state.updatedAt = Date.now();
-    this.bySession.set(chatSessionId, state);
+    this.setSessionState(chatSessionId, state);
   }
 
   updateFromToolResult(
@@ -249,7 +269,7 @@ export class SessionStateStore {
     }
 
     state.updatedAt = Date.now();
-    this.bySession.set(chatSessionId, state);
+    this.setSessionState(chatSessionId, state);
   }
 
   toReinjectionText(chatSessionId: string): string | undefined {

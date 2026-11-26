@@ -78,6 +78,11 @@ test("actual main TCP gate binds delegated credentials, scope and policy at work
   assert.deepEqual(selected.hosts.map((item) => item.sessionId), ["synthetic-a"]);
   assert.equal(inventoryRequests, 0, "delegated context must not query app-wide tunnel inventory");
   await assert.rejects(client.call("netcatty/getStatus", {}), /outside the Agent delegation/);
+  await assert.rejects(
+    client.call("netcatty/execBulk", { command: "synthetic", sessionIds: JSON.stringify(["synthetic-a", "synthetic-b"]) }),
+    /outside the Agent delegation/,
+    "fan-out execution is not part of any agent delegation",
+  );
   const run = (sessionId = target.id) => client.call("netcatty/exec", { sessionId, command: "printf synthetic" });
   const beforeDecision = decisions;
   assert.equal((await run()).stdout, "synthetic output");

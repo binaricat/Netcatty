@@ -1,4 +1,13 @@
-export const SDK_SESSION_ID_PREFIX = 'netcatty-sdk-session:';
+import {
+  SDK_SESSION_ID_PREFIX as SHARED_SDK_SESSION_ID_PREFIX,
+  encodeSdkSessionIdentity as encodeSharedSdkSessionIdentity,
+  normalizeCursorAuthMode as normalizeSharedCursorAuthMode,
+  normalizeCursorCliMode as normalizeSharedCursorCliMode,
+  normalizeSdkRuntime as normalizeSharedSdkRuntime,
+  parseSdkSessionIdentity as parseSharedSdkSessionIdentity,
+} from "@/domain/sdkSessionIdentity.shared.cjs";
+
+export const SDK_SESSION_ID_PREFIX = SHARED_SDK_SESSION_ID_PREFIX;
 
 export type CursorAuthModeIdentity = 'api-key' | 'cli-login';
 export type CursorCliModeIdentity = 'ask' | 'agent';
@@ -18,23 +27,19 @@ export interface SdkSessionIdentityPayload {
 export function normalizeCursorAuthMode(
   authMode: string | undefined | null,
 ): CursorAuthModeIdentity | undefined {
-  return authMode === 'cli-login' ? 'cli-login' : authMode === 'api-key' ? 'api-key' : undefined;
+  return normalizeSharedCursorAuthMode(authMode);
 }
 
 export function normalizeCursorCliMode(
   cliMode: string | undefined | null,
 ): CursorCliModeIdentity | undefined {
-  return cliMode === 'ask' ? 'ask' : cliMode === 'agent' ? 'agent' : undefined;
+  return normalizeSharedCursorCliMode(cliMode);
 }
 
 export function normalizeSdkRuntime(
   runtime: string | undefined | null,
 ): SdkRuntimeIdentity {
-  const raw = String(runtime || '').trim().toLowerCase();
-  if (raw === 'app-server') return 'app-server';
-  if (raw === 'acp') return 'acp';
-  if (raw === 'streaming-json' || raw === 'cli' || raw === 'headless') return 'streaming-json';
-  return 'sdk';
+  return normalizeSharedSdkRuntime(runtime);
 }
 
 export function encodeSdkSessionIdentity(
@@ -45,36 +50,9 @@ export function encodeSdkSessionIdentity(
   authMode?: string,
   cliMode?: string,
 ): string {
-  if (!sessionId || !sdkBackend) return sessionId;
-  const payload: SdkSessionIdentityPayload = {
-    v: 1,
-    id: sessionId,
-    backend: sdkBackend,
-    binPath: binPath || '',
-    runtime: normalizeSdkRuntime(runtime),
-  };
-  const normalizedAuthMode = normalizeCursorAuthMode(authMode);
-  if (normalizedAuthMode) payload.authMode = normalizedAuthMode;
-  const normalizedCliMode = normalizeCursorCliMode(cliMode);
-  if (normalizedCliMode) payload.cliMode = normalizedCliMode;
-  return `${SDK_SESSION_ID_PREFIX}${encodeURIComponent(JSON.stringify(payload))}`;
+  return encodeSharedSdkSessionIdentity(sessionId, sdkBackend, binPath, runtime, authMode, cliMode);
 }
 
 export function parseSdkSessionIdentity(value: string | undefined | null): SdkSessionIdentityPayload | null {
-  const raw = String(value || '').trim();
-  if (!raw.startsWith(SDK_SESSION_ID_PREFIX)) return null;
-  try {
-    const parsed = JSON.parse(decodeURIComponent(raw.slice(SDK_SESSION_ID_PREFIX.length))) as SdkSessionIdentityPayload;
-    if (parsed?.v !== 1 || !parsed.id || !parsed.backend) return null;
-    const authMode = normalizeCursorAuthMode(parsed.authMode);
-    const cliMode = normalizeCursorCliMode(parsed.cliMode);
-    return {
-      ...parsed,
-      runtime: normalizeSdkRuntime(parsed.runtime),
-      ...(authMode ? { authMode } : {}),
-      ...(cliMode ? { cliMode } : {}),
-    };
-  } catch {
-    return null;
-  }
+  return parseSharedSdkSessionIdentity(value);
 }

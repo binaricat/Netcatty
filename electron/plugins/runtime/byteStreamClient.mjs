@@ -27,6 +27,12 @@ export async function connectByteStream({ client, streams, subscriptions, enable
     await close().catch(() => {});
     throw new PluginError("cancelled", "Byte stream connection cancelled");
   };
+  const upgradeTls = (options = {}) => client.request("network.stream.upgradeTls", {
+    handleId: descriptor.handleId,
+    ...(options?.servername === undefined ? {} : { servername: options.servername }),
+    ...(options?.allowSelfSigned === undefined ? {} : { allowSelfSigned: options.allowSelfSigned }),
+    ...(options?.caPem === undefined ? {} : { caPem: options.caPem }),
+  }, { cancellationToken, deadlineMs: 60_000 });
   try {
     await checkCancelled();
     readablePromise = streams.acceptReadable(descriptor.outputStreamId);
@@ -37,6 +43,7 @@ export async function connectByteStream({ client, streams, subscriptions, enable
     await checkCancelled();
     connection = Object.freeze({
       endpoint: descriptor.endpoint,
+      ...(descriptor.hostBindingToken ? { hostBindingToken: descriptor.hostBindingToken } : {}),
       readable: Object.freeze({
         id: readable.id, read: () => readable.read(), cancel, dispose: cancel,
       }),
@@ -44,6 +51,7 @@ export async function connectByteStream({ client, streams, subscriptions, enable
         id: writable.id, write: (bytes) => writable.write(bytes), end: () => writable.end(),
         fail: cancel, cancel, dispose: cancel,
       }),
+      upgradeTls,
       close, dispose: cancel,
     });
     cancellation = cancellationToken?.onCancellationRequested(cancel);

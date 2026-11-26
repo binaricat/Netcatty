@@ -67,19 +67,28 @@ for (const platform of ['linux', 'darwin']) {
   });
 }
 
-test('Windows native PowerShell registers a Win32 controller without enabling CMD or POSIX wrappers', async t => {
+test('Windows native shells register independent Win32 controllers alongside a Bash session', async t => {
   installBridge(t, async () => ({ name: 'Netcatty', version: 'test', platform: 'win32' }));
-  function Harness() {
+  function NativeShells() {
     useTerminalDirectorySession(options('native-powershell', 'local', 'powershell'));
     useTerminalDirectorySession(options('native-cmd', 'local', 'cmd'));
     return null;
   }
+  function Harness({ showNative }: { showNative: boolean }) {
+    const props = options('first-bash');
+    props.host = { ...props.host, localShell: 'git-bash' };
+    useTerminalDirectorySession(props);
+    return showNative ? React.createElement(NativeShells) : null;
+  }
   let root!: ReactTestRenderer;
-  await act(async () => { root = create(React.createElement(Harness)); });
+  await act(async () => { root = create(React.createElement(Harness, { showNative: false })); });
   t.after(async () => { await act(async () => { root.unmount(); }); });
+  await act(async () => { root.update(React.createElement(Harness, { showNative: true })); });
+  assert.equal(getTerminalDirectory('first-bash'), null);
   assert.equal(getTerminalDirectory('native-powershell')?.target.pathFlavor, 'win32');
   assert.equal(getTerminalDirectory('native-powershell')?.target.authority, 'local:native-powershell');
-  assert.equal(getTerminalDirectory('native-cmd'), null);
+  assert.equal(getTerminalDirectory('native-cmd')?.target.pathFlavor, 'win32');
+  assert.equal(getTerminalDirectory('native-cmd')?.target.authority, 'local:native-cmd');
 });
 
 test('Windows SSH sessions do not inherit the local cwd platform limitation', async t => {

@@ -48,6 +48,7 @@ function baseProps() {
       { type: "terminal" as const, targetId: "t-2", label: "core", hostIds: undefined as string[] | undefined },
     ],
     onSelect: (_sessionId: string) => {},
+    onFocusScope: undefined as ((_target: { type: "terminal" | "workspace"; targetId: string }) => boolean | void) | undefined,
     onRebind: (_sessionId: string, _target: { type: string; targetId: string; hostIds?: string[] }) => {},
     onRename: undefined as ((_sessionId: string, _title: string) => void) | undefined,
     onDelete: (_sessionId: string) => {},
@@ -480,6 +481,63 @@ test("history drawer hosts the manager behind a current/all toggle", async () =>
     assert.ok(manager, "all tab renders the manager");
     const rowIds = rows(renderer).map((row) => row.dataset.sessionId);
     assert.ok(rowIds.includes("gone"), "all view shows chats outside the drawer's current list");
+  } finally {
+    dom.cleanup();
+  }
+});
+
+test("clicking an active-elsewhere chat jumps to its open panel instead of moving it; past chats still open directly", async () => {
+  const dom = installDomEnvironment();
+  try {
+    const props = baseProps();
+    props.sessions = [
+      makeSession({ id: "elsewhere-term", title: "Active in core", scope: { type: "terminal", targetId: "t-2" }, updatedAt: 300 }),
+      makeSession({ id: "elsewhere-ws", title: "Active in prod", scope: { type: "workspace", targetId: "w-1" }, updatedAt: 200 }),
+      makeSession({ id: "past-chat", title: "Closed host chat", scope: { type: "terminal", targetId: "t-gone", hostIds: ["h-old"] }, updatedAt: 100 }),
+    ];
+    props.activeSessionIdMap = {
+      "terminal:t-2": "elsewhere-term",
+      "workspace:w-1": "elsewhere-ws",
+    };
+    const selected: string[] = [];
+    const focused: Array<{ type: "terminal" | "workspace"; targetId: string }> = [];
+    props.onSelect = (id) => selected.push(id);
+    props.onFocusScope = (target) => {
+      focused.push(target);
+      return true;
+    };
+    const renderer = await renderManager(dom, props);
+
+    const byId = (id: string) => rows(renderer).find((row) => row.dataset.sessionId === id)!;
+    await dispatchDomEvent(byId("elsewhere-term"), new dom.window.MouseEvent("click", { bubbles: true }));
+    await dispatchDomEvent(byId("elsewhere-ws"), new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await dispatchDomEvent(byId("past-chat"), new dom.window.MouseEvent("click", { bubbles: true }));
+
+    assert.deepEqual(focused, [
+      { type: "terminal", targetId: "t-2" },
+      { type: "workspace", targetId: "w-1" },
+    ]);
+    assert.deepEqual(selected, ["past-chat"]);
+  } finally {
+    dom.cleanup();
+  }
+});
+
+test("clicking an active-elsewhere chat falls back to opening locally when focusing the target panel fails", async () => {
+  const dom = installDomEnvironment();
+  try {
+    const props = baseProps();
+    props.sessions = [
+      makeSession({ id: "elsewhere-term", title: "Active in core", scope: { type: "terminal", targetId: "t-2" } }),
+    ];
+    props.activeSessionIdMap = { "terminal:t-2": "elsewhere-term" };
+    const selected: string[] = [];
+    props.onSelect = (id) => selected.push(id);
+    props.onFocusScope = () => false;
+    const renderer = await renderManager(dom, props);
+
+    await dispatchDomEvent(rows(renderer)[0], new dom.window.MouseEvent("click", { bubbles: true }));
+    assert.deepEqual(selected, ["elsewhere-term"]);
   } finally {
     dom.cleanup();
   }

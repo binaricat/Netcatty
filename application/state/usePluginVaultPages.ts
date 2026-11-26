@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { activeTabStore, useActiveTabId } from './activeTabStore';
+import { activeTabStore, useIsVaultActive } from './activeTabStore';
 import { collectPluginVaultPages, PLUGIN_VAULT_PAGE_PREFIX, resolvePluginVaultPage } from './pluginVaultPages';
 import { usePluginContributions } from './usePluginContributions';
 import { OPEN_PLUGIN_VIEW_EVENT, type OpenPluginViewDetail } from './usePluginViewLifecycle';
@@ -11,7 +11,7 @@ export function usePluginVaultPages({ locale, section, select }: {
   section: string;
   select(section: 'hosts' | `plugin-vault:${string}`): void;
 }) {
-  const active = useActiveTabId() === 'vault';
+  const active = useIsVaultActive();
   const sectionRef = useRef(section);
   const focusFrame = useRef<number | null>(null);
   sectionRef.current = section;
