@@ -1,4 +1,5 @@
 import type { GroupConfig, Host, Identity, ManagedSource, ProxyProfile } from './models';
+import { normalizeAgentCharset } from './vaultHostConnectionSettings';
 import { applyGroupDefaults, resolveGroupDefaults } from './groupConfig';
 import {
   findIntroducedVaultJumpGraphIssue,
@@ -103,6 +104,53 @@ const findReferencedJumpHostProtocolRegression = (
   });
 };
 
+/**
+ * removeDefaults entries and the group config keys each one deletes, so the
+ * parent group (or the app default) applies again. Credentials stay GUI-only.
+ */
+const REMOVABLE_GROUP_DEFAULTS: Record<string, readonly (keyof GroupConfig)[]> = {
+  proxy: ['proxyProfileId', 'proxyConfig'],
+  jumpHostIds: ['hostChain'],
+  startupCommand: ['startupCommand'],
+  startupCommandRunMode: ['startupCommandRunMode'],
+  environmentVariables: ['environmentVariables'],
+  moshEnabled: ['moshEnabled'],
+  moshServerPath: ['moshServerPath'],
+  etEnabled: ['etEnabled'],
+  etPort: ['etPort'],
+  deviceType: ['deviceType'],
+  charset: ['charset'],
+  backspaceBehavior: ['backspaceBehavior'],
+};
+
+const REMOVE_CONFLICT_KEYS: Record<string, readonly string[]> = {
+  proxy: ['proxyProfileId'],
+};
+
+function parseRemoveDefaults(raw: unknown): string[] | { error: string } {
+  if (raw === undefined || raw === null) return [];
+  let value: unknown = raw;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[')) {
+      try { value = JSON.parse(trimmed); } catch { return { error: 'removeDefaults must be a valid JSON array.' }; }
+    } else {
+      value = trimmed ? trimmed.split(',') : [];
+    }
+  }
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    return { error: 'removeDefaults must be an array of field names.' };
+  }
+  const fields = Array.from(new Set((value as string[]).map((entry) => entry.trim()).filter(Boolean)));
+  const unknown = fields.find((field) => !Object.hasOwn(REMOVABLE_GROUP_DEFAULTS, field));
+  if (unknown) {
+    return {
+      error: `removeDefaults cannot remove "${unknown}". Allowed: ${Object.keys(REMOVABLE_GROUP_DEFAULTS).join(', ')}.`,
+    };
+  }
+  return fields;
+}
+
 export function patchGroupConfig(
   current: GroupConfig,
   rawDefaults: unknown,
@@ -110,10 +158,43 @@ export function patchGroupConfig(
   proxyProfiles: ProxyProfile[],
   hosts: Host[],
   resolveEffectiveHost?: (host: Host) => Host,
+  rawRemoveDefaults?: unknown,
 ): { ok: true; config: GroupConfig } | { ok: false; error: string } {
   const defaults = parseDefaults(rawDefaults);
   if ('error' in defaults) return { ok: false, error: String(defaults.error) };
+  const removeDefaults = parseRemoveDefaults(rawRemoveDefaults);
+  if ('error' in removeDefaults) return { ok: false, error: removeDefaults.error };
+  for (const field of removeDefaults) {
+    const conflict = [field, ...(REMOVE_CONFLICT_KEYS[field] ?? [])].find((key) => Object.hasOwn(defaults, key));
+    if (conflict) return { ok: false, error: `${conflict} cannot be set and removed in the same update.` };
+  }
+  if (Object.hasOwn(defaults, 'authMethod')) {
+    return { ok: false, error: 'authMethod cannot be set on a group here; choose the group key or identity in Group Details.' };
+  }
   const next: GroupConfig = { ...current };
+  for (const field of removeDefaults) {
+    for (const key of REMOVABLE_GROUP_DEFAULTS[field]) delete next[key];
+  }
+  if (Object.hasOwn(defaults, 'deviceType')) {
+    const deviceType = String(defaults.deviceType ?? '').trim().toLowerCase();
+    if (deviceType !== 'general' && deviceType !== 'network') {
+      return { ok: false, error: 'deviceType must be general or network.' };
+    }
+    next.deviceType = deviceType;
+  }
+  if (Object.hasOwn(defaults, 'charset')) {
+    const charset = normalizeAgentCharset(defaults.charset);
+    if (!charset) {
+      return { ok: false, error: 'charset must be UTF-8 or GB18030 (GBK and GB2312 are saved as GB18030). Use removeDefaults ["charset"] to inherit.' };
+    }
+    next.charset = charset;
+  }
+  if (Object.hasOwn(defaults, 'backspaceBehavior')) {
+    if (String(defaults.backspaceBehavior ?? '').trim().toLowerCase() !== 'ctrl-h') {
+      return { ok: false, error: 'backspaceBehavior must be ctrl-h. Use removeDefaults ["backspaceBehavior"] to inherit.' };
+    }
+    next.backspaceBehavior = 'ctrl-h';
+  }
   if (Object.hasOwn(defaults, 'username')) {
     next.username = String(defaults.username ?? '');
     if (!Object.hasOwn(defaults, 'identityId') && current.identityId) {
@@ -204,7 +285,7 @@ export function upsertGroup(
   defaults: unknown,
   identities: Identity[],
   proxyProfiles: ProxyProfile[],
-  options: { create?: boolean; newPath?: unknown } = {},
+  options: { create?: boolean; newPath?: unknown; removeDefaults?: unknown } = {},
 ): Result {
   const path = normalizePath(pathValue);
   if (!path) return { ok: false, error: 'path is required.' };
@@ -254,6 +335,7 @@ export function upsertGroup(
     proxyProfiles,
     state.hosts,
     resolveProspectiveHost,
+    options.removeDefaults,
   );
   if ('error' in patched) return { ok: false, error: patched.error };
   const groups = options.create

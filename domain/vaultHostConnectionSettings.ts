@@ -82,6 +82,7 @@ export const normalizeAgentCharset = (raw: unknown): 'UTF-8' | 'GB18030' | undef
   typeof raw === 'string' ? CHARSET_ALIASES[raw.trim().toLowerCase().replace(/[^a-z0-9]/g, '')] : undefined
 );
 
+
 type Failure = { ok: false; error: string };
 
 const hasOwn = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key);

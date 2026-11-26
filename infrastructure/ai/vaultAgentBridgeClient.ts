@@ -1254,6 +1254,7 @@ export async function handleVaultAgentOp(
           }, params.path, params.defaults, deps.identities, deps.proxyProfiles, {
             create: op === 'group.create',
             newPath: params.newPath,
+            removeDefaults: op === 'group.update' ? params.removeDefaults : undefined,
           });
           if ('error' in result) return result;
           savedConfig = result.config;

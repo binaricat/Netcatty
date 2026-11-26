@@ -1282,7 +1282,7 @@
       "defaults": {
         "type": "string",
         "optional": true,
-        "description": "JSON object of group defaults: username, identityId, proxyProfileId, jumpHostIds, startupCommand, environmentVariables, moshEnabled, moshServerPath, etEnabled, etPort."
+        "description": "JSON object of group defaults: username, identityId, proxyProfileId, jumpHostIds, startupCommand, environmentVariables, moshEnabled, moshServerPath, etEnabled, etPort, deviceType (general or network), charset (UTF-8 or GB18030; GBK and GB2312 are saved as GB18030), backspaceBehavior (ctrl-h). Hosts in the group inherit them unless they set their own value."
       }
     },
     "policy": {
@@ -1315,7 +1315,12 @@
       "defaults": {
         "type": "string",
         "optional": true,
-        "description": "JSON object containing only group defaults to change."
+        "description": "JSON object containing only group defaults to change. Same fields as vault_groups_create. An empty proxyProfileId removes the group proxy so a parent group proxy or the global default applies."
+      },
+      "removeDefaults": {
+        "type": "string",
+        "optional": true,
+        "description": "JSON array or comma-separated group defaults to remove so a parent group, or the app default, applies again: proxy, jumpHostIds, startupCommand, startupCommandRunMode, environmentVariables, moshEnabled, moshServerPath, etEnabled, etPort, deviceType, charset, backspaceBehavior. Credentials cannot be removed here."
       }
     },
     "policy": {

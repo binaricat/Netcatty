@@ -1913,6 +1913,27 @@ describe('handleVaultAgentOp vault management gaps', () => {
     assert.equal(JSON.stringify(result).includes('hidden'), false);
   });
 
+  it('group.update sets connection defaults and removes them with removeDefaults', async () => {
+    const deps = createDeps({ customGroups: ['prod'], groupConfigs: [{ path: 'prod', startupCommand: 'old' }] });
+
+    const updated = await handleVaultAgentOp('group.update', {
+      path: 'prod',
+      defaults: '{"deviceType":"network","charset":"GBK"}',
+    }, deps);
+    assert.equal(updated.ok, true);
+    assert.equal(deps.getGroupConfigs()[0]?.deviceType, 'network');
+    assert.equal(deps.getGroupConfigs()[0]?.charset, 'GB18030');
+
+    const removed = await handleVaultAgentOp('group.update', {
+      path: 'prod',
+      removeDefaults: 'charset, startupCommand',
+    }, deps);
+    assert.equal(removed.ok, true);
+    assert.equal(deps.getGroupConfigs()[0]?.charset, undefined);
+    assert.equal(deps.getGroupConfigs()[0]?.startupCommand, undefined);
+    assert.equal(deps.getGroupConfigs()[0]?.deviceType, 'network');
+  });
+
   it('host.get reports where host values come from', async () => {
     const groupedHost: Host = { ...host, group: 'prod', backspaceBehavior: 'ctrl-h' };
     const deps = createDeps({
