@@ -86,6 +86,9 @@ const POST_CONVERSION_CORRECTIONS = [
   [/(?<!合)併為/g, "並為"],
   // 后 is a queen; the source is 后 (after), which is 後 in Traditional.
   [/后/g, "後"],
+  // Taiwan util-linux wording.
+  [/塊裝置/g, "區塊裝置"],
+  [/分割槽表/g, "分割表"],
 ];
 
 function applyPostConversionCorrections(text) {
@@ -130,6 +133,7 @@ const descriptionOverrides = new Map([
   ["Do not copy Extended Attributes (EAs) or resource forks", "不複製擴充屬性（EA）或資源分支"],
   ["Follow all symbolic links in the source", "跟隨來源檔案和目錄中的所有符號連結"],
   ["Follow only symbolic links given as source arguments", "僅跟隨以來源引數傳入的符號連結"],
+  ["Finds files matching a given query", "尋找符合指定查詢的檔案"],
   ["If the destination cannot be opened, remove it and retry the copy", "若無法開啟目標檔案，則刪除該檔案並重試複製"],
   ["Preserve file attributes such as permissions, ownership, and timestamps", "保留權限、所有者和所屬組、時間戳等檔案屬性"],
   ["Preserve permissions, ownership, and timestamps", "保留權限、所有者和所屬組及時間戳"],

@@ -46,9 +46,9 @@ Object.defineProperty(globalThis, "localStorage", {
 Object.defineProperty(globalThis, "window", {
   value: {
     netcatty: {
-      listFigSpecs: async () => ["su", "readlink", "date", "base64", "cp", "kubectl", "make"],
+      listFigSpecs: async () => ["su", "readlink", "date", "base64", "cp", "kubectl", "make", "nvm", "airflow", "mdfind"],
       loadFigSpec: async (name: string, hostOs?: string) =>
-        ["cp", "kubectl", "make"].includes(name)
+        ["cp", "kubectl", "make", "nvm", "airflow", "mdfind"].includes(name)
           ? loadFigSpec(electronDir, name, hostOs)
           : byPlatform[hostOs ?? "linux"]?.[name] ?? null,
     },
@@ -193,6 +193,21 @@ test("command-name suggestions use the generated Chinese descriptions", async ()
   assert.equal(
     makeCn.find((item) => item.displayText === "make")?.description,
     "构建自动化工具",
+  );
+  const nvmCn = await suggestions("nv", "linux", "zh-CN");
+  assert.equal(
+    nvmCn.find((item) => item.displayText === "nvm")?.description,
+    "Node 版本管理器",
+  );
+  const airflowCn = await suggestions("airflo", "linux", "zh-CN");
+  assert.equal(
+    airflowCn.find((item) => item.displayText === "airflow")?.description,
+    "用于编写、调度和监控数据管道的工作流调度器",
+  );
+  const mdfindTw = await suggestions("mdfin", "macos", "zh-TW");
+  assert.equal(
+    mdfindTw.find((item) => item.displayText === "mdfind")?.description,
+    "尋找符合指定查詢的檔案",
   );
 });
 

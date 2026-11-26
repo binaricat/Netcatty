@@ -7,7 +7,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,14 +23,15 @@ registerFigSpecHandlers({ handle: (name, handler) => handlers.set(name, handler)
 
 const simplified = JSON.parse(fs.readFileSync(path.join(descriptionDir, 'descriptions.zh-CN.json'), 'utf8'));
 const traditional = JSON.parse(fs.readFileSync(path.join(descriptionDir, 'descriptions.zh-TW.json'), 'utf8'));
-const { COMMAND_DESCRIPTIONS: existing } = await import(targetPath);
+const { COMMAND_DESCRIPTIONS: existing } = await import(pathToFileURL(targetPath).href);
 
 /** Root descriptions for commands whose Fig spec has none. */
 const MANUAL = {
   agrippa: ['Generate a React app with a flexible generator', '使用灵活生成器创建 React 应用', '使用靈活產生器建立 React 應用'],
+  airflow: ['Workflow scheduler for authoring, scheduling and monitoring data pipelines', '用于编写、调度和监控数据管道的工作流调度器', '用於編寫、排程和監控資料管道的工作流排程器'],
   argo: ['Workflow engine for Kubernetes', 'Kubernetes 工作流引擎', 'Kubernetes 工作流程引擎'],
   babel: ['JavaScript compiler', 'JavaScript 编译器', 'JavaScript 編譯器'],
-  barnard59: ['Streaming data pipelines with JavaScript', '使用 JavaScript 构建流式数据管道', '使用 JavaScript 建構串流資料管道'],
+  barnard59: ['Streaming data pipelines with JavaScript', '使用 JavaScript 构建流式数据管道', '使用 JavaScript 構建串流資料管道'],
   bunx: ['Run a package binary with Bun', '使用 Bun 运行软件包二进制', '使用 Bun 執行軟體包二進位檔'],
   bw: ['Bitwarden CLI', 'Bitwarden 命令行工具', 'Bitwarden 命令列工具'],
   bws: ['Bitwarden Secrets Manager CLI', 'Bitwarden Secrets Manager 命令行工具', 'Bitwarden Secrets Manager 命令列工具'],
@@ -49,10 +50,11 @@ const MANUAL = {
   kitty: ['GPU-accelerated terminal emulator', 'GPU 加速的终端模拟器', 'GPU 加速的終端機模擬器'],
   kubecolor: ['Colorized kubectl output', '为 kubectl 输出着色', '為 kubectl 輸出著色'],
   kubectl: ['Kubernetes command-line tool', 'Kubernetes 命令行工具', 'Kubernetes 命令列工具'],
-  make: ['Build automation tool', '构建自动化工具', '建構自動化工具'],
+  make: ['Build automation tool', '构建自动化工具', '構建自動化工具'],
   mask: ['Run commands defined in a Markdown file', '运行 Markdown 文件中定义的命令', '執行 Markdown 檔案中定義的命令'],
   mosh: ['Mobile shell for roaming SSH sessions', '支持漫游 SSH 会话的移动 shell', '支援漫遊 SSH 工作階段的行動 shell'],
-  nuxt: ['Vue framework for building web applications', '用于构建 Web 应用的 Vue 框架', '用於建構 Web 應用程式的 Vue 框架'],
+  nuxt: ['Vue framework for building web applications', '用于构建 Web 应用的 Vue 框架', '用於構建 Web 應用程式的 Vue 框架'],
+  nvm: ['Node Version Manager', 'Node 版本管理器', 'Node 版本管理器'],
   'oh-my-posh': ['Prompt theme engine', '提示符主题引擎', '提示字元主題引擎'],
   pgcli: ['PostgreSQL CLI with autocompletion', '带自动补全的 PostgreSQL 命令行工具', '帶自動補全的 PostgreSQL 命令列工具'],
   planter: ['Create and manage project planters', '创建和管理项目 planters', '建立和管理專案 planters'],
@@ -66,9 +68,9 @@ const MANUAL = {
   su: ['Switch user or run a command as another user', '切换用户或以其他用户身份运行命令', '切換使用者或以其他使用者身分執行命令'],
   systemctl: ['Control the systemd system and service manager', '控制 systemd 系统和服务管理器', '控制 systemd 系統與服務管理員'],
   tailscale: ['WireGuard-based mesh VPN', '基于 WireGuard 的网状 VPN', '基於 WireGuard 的網狀 VPN'],
-  tangram: ['Build and run Tangram applications', '构建和运行 Tangram 应用', '建構和執行 Tangram 應用程式'],
+  tangram: ['Build and run Tangram applications', '构建和运行 Tangram 应用', '構建和執行 Tangram 應用程式'],
   task: ['Task runner', '任务运行器', '任務執行器'],
-  'wasm-pack': ['Build Rust-generated WebAssembly packages', '构建 Rust 生成的 WebAssembly 软件包', '建構 Rust 產生的 WebAssembly 軟體包'],
+  'wasm-pack': ['Build Rust-generated WebAssembly packages', '构建 Rust 生成的 WebAssembly 软件包', '構建 Rust 產生的 WebAssembly 軟體包'],
   webpack: ['JavaScript module bundler', 'JavaScript 模块打包器', 'JavaScript 模組打包器'],
   wing: ['Wing language toolchain', 'Wing 语言工具链', 'Wing 語言工具鏈'],
   z: ['Jump to frequently used directories', '跳转到常用目录', '跳轉到常用目錄'],
@@ -76,29 +78,50 @@ const MANUAL = {
 
 const names = (await handlers.get('netcatty:figspec:list')(null, 'linux'))
   .filter((name) => !name.includes('/'));
-
-const result = { ...existing };
-for (const name of names) {
-  const spec = await loadFigSpec(electronDir, name, 'linux').catch(() => null);
-  const manual = MANUAL[name];
-  const en = spec?.description?.trim() || manual?.[0] || result[name]?.en || '';
-  if (!en) continue;
-  result[name] = {
-    en,
-    ...(simplified[en] || manual?.[1] ? { zhCN: simplified[en] ?? manual?.[1] } : {}),
-    ...(traditional[en] || manual?.[2] ? { zhTW: traditional[en] ?? manual?.[2] } : {}),
-  };
+if (names.length === 0) {
+  throw new Error('Fig spec list is empty; refusing to rewrite command descriptions');
 }
 
-// Cloud specs are excluded from the packaged app and never suggested.
-for (const name of Object.keys(result)) {
-  if (/^(aws|gcloud|az)(\/|$)/.test(name)) delete result[name];
+const unknownManual = Object.keys(MANUAL).filter((name) => !names.includes(name));
+if (unknownManual.length > 0) {
+  throw new Error(`Manual command descriptions reference unknown commands: ${unknownManual.join(', ')}`);
+}
+
+const failures = [];
+const specs = new Map(await Promise.all(names.map(async (name) => {
+  try {
+    return [name, await loadFigSpec(electronDir, name, 'linux')];
+  } catch (error) {
+    failures.push(`${name}: ${error?.message ?? error}`);
+    return [name, null];
+  }
+})));
+if (failures.length > 0) {
+  throw new Error(`Failed to load Fig specs:\n${failures.join('\n')}`);
+}
+
+// Seed only commands that still exist so removed specs cannot linger forever.
+const result = Object.fromEntries(
+  names.filter((name) => existing[name]).map((name) => [name, existing[name]]),
+);
+for (const name of names) {
+  const spec = specs.get(name);
+  const manual = MANUAL[name];
+  const en = manual?.[0] || spec?.description?.trim() || existing[name]?.en || '';
+  if (!en) continue;
+  const zhCN = manual?.[1] ?? simplified[en] ?? existing[name]?.zhCN;
+  const zhTW = manual?.[2] ?? traditional[en] ?? existing[name]?.zhTW;
+  result[name] = {
+    en,
+    ...(zhCN ? { zhCN } : {}),
+    ...(zhTW ? { zhTW } : {}),
+  };
 }
 
 const missingZhCN = Object.entries(result).filter(([, value]) => !value.zhCN).map(([name]) => name);
 const missingZhTW = Object.entries(result).filter(([, value]) => !value.zhTW).map(([name]) => name);
 
-const lines = Object.keys(result).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map((name) => {
+const lines = Object.keys(result).sort().map((name) => {
   const value = result[name];
   const fields = [`en: ${JSON.stringify(value.en)}`];
   if (value.zhCN) fields.push(`zhCN: ${JSON.stringify(value.zhCN)}`);
