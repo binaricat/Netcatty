@@ -1,5 +1,6 @@
 "use strict";
 
+const fs = require("node:fs");
 const net = require("node:net");
 
 function failure(_code, message) { return new TypeError(message); }
@@ -42,18 +43,79 @@ function normalizeStreamAddress(address) {
   return [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
 }
 
-function isLocalControlAddress(address) {
-  address = normalizeStreamAddress(address);
-  if (net.isIP(address) === 4) {
-    const [a, b] = address.split(".").map(Number);
-    return a === 0 || a === 127 || a >= 224 || (a === 169 && b === 254);
+function isLoopbackAddress(address) {
+  const normalized = normalizeStreamAddress(address);
+  if (net.isIP(normalized) === 4) {
+    return normalized.startsWith("127.");
   }
-  if (net.isIP(address) !== 6) return true;
-  const canonical = address;
-  // Also exclude compatible/tunnel addresses that can obscure a local IPv4 peer.
-  return canonical.startsWith("::") || canonical.startsWith("ff")
-    || /^fe[89ab]/u.test(canonical) || canonical.startsWith("2002:")
-    || canonical.startsWith("2001:0:");
+  return normalized === "::1";
 }
 
-module.exports = { canonicalizeStreamEndpoint, isLocalControlAddress, normalizeStreamAddress };
+function isUnconditionallyBlockedAddress(address) {
+  const normalized = normalizeStreamAddress(address);
+  if (net.isIP(normalized) === 4) {
+    const [a, b] = normalized.split(".").map(Number);
+    return a === 0 || a >= 224 || (a === 169 && b === 254);
+  }
+  if (net.isIP(normalized) !== 6) return true;
+  if (normalized === "::1") return false;
+  return normalized.startsWith("::") || normalized.startsWith("ff")
+    || /^fe[89ab]/u.test(normalized) || normalized.startsWith("2002:")
+    || normalized.startsWith("2001:0:");
+}
+
+function isLocalControlAddress(address) {
+  return isLoopbackAddress(address) || isUnconditionallyBlockedAddress(address);
+}
+
+function getNetcattyInternalControlPorts() {
+  const ports = new Set();
+  const discoveryFile = process.env.NETCATTY_TOOL_CLI_DISCOVERY_FILE;
+  if (typeof discoveryFile === "string" && discoveryFile.length > 0) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(discoveryFile, "utf8"));
+      if (Number.isInteger(parsed?.port) && parsed.port > 0 && parsed.port <= 65535) {
+        ports.add(parsed.port);
+      }
+    } catch { /* discovery file may not exist */ }
+  }
+  const viteUrl = process.env.VITE_DEV_SERVER_URL;
+  if (typeof viteUrl === "string" && viteUrl.length > 0) {
+    try {
+      const parsed = new URL(viteUrl);
+      const port = Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80));
+      if (Number.isInteger(port) && port > 0 && port <= 65535) ports.add(port);
+    } catch { /* ignore invalid dev server URL */ }
+  }
+  for (const arg of [...(process.argv ?? []), ...(process.execArgv ?? [])]) {
+    const match = /^--(?:remote-debugging-port|inspect|inspect-brk)=(?:[^:]*:)?(\d{1,5})$/u.exec(String(arg));
+    if (match) {
+      const port = Number(match[1]);
+      if (port > 0 && port <= 65535) ports.add(port);
+    }
+  }
+  // In the live Electron main process, every active TCP net.Server belongs to
+  // Netcatty's own internal bridges (MCP/CLI RPC, external MCP HTTP, OAuth, etc.).
+  if (process.versions?.electron && typeof process._getActiveHandles === "function") {
+    try {
+      for (const handle of process._getActiveHandles()) {
+        if (handle instanceof net.Server && handle.listening) {
+          const addr = handle.address();
+          if (addr && typeof addr === "object" && Number.isInteger(addr.port) && addr.port > 0) {
+            ports.add(addr.port);
+          }
+        }
+      }
+    } catch { /* ignore handle inspection errors */ }
+  }
+  return ports;
+}
+
+module.exports = {
+  canonicalizeStreamEndpoint,
+  getNetcattyInternalControlPorts,
+  isLocalControlAddress,
+  isLoopbackAddress,
+  isUnconditionallyBlockedAddress,
+  normalizeStreamAddress,
+};

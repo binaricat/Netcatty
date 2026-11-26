@@ -41,6 +41,7 @@ import { resolveBridgeSshAgentAuth, resolveHostAuth } from "../../../domain/sshA
 import { connectionTotpFields } from "../../../domain/totpConfig";
 import { requiresFidoSshAgentAuth } from "../../../domain/fidoSsh";
 import {
+  formatHostPort,
   hostRestrictsExtraSshChannels,
   resolveHostKeepalive,
   resolveTelnetPassword,
@@ -642,12 +643,15 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         totalHops,
         currentHostLabel:
           jumpHosts[0]?.label || jumpHosts[0]?.hostname || ctx.host.hostname,
+        currentHostAddress: jumpHosts[0]?.hostname
+          ? formatHostPort(jumpHosts[0].hostname, jumpHosts[0].port || 22)
+          : undefined,
         connectionPhase: 'connecting',
       });
     }
 
     {
-      const unsub = ctx.terminalBackend.onChainProgress((sid, hop, total, label, status, error) => {
+      const unsub = ctx.terminalBackend.onChainProgress((sid, hop, total, label, status, error, address) => {
         // P1: Only process events for this session
         if (sid !== ctx.sessionId) return;
         // Disconnect/reconnect can leave two SSH starts sharing this UI
@@ -660,6 +664,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
             currentHop: hop,
             totalHops: total,
             currentHostLabel: label,
+            currentHostAddress: address,
             connectionPhase: status,
           });
         }

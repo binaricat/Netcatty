@@ -24,9 +24,17 @@ type Review = {
   completionToken?: string;
 };
 
+function isHostActionRequestKind(kind: string): boolean {
+  return kind.startsWith('vault.')
+    || kind === 'network.stream.connectViaHost'
+    || kind === 'network.stream.confirm'
+    || kind === 'network.stream.tlsConfirm';
+}
+
 export function usePluginHostActions() {
   const [review, setReview] = useState<Review | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const current = useRef<Review | null>(null);
@@ -44,9 +52,19 @@ export function usePluginHostActions() {
 
   const assertCurrent = useCallback((entry: Review) => {
     if (current.current !== entry || Date.now() >= entry.prompt.expiresAt) throw new Error('Host action expired');
+    if (entry.prompt.request.kind === 'network.stream.confirm' || entry.prompt.request.kind === 'network.stream.tlsConfirm') {
+      const lock = getAppAppLockRuntime();
+      if (lock && lock.initialized && lock.locked) throw new Error('App is locked');
+      return;
+    }
     const vault = getVault();
     const target = entry.prompt.vaultTarget;
-    if (target && resources.current.resolve(target.resourceId, target.revision) !== entry.host) throw new Error('Selected host changed');
+    if (entry.prompt.durableHostId) {
+      const liveHost = vault.hosts.find((candidate) => candidate.id === entry.prompt.durableHostId);
+      if (!liveHost || liveHost !== entry.host) throw new Error('Saved SSH host changed or was removed');
+    } else if (target && resources.current.resolve(target.resourceId, target.revision) !== entry.host) {
+      throw new Error('Selected host changed');
+    }
     if ((entry.prompt.request.kind === 'vault.requestConnect' || entry.prompt.request.kind === 'network.stream.connectViaHost') && (vault.groupConfigs !== entry.groups || vault.snippets !== entry.snippets)) {
       throw new Error('Saved connection settings changed');
     }
@@ -71,7 +89,7 @@ export function usePluginHostActions() {
       assertCurrent(entry);
       const request = entry.prompt.request;
       const target = entry.prompt.vaultTarget;
-      if (request.kind === 'network.stream.connectViaHost' && target && entry.host) {
+      if (request.kind === 'network.stream.connectViaHost' && entry.host && (target || entry.prompt.durableHostId)) {
         const vault = getVault();
         const settings = getAppSettingsRuntime();
         if (!settings || !bridge.openPluginHostStream) throw new Error('Host stream unavailable');
@@ -83,7 +101,15 @@ export function usePluginHostActions() {
             || latest.hosts !== vault.hosts || latest.knownHosts !== vault.knownHosts || getAppSettingsRuntime()?.terminalSettings !== settings.terminalSettings) throw new Error('Connection settings changed');
         };
         assertPrepared();
-        await executePluginHostAction({ kind: 'connect', target }, {
+        if (entry.prompt.durableHostId) {
+          entry.claimed = true;
+          await bridge.openPluginHostStream!({
+            response: { requestId: entry.prompt.requestId, actionToken: entry.prompt.actionToken, action: 'commit' },
+            connectionOptions,
+          });
+          return;
+        }
+        await executePluginHostAction({ kind: 'connect', target: target! }, {
           getVault, resources: resources.current, assertCurrent: assertPrepared,
           authorizeCommit: async () => { assertPrepared(); },
           connect: async () => {
@@ -126,12 +152,35 @@ export function usePluginHostActions() {
     const unsubscribe = bridge.onPluginInteraction((event) => {
       if ('closed' in event) {
         if (current.current?.prompt.requestId !== event.requestId) return;
-        current.current = null; setReview(null); setBusy(false); responding.current = false;
+        current.current = null; setReview(null); setRemember(false); setBusy(false); responding.current = false;
         return;
       }
-      if (!event.request.kind.startsWith('vault.') && event.request.kind !== 'network.stream.connectViaHost') return;
+      if (!isHostActionRequestKind(event.request.kind)) return;
       const prompt = event as VaultHostPrompt;
       try {
+        if (prompt.request.kind === 'network.stream.confirm' || prompt.request.kind === 'network.stream.tlsConfirm') {
+          const entry: Review = {
+            prompt, candidates: [], candidateRevisions: new Map(), customGroups: [],
+            groups: [], snippets: [], managedSources: [], scriptsRun: false, claimed: false,
+          };
+          current.current = entry; setSelectedIds([]); setRemember(false); setBusy(false); setError(false); responding.current = false;
+          setReview(entry);
+          return;
+        }
+        if (prompt.phase === 'commit' && prompt.autoCommit && prompt.durableHostId && prompt.request.kind === 'network.stream.connectViaHost') {
+          const vault = getVault();
+          const host = vault.hosts.find((candidate) => candidate.id === prompt.durableHostId);
+          if (!host) throw new Error('Saved SSH host no longer exists');
+          const entry: Review = {
+            prompt, candidates: [], candidateRevisions: new Map(), customGroups: vault.customGroups,
+            host, groups: vault.groupConfigs, snippets: vault.snippets, managedSources: vault.managedSources,
+            scriptsRun: false, claimed: false,
+          };
+          current.current = entry; setSelectedIds([]); setRemember(false); setBusy(true); setError(false); responding.current = false;
+          setReview(null);
+          void execute(entry);
+          return;
+        }
         if (prompt.phase === 'commit') {
           const entry = current.current;
           if (!entry || entry.prompt.requestId !== prompt.requestId || entry.prompt.request.kind !== prompt.request.kind) throw new Error('Host review is unavailable');
@@ -150,7 +199,10 @@ export function usePluginHostActions() {
           scriptsRun: host ? pluginHostRunsSavedScripts(host, vault.groupConfigs, vault.snippets) : false,
           claimed: false,
         };
-        current.current = entry; setSelectedIds([]); setBusy(false); setError(false); responding.current = false;
+        const defaultRemember = prompt.request.kind === 'network.stream.connectViaHost'
+          && 'durable' in prompt.request
+          && prompt.request.durable === true;
+        current.current = entry; setSelectedIds([]); setRemember(defaultRemember); setBusy(false); setError(false); responding.current = false;
         if (prompt.request.kind === 'vault.requestConnect' && prompt.permissionMode === 'allow') {
           setReview(null);
           void bridge.respondPluginInteraction?.({ requestId: prompt.requestId, actionToken: prompt.actionToken,
@@ -168,7 +220,7 @@ export function usePluginHostActions() {
     };
   }, [execute, fail, getVault]);
 
-  const respond = useCallback(async (action: 'cancel' | 'submit', draft?: PluginHostDraftFields) => {
+  const respond = useCallback(async (action: 'cancel' | 'submit', draft?: PluginHostDraftFields, rememberOverride?: boolean) => {
     const entry = current.current;
     if (!entry || responding.current || (action === 'cancel' && entry.claimed)) return;
     responding.current = true; setBusy(true); setError(false);
@@ -181,17 +233,24 @@ export function usePluginHostActions() {
         resources.current.resolve(id, revision);
         return resources.current.metadata(id);
       }) : undefined;
+      const includeRemember = action === 'submit' && (
+        request.kind === 'network.stream.connectViaHost'
+        || request.kind === 'network.stream.confirm'
+        || request.kind === 'network.stream.tlsConfirm'
+      );
+      const effectiveRemember = rememberOverride ?? remember;
       await netcattyBridge.require().respondPluginInteraction?.({
         requestId: entry.prompt.requestId, actionToken: entry.prompt.actionToken, action,
         ...(selected === undefined ? {} : { resources: selected }),
         ...(draft === undefined ? {} : { draft }),
         ...(request.kind === 'vault.requestConnect' && action === 'submit' ? { scriptsRun: entry.scriptsRun } : {}),
+        ...(includeRemember && effectiveRemember ? { remember: true } : {}),
       });
     } catch { await fail(entry); }
     finally {
       if (current.current === entry && entry.prompt.phase === 'request') { responding.current = false; setBusy(false); }
     }
-  }, [assertCurrent, fail, selectedIds]);
+  }, [assertCurrent, fail, remember, selectedIds]);
 
-  return { review, selectedIds, setSelectedIds, busy, error, respond };
+  return { review, selectedIds, setSelectedIds, remember, setRemember, busy, error, respond };
 }

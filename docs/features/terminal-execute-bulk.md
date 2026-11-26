@@ -106,7 +106,8 @@ are grouped, which keeps the response small on large fleets.
   `cancelled`, `connection_lost`, `error`, or `not_sent`.
 - `exitCode` is a number only for `completed`. A non-zero exit code is a normal result,
   not a tool failure. Serial and network-device sessions have no exit code (`null`).
-- `stderr` and `error` are omitted when empty.
+- `stderr` and `error` are omitted when empty. On interactive terminals stderr is part of stdout, so `stderr` usually
+  appears only for sessions that run the command over an SSH exec channel.
 - Output is grouped on the full, untruncated result, so two hosts that differ only in the
   part that was cut off are never merged. `tailLines` and a per-group size cap are then
   applied; a cut group has `outputTruncated: true` (also set when the exec layer had already dropped the beginning of a very large output) and, when lines were dropped,

@@ -1,10 +1,44 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  normalizeGroupTargetPath,
+  resolveHostGroupForSave,
   remapSnippetTargetGroupPaths,
   removeSnippetTargetGroupPaths,
 } from './hostGroupPathMutations.ts';
 import type { Snippet } from './models';
+
+const dirtyPaths = ['prod / web', 'prod//web', 'prod\\web', ' prod / web ', '/ prod / / web //'];
+
+test('Host Details normalizes new and changed group paths with the shared rules', () => {
+  for (const value of dirtyPaths) {
+    assert.equal(normalizeGroupTargetPath(value), 'prod/web');
+    assert.equal(resolveHostGroupForSave(value), 'prod/web', 'new host');
+    assert.equal(resolveHostGroupForSave(value, ''), 'prod/web', 'previously ungrouped host');
+    assert.equal(resolveHostGroupForSave(value, 'staging'), 'prod/web', 'changed group');
+  }
+});
+
+test('Host Details preserves unchanged stored paths on unrelated edits', () => {
+  for (const storedGroup of [...dirtyPaths, '', '   ']) {
+    const value = storedGroup.trim() || storedGroup || '';
+    assert.equal(resolveHostGroupForSave(value, storedGroup), storedGroup);
+    assert.equal(resolveHostGroupForSave(storedGroup, storedGroup), storedGroup);
+  }
+});
+
+test('Host Details normalizes an explicitly changed group equivalent after trimming', () => {
+  for (const storedGroup of [' prod/web ', ' prod / web ']) {
+    assert.equal(resolveHostGroupForSave(storedGroup.trim(), storedGroup, true), 'prod/web');
+  }
+});
+
+test('Host Details allows changed paths to normalize to ungrouped', () => {
+  for (const value of ['', ' / / \\ ']) {
+    assert.equal(resolveHostGroupForSave(value, 'prod / web'), '');
+    assert.equal(resolveHostGroupForSave(value), '');
+  }
+});
 
 const snippets: Snippet[] = [{
   id: 'script-a',

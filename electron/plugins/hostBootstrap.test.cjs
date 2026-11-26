@@ -5,15 +5,33 @@ const test = require("node:test");
 
 const { startPluginHost } = require("./hostBootstrap.cjs");
 
-test("default startup leaves the plugin host and stored plugin data untouched", () => {
+test("explicitly disabling NETCATTY_PLUGIN_DEV leaves the plugin host and stored plugin data untouched", () => {
   const effects = [];
   assert.equal(startPluginHost({
-    env: {},
+    env: { NETCATTY_PLUGIN_DEV: "0" },
     createService() { effects.push("create"); },
     registerShutdown() { effects.push("register"); },
     logger: { error() { effects.push("error"); } },
   }), null);
   assert.deepEqual(effects, []);
+});
+
+test("default startup enables the plugin host during database plugin development", async () => {
+  let initialized = 0;
+  const service = {
+    manager: {
+      async initialize() { initialized += 1; },
+      async shutdown() {},
+    },
+  };
+  assert.equal(startPluginHost({
+    env: {},
+    createService: () => service,
+    registerShutdown() {},
+    logger: { error() {} },
+  }), service);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(initialized, 1);
 });
 
 test("synchronous plugin host construction failure leaves Netcatty available", () => {

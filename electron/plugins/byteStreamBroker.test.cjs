@@ -328,3 +328,129 @@ test("real TLS validates trust and the original hostname against a pinned IP", a
   const wrong = broker(t, wrongEndpoint, { lookup, connectTls: (options) => tls.connect({ ...options, ca: cert }) }).instance;
   await assert.rejects(wrong.connect(wrongEndpoint, context()), { code: RPC_ERRORS.unavailable });
 });
+
+test("dynamic local opt-in allows loopback when approved but unconditionally blocks Netcatty internal control ports and metadata IPs", async (t) => {
+  const peer = await server(t, (socket) => socket.on("data", (bytes) => socket.write(bytes)));
+  const port = peer.address().port;
+  const endpoint = `tcp://127.0.0.1:${port}`;
+  const { instance } = broker(t, null, {
+    isInternalControlPort: (_address, targetPort) => targetPort === port,
+  });
+  // Even with localApproved: true, Netcatty's own internal control port is unconditionally blocked.
+  await assert.rejects(
+    instance.connect(endpoint, context(), undefined, { localApproved: true, skipPermissionAuthorize: true }),
+    { code: RPC_ERRORS.permissionDenied },
+  );
+  // Link-local cloud metadata IP is unconditionally blocked even with localApproved: true.
+  await assert.rejects(
+    instance.connect("tcp://169.254.169.254:80", context(), undefined, { localApproved: true, skipPermissionAuthorize: true }),
+    { code: RPC_ERRORS.permissionDenied },
+  );
+  // Approved loopback to a non-control DB port succeeds cleanly.
+  const allowed = broker(t, null, {
+    isInternalControlPort: () => false,
+  }).instance;
+  const ctx = context();
+  const handle = await allowed.connect(endpoint, ctx, undefined, { localApproved: true, skipPermissionAuthorize: true });
+  await allowed.write(handle.handleId, Uint8Array.from([1, 2, 3]), ctx);
+  assert.deepEqual(await allowed.read(handle.handleId, ctx), Uint8Array.from([1, 2, 3]));
+  allowed.close(handle.handleId, ctx);
+});
+
+test("in-band STARTTLS upgradeTls upgrades a plaintext TCP stream with CA validation, pending-read resume, and explicit self-signed cert approval", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-starttls-test-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const keyPath = path.join(directory, "test.key");
+  const certPath = path.join(directory, "test.crt");
+  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", keyPath,
+    "-out", certPath, "-days", "1", "-subj", "/CN=db.local.test", "-addext", "subjectAltName=DNS:db.local.test"],
+  { stdio: "ignore" });
+  const key = fs.readFileSync(keyPath);
+  const cert = fs.readFileSync(certPath);
+
+  // Simulate PostgreSQL SSLRequest -> 'S' -> STARTTLS upgrade -> encrypted echo.
+  const peer = await server(t, (rawSocket) => {
+    rawSocket.once("data", (chunk) => {
+      if (chunk.toString() === "SSLREQ") {
+        rawSocket.write("S");
+        const tlsSocket = new tls.TLSSocket(rawSocket, { isServer: true, key, cert });
+        tlsSocket.on("error", () => {});
+        tlsSocket.on("data", (data) => tlsSocket.write(Buffer.concat([Buffer.from("TLS:"), data])));
+      }
+    });
+  });
+  const endpoint = `tcp://127.0.0.1:${peer.address().port}`;
+
+  // 1) Trusted CA upgrade with a pending read() already active on the plaintext socket.
+  {
+    const { instance } = broker(t, endpoint);
+    const ctx = context();
+    const { handleId } = await instance.connect(endpoint, ctx);
+    await instance.write(handleId, Buffer.from("SSLREQ"), ctx);
+    assert.equal(Buffer.from(await instance.read(handleId, ctx)).toString(), "S");
+    // Start a pending read (mirrors byteStreamService.pump()) BEFORE calling upgradeTls.
+    const pendingRead = instance.read(handleId, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    const upgraded = await instance.upgradeTls(handleId, { servername: "db.local.test", caPem: cert.toString("utf8") }, ctx);
+    assert.equal(upgraded.upgraded, true);
+    assert.equal(upgraded.authorized, true);
+    assert.ok(upgraded.fingerprint256);
+    await instance.write(handleId, Buffer.from("SELECT 1"), ctx);
+    assert.equal(Buffer.from(await pendingRead).toString(), "TLS:SELECT 1");
+    instance.close(handleId, ctx);
+  }
+
+  // 2) Self-signed cert fails closed without allowSelfSigned, prompts user with allowSelfSigned, and honors remembered fingerprint.
+  {
+    const trustedFingerprints = new Set();
+    const prompts = [];
+    const { instance } = broker(t, endpoint, {
+      isTrustedTlsCert: (_pluginId, _ep, fp) => trustedFingerprints.has(fp),
+      rememberTlsCert: (_pluginId, _ep, fp) => trustedFingerprints.add(fp),
+      confirmTlsCert: async (info) => {
+        prompts.push(info);
+        return { approved: prompts.length > 1, remember: true };
+      },
+    });
+    const ctx = context();
+    // First attempt: user rejects self-signed cert -> fails closed.
+    const first = await instance.connect(endpoint, ctx);
+    await instance.write(first.handleId, Buffer.from("SSLREQ"), ctx);
+    assert.equal(Buffer.from(await instance.read(first.handleId, ctx)).toString(), "S");
+    await assert.rejects(
+      instance.upgradeTls(first.handleId, { servername: "db.local.test", allowSelfSigned: true }, ctx),
+      { code: RPC_ERRORS.permissionDenied },
+    );
+    assert.equal(prompts.length, 1);
+    assert.ok(prompts[0].fingerprint256.length > 20);
+    assert.match(prompts[0].subject, /CN=db\.local\.test/);
+
+    // Second attempt: user approves with remember: true.
+    const second = await instance.connect(endpoint, ctx);
+    await instance.write(second.handleId, Buffer.from("SSLREQ"), ctx);
+    assert.equal(Buffer.from(await instance.read(second.handleId, ctx)).toString(), "S");
+    const res2 = await instance.upgradeTls(second.handleId, { servername: "db.local.test", allowSelfSigned: true }, ctx);
+    assert.equal(res2.upgraded, true);
+    assert.equal(res2.authorized, false);
+    assert.equal(prompts.length, 2);
+    await instance.write(second.handleId, Buffer.from("PING"), ctx);
+    assert.equal(Buffer.from(await instance.read(second.handleId, ctx)).toString(), "TLS:PING");
+    instance.close(second.handleId, ctx);
+
+    // Third attempt: remembered fingerprint skips prompt automatically.
+    const third = await instance.connect(endpoint, ctx);
+    await instance.write(third.handleId, Buffer.from("SSLREQ"), ctx);
+    assert.equal(Buffer.from(await instance.read(third.handleId, ctx)).toString(), "S");
+    const res3 = await instance.upgradeTls(third.handleId, { servername: "db.local.test", allowSelfSigned: true }, ctx);
+    assert.equal(res3.upgraded, true);
+    assert.equal(prompts.length, 2);
+    instance.close(third.handleId, ctx);
+  }
+});
+
+test("DB-friendly stream budgets expose expanded concurrency, idle, lifetime, and byte caps", () => {
+  assert.equal(LIMITS.connectionsPerRuntime, 24);
+  assert.equal(LIMITS.idleMs, 1_800_000);
+  assert.equal(LIMITS.lifetimeMs, 28_800_000);
+  assert.equal(LIMITS.connectionBytes, 536_870_912);
+});

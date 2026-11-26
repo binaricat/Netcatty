@@ -343,6 +343,22 @@ class PluginSecretStore {
       throw new PluginRpcError(RPC_ERRORS.dataLoss, "Plugin secret could not be decrypted");
     }
   }
+
+  /**
+   * Decrypts a secret stored by this plugin itself in its own safeStorage-encrypted
+   * namespace. Never accesses Netcatty Vault credentials or another plugin's secrets.
+   */
+  getPlaintext(pluginId, key) {
+    this.#assertAvailable();
+    assertSecretKey(key);
+    const record = this.database.getSecretByKey(pluginId, key);
+    if (!record) return undefined;
+    try {
+      return this.safeStorage.decryptString(record.ciphertext);
+    } catch {
+      throw new PluginRpcError(RPC_ERRORS.dataLoss, "Plugin secret could not be decrypted");
+    }
+  }
 }
 
 module.exports = {

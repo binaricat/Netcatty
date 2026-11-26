@@ -24,10 +24,13 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HostDetailsAdvancedSectionsProps = Record<string, any>;
 
-const ToggleRow: React.FC<{ label: string; hint?: React.ReactNode; enabled: boolean; disabled?: boolean; onToggle: () => void }> = ({ label, hint, enabled, disabled, onToggle }) => {
+const ToggleRow: React.FC<{ label: string; hint?: React.ReactNode; enabled: boolean; disabled?: boolean; onToggle: () => void; inheritance?: React.ReactNode }> = ({ label, hint, enabled, disabled, onToggle, inheritance }) => {
   return (
     <HostDetailsSettingRow label={label} hint={hint}>
-      <Switch checked={enabled} disabled={disabled} onCheckedChange={() => onToggle()} />
+      <div className="flex items-center gap-2">
+        {inheritance}
+        <Switch checked={enabled} disabled={disabled} onCheckedChange={() => onToggle()} />
+      </div>
     </HostDetailsSettingRow>
   );
 };
@@ -49,6 +52,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
   setShowAlgorithmOverrides,
   chainedHosts,
   hostChainInherited = false,
+  canRestoreHostChain = false,
   setActiveSubPanel,
   clearHostChain,
   proxySummaryType,
@@ -59,6 +63,29 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
 }) => {
   const inheritedDeviceType = effectiveGroupDefaults?.deviceType;
   const effectiveDeviceType = form.deviceType ?? inheritedDeviceType;
+  const effectiveMoshEnabled = form.moshEnabled ?? effectiveGroupDefaults?.moshEnabled;
+  const effectiveEtEnabled = form.etEnabled ?? effectiveGroupDefaults?.etEnabled;
+  const inheritedBackspaceBehavior = effectiveGroupDefaults?.backspaceBehavior;
+  const groupSettingControl = (key: "moshEnabled" | "etEnabled" | "deviceType" | "backspaceBehavior") => {
+    if (effectiveGroupDefaults?.[key] === undefined) return null;
+    return form[key] === undefined ? (
+      <Badge variant="outline" className="text-xs text-muted-foreground">
+        {t("vault.groups.details.inherited")}
+      </Badge>
+    ) : (
+      <HostDetailsOverrideReset size="sm" label={t("common.useGroup")} onClick={() => {
+        if ((key === "moshEnabled" || key === "etEnabled") && effectiveGroupDefaults[key] === true) {
+          setForm(prev => ({
+            ...prev,
+            [key]: undefined,
+            [key === "moshEnabled" ? "etEnabled" : "moshEnabled"]: false,
+          }));
+        } else {
+          update(key, undefined);
+        }
+      }} />
+    );
+  };
   const inheritedStartupCommandRunMode = effectiveGroupDefaults?.startupCommandRunMode ?? "paste";
   const effectiveStartupCommandRunMode = form.startupCommandRunMode ?? inheritedStartupCommandRunMode;
   const systemSshAgentSupported = effectiveAuthMethod === "auto" || effectiveAuthMethod === "key";
@@ -197,9 +224,10 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
         >
           <ToggleRow
             label="Mosh"
-            enabled={!!form.moshEnabled}
+            enabled={!!effectiveMoshEnabled}
+            inheritance={groupSettingControl("moshEnabled")}
             onToggle={() => {
-              const enabling = !form.moshEnabled;
+              const enabling = !effectiveMoshEnabled;
               if (enabling) {
                 setForm(prev => ({
                   ...prev,
@@ -220,9 +248,10 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
         >
           <ToggleRow
             label="EternalTerminal"
-            enabled={!!form.etEnabled}
+            enabled={!!effectiveEtEnabled}
+            inheritance={groupSettingControl("etEnabled")}
             onToggle={() => {
-              const enabling = !form.etEnabled;
+              const enabling = !effectiveEtEnabled;
               if (enabling) {
                 setForm(prev => ({
                   ...prev,
@@ -235,7 +264,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               }
             }}
           />
-          {form.etEnabled && (
+          {effectiveEtEnabled && (
             <>
               <HostDetailsSettingRow label={t("hostDetails.et.port")} hint={t("hostDetails.et.port.desc")}>
                 <Input
@@ -367,11 +396,12 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
           icon={<Router size={14} className="text-muted-foreground" />}
           title={t("hostDetails.section.deviceType")}
         >
-          {(!form.protocol || form.protocol === 'ssh') && !form.moshEnabled && !form.etEnabled && (<>
+          {(!form.protocol || form.protocol === 'ssh') && !effectiveMoshEnabled && !effectiveEtEnabled && (<>
             <ToggleRow
               label={t("hostDetails.deviceType")}
               hint={t("hostDetails.deviceType.desc")}
               enabled={effectiveDeviceType === 'network'}
+              inheritance={groupSettingControl("deviceType")}
               onToggle={() => update("deviceType", effectiveDeviceType === 'network' ? 'general' : 'network')}
             />
             {effectiveDeviceType === 'network' && (
@@ -485,7 +515,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             enabled={!!form.showLineTimestamps}
             onToggle={() => update("showLineTimestamps", !form.showLineTimestamps)}
           />
-          {(form.protocol === undefined || form.protocol === "ssh") && !form.moshEnabled && !form.etEnabled && (
+          {(form.protocol === undefined || form.protocol === "ssh") && !effectiveMoshEnabled && !effectiveEtEnabled && (
             <>
               <ToggleRow
                 label={t("hostDetails.sshInputCompatibility")}
@@ -499,19 +529,23 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             </>
           )}
           <HostDetailsSettingRow label={t("hostDetails.backspaceBehavior")}>
-            <Select
-              value={form.backspaceBehavior ?? "default"}
-              onValueChange={(v) => update("backspaceBehavior", v === "default" ? undefined : v)}
-            >
-              <SelectTrigger className="h-8 w-36 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default">{t("hostDetails.backspaceBehavior.default")}</SelectItem>
-                <SelectItem value="ctrl-h">^H (0x08)</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2">
+              {form.backspaceBehavior !== undefined && groupSettingControl("backspaceBehavior")}
+              <Select
+                value={form.backspaceBehavior ?? inheritedBackspaceBehavior ?? "default"}
+                onValueChange={(v) => update("backspaceBehavior", v === "default" && inheritedBackspaceBehavior === undefined ? undefined : v)}
+              >
+                <SelectTrigger className="h-8 w-36 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">{inheritedBackspaceBehavior !== undefined ? t("serial.backspace.default") : t("hostDetails.backspaceBehavior.default")}</SelectItem>
+                  <SelectItem value="ctrl-h">^H (0x08)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </HostDetailsSettingRow>
+          {form.backspaceBehavior === undefined && groupSettingControl("backspaceBehavior")}
         </HostDetailsSection>
 
         {/* Per-host keepalive override */}
@@ -634,9 +668,14 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                 </Badge>
               </div>
             ) : (
-              <Badge variant="outline" className="text-xs text-muted-foreground">
-                {t("hostDetails.jumpHosts.direct")}
-              </Badge>
+              <div className="flex items-center gap-1">
+                <Badge variant="outline" className="text-xs text-muted-foreground">
+                  {t("hostDetails.jumpHosts.direct")}
+                </Badge>
+                {canRestoreHostChain && (
+                  <HostDetailsOverrideReset size="sm" label={t("common.useGroup")} onClick={clearHostChain} />
+                )}
+              </div>
             )
           }
         >

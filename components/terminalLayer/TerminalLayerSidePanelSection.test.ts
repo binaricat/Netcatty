@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 
@@ -18,6 +19,17 @@ import {
   movePersistentPortalNode,
   resolveSidePanelPortalTarget,
 } from './terminalLayerSidePanelSlots.tsx';
+
+test('magnified side panels use a continuous 1px inset outline in the side panel accent', () => {
+  const source = readFileSync(new URL('./TerminalLayerSidePanelSection.tsx', import.meta.url), 'utf8');
+  const chromeStart = source.indexOf('className="absolute inset-3');
+  const chromeSource = source.slice(chromeStart, source.indexOf('\n        >', chromeStart));
+
+  assert.match(chromeSource, /overflow-hidden rounded-md bg-background shadow-2xl/);
+  assert.match(chromeSource, /outline: `1px solid \$\{sidePanelTheme\.accent\}`/);
+  assert.match(chromeSource, /outlineOffset: -1/);
+  assert.doesNotMatch(chromeSource, /\bborder(?:Color|Width|Style)?\b/);
+});
 
 test('AI side panel shell can be force-hidden for layout isolation', () => {
   assert.equal(getTerminalSidePanelShellWidth({

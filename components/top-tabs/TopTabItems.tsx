@@ -26,8 +26,6 @@ import { resolveSessionCodingCliProvider } from '../../domain/codingCliProviderM
 import type { CodingCliProvider } from '../../domain/codingCliProviders';
 import { resolveCodingCliActivityPhase, type CodingCliActivityPhase } from '../../domain/codingCliTitleParse';
 import {
-  buildMergedWorkspaceTitleFromSessions,
-  DEFAULT_WORKSPACE_TITLE,
   resolveSessionTabTitle,
   resolveWorkspaceTabLabel,
 } from '../../domain/sessionTabTitle';
@@ -261,24 +259,15 @@ export const formatSessionTopTabLabel = (
 
 type WorkspaceTopTabLabelWorkspace = Pick<
   Workspace,
-  'title' | 'focusedSessionId' | 'autoTitle'
-> & {
-  generatedTitle?: boolean;
-};
+  'title' | 'focusedSessionId' | 'autoTitle' | 'generatedTitle'
+>;
 
 export const resolveWorkspaceTopTabLabel = (
   workspace: WorkspaceTopTabLabelWorkspace,
   sessions: readonly TerminalSession[],
+  dynamicTabTitleMode?: DynamicTabTitleMode,
 ): string => {
-  const presentedSessions = sessions.map(applySessionPresentation);
-  const resolvedWorkspace = workspace.generatedTitle
-    ? {
-        ...workspace,
-        title: buildMergedWorkspaceTitleFromSessions(presentedSessions) ?? DEFAULT_WORKSPACE_TITLE,
-        autoTitle: false,
-      }
-    : workspace;
-  return resolveWorkspaceTabLabel(resolvedWorkspace, presentedSessions);
+  return resolveWorkspaceTabLabel(workspace, sessions.map(applySessionPresentation), dynamicTabTitleMode);
 };
 
 export const createTopTabCopyDoubleClickHandler = (
@@ -1106,7 +1095,7 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
     [onCopyWorkspace, workspace.id, tabDoubleClickBehavior],
   );
   const detachSessions = workspaceSessions ?? [];
-  const tabLabel = resolveWorkspaceTopTabLabel(workspace, detachSessions);
+  const tabLabel = resolveWorkspaceTopTabLabel(workspace, detachSessions, dynamicTabTitleMode);
 
   return (
     <ContextMenu>

@@ -102,3 +102,53 @@ test("window closure during opening aborts the operation and rejects a late conn
   assert.equal(f.opens[0].context.signal.aborted, true);
   assert.equal(f.vault.streams.size, 0);
 });
+
+test("durable SSH tunnel binding survives selection expiry and blur, enforces exact endpoint, and can be revoked", async (t) => {
+  const f = await fixture(t);
+  const pending = f.call("network.stream.connectViaHost", { ...f.params, durable: true });
+  await f.tick();
+  await f.respond("submit", { remember: true });
+  await f.respond("commit", {}, { hostId: "host-one" });
+  const first = await pending;
+  assert.equal(typeof first.hostBindingToken, "string");
+  assert.ok(first.hostBindingToken.startsWith("hb_"));
+
+  // Expire ephemeral selection and clear selections (simulating blur/restart).
+  f.expire();
+  f.vault.clearSelections();
+
+  // Mismatched endpoint with the same durable token must be rejected.
+  await assert.rejects(
+    f.call("network.stream.connectViaHost", { hostBindingToken: first.hostBindingToken, endpoint: "tcp://127.0.0.1:5432" }),
+    /binding/u,
+  );
+  // Forged token must be rejected.
+  await assert.rejects(
+    f.call("network.stream.connectViaHost", { hostBindingToken: "hb_forged_token_000000000000000000", endpoint: f.params.endpoint }),
+    /binding/u,
+  );
+
+  // Reconnect with durable token skips request phase and emits autoCommit prompt bound to host-one.
+  const reconnect = f.call("network.stream.connectViaHost", {
+    hostBindingToken: first.hostBindingToken,
+    endpoint: f.params.endpoint,
+  });
+  await f.tick();
+  const prompt = f.prompts.at(-1);
+  assert.equal(prompt.phase, "commit");
+  assert.equal(prompt.autoCommit, true);
+  assert.equal(prompt.durableHostId, "host-one");
+  await f.respond("commit", {}, { hostId: "host-one" });
+  const second = await reconnect;
+  assert.equal(second.endpoint, f.params.endpoint);
+  assert.equal(second.hostBindingToken, first.hostBindingToken);
+  assert.equal(f.opens.length, 2);
+
+  // Revoke durable binding -> subsequent reconnect fails closed.
+  const revoked = await f.call("vault.revokeHostBinding", { hostBindingToken: first.hostBindingToken });
+  assert.deepEqual(revoked, { revoked: true });
+  await assert.rejects(
+    f.call("network.stream.connectViaHost", { hostBindingToken: first.hostBindingToken, endpoint: f.params.endpoint }),
+    /binding/u,
+  );
+});

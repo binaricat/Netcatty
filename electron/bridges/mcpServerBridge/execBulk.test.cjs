@@ -14,6 +14,7 @@ const {
   formatPreflightFailure,
   groupBulkResults,
   parseBulkExecParams,
+  splitGroupBudget,
   tailText,
 } = require("./execBulk.cjs");
 
@@ -783,4 +784,56 @@ test("explicit no-send codes thrown by the exec layer, and closed streams, are c
   }
   assert.equal(classifyHostResult({ ok: false, thrown: true, error: "boom" }).status, "error");
   assert.equal(classifyHostResult({ ok: false, thrown: true, code: "SHELL_PROMPT_PENDING", error: "x" }).status, "not_sent");
+});
+
+// ── stdout/stderr budget ──
+
+test("splitGroupBudget gives a stream's unused share to the other", () => {
+  // No stderr (interactive terminals): stdout gets the whole budget.
+  assert.deepEqual(splitGroupBudget(30_000, 0, 32_000), { stdoutChars: 32_000, stderrChars: 0 });
+  // Small stderr keeps what it needs; stdout gets the rest.
+  assert.deepEqual(splitGroupBudget(30_000, 1_000, 32_000), { stdoutChars: 31_000, stderrChars: 1_000 });
+  // Small stdout leaves room for a large stderr.
+  assert.deepEqual(splitGroupBudget(1_000, 30_000, 32_000), { stdoutChars: 2_000, stderrChars: 30_000 });
+  // Both large: stderr keeps a quarter, as before.
+  assert.deepEqual(splitGroupBudget(50_000, 50_000, 32_000), { stdoutChars: 24_000, stderrChars: 8_000 });
+  for (const [out, err] of [[0, 0], [5, 5], [40_000, 3], [3, 40_000], [20_000, 20_000]]) {
+    const { stdoutChars, stderrChars } = splitGroupBudget(out, err, 32_000);
+    assert.ok(stdoutChars + stderrChars <= 32_000, `${out}/${err}`);
+  }
+});
+
+test("groupBulkResults keeps stdout beyond three quarters when stderr is empty", () => {
+  // One line per 100 chars, under the tailLines limit so only the character cap applies.
+  const line = `${"o".repeat(99)}\n`;
+  const stdout = line.repeat(300); // 30,000 chars, 300 lines
+  const payload = groupBulkResults([
+    { sessionId: "a", label: "web1", result: { ok: true, stdout, stderr: "", exitCode: 0 } },
+  ], { tailLines: 2000 });
+  assert.equal(payload.groups[0].stdout, stdout, "all 30,000 chars fit in the 32 KB group budget");
+  assert.equal(payload.groups[0].outputTruncated, undefined);
+});
+
+test("groupBulkResults applies tailLines before sharing the budget", () => {
+  const stdout = Array.from({ length: 500 }, (_, i) => `out-${i}`).join("\n");
+  const stderr = `${"e".repeat(99)}\n`.repeat(200); // 20,000 chars of stderr
+  const payload = groupBulkResults([
+    { sessionId: "a", label: "web1", result: { ok: true, stdout, stderr, exitCode: 1 } },
+  ], { tailLines: 10 });
+  const group = payload.groups[0];
+  // stdout is cut to 10 short lines, so stderr may use the space stdout does not need.
+  assert.equal(group.stdout.split("\n").length, 10);
+  assert.equal(group.stderr.split("\n").filter(Boolean).length, 10, "stderr also keeps its last 10 lines");
+  assert.equal(group.outputTruncated, true);
+  assert.equal(group.omittedLines, 490 + 190);
+});
+
+test("groupBulkResults never exceeds the per-group budget", () => {
+  const big = "x".repeat(100_000);
+  const payload = groupBulkResults([
+    { sessionId: "a", label: "", result: { ok: true, stdout: big, stderr: big, exitCode: 0 } },
+  ], { tailLines: 2000 });
+  const group = payload.groups[0];
+  assert.ok(group.stdout.length + (group.stderr || "").length <= 32 * 1024);
+  assert.equal(group.outputTruncated, true);
 });
