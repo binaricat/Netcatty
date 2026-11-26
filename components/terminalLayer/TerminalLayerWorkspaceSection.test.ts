@@ -5,43 +5,43 @@ import React from "react";
 import { act, create } from "react-test-renderer";
 import { sidePanelLiveStore, SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT } from "../../application/state/sidePanelLiveStore.ts";
 import { createEmptyWorkspaceRoot } from "../../domain/workspace.ts";
-import { resolveMagnifiedChromeBorderWidth } from "../../domain/paneMagnification.ts";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { TerminalLayerWorkspaceSection } from "./TerminalLayerWorkspaceSection.tsx";
 
-test("terminal pane chrome follows retained surface bounds through restore", () => {
+test("terminal pane chrome follows retained surface bounds through restore with a continuous 1px inset outline", () => {
   const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
   const paneSource = source.slice(source.indexOf('data-section="terminal-split-pane"'), source.indexOf("<Terminal\n"));
 
-  assert.match(paneSource, /^\s*magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl",$/m);
-  assert.match(paneSource, /borderColor: magnifiedSurfaceBounds \? sessionAppearanceTheme\.colors\.cursor : undefined/);
-  assert.match(paneSource, /borderWidth: magnifiedSurfaceBounds\s*\? resolveMagnifiedChromeBorderWidth\(magnifiedDevicePixelRatio\)\s*: undefined/);
+  assert.match(paneSource, /^\s*magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl",$/m);
+  assert.match(paneSource, /outline: magnifiedSurfaceBounds\s+\? `1px solid \$\{sessionAppearanceTheme\.colors\.cursor\}`\s+: undefined/);
+  assert.match(paneSource, /outlineOffset: magnifiedSurfaceBounds \? -1 : undefined/);
+  assert.doesNotMatch(paneSource, /\bborder(?:Color|Width|Style)?\b/);
 });
 
-test("restoring terminal chrome keeps its width and color until surface bounds clear", () => {
+test("restoring terminal chrome keeps its 1px inset outline until surface bounds clear at any DPR", () => {
   const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
   const paneSource = source.slice(source.indexOf('data-section="terminal-split-pane"'), source.indexOf("<Terminal\n"));
   const styleSource = paneSource.match(/style=\{\{([\s\S]*?)\}\}/);
   assert.ok(styleSource);
   const resolveStyle = new Function(
     "style", "isMagnified", "magnifiedSurfaceBounds", "sessionAppearanceTheme",
-    "magnifiedDevicePixelRatio", "resolveMagnifiedChromeBorderWidth",
+    "magnifiedDevicePixelRatio",
     `return ({${styleSource[1]}});`,
   );
   const bounds = { left: 0, top: 80, width: 1200, height: 800 };
   const theme = { colors: { cursor: "#0088ff" } };
 
-  for (const dpr of [1, 2]) {
-    const magnified = resolveStyle({}, true, bounds, theme, dpr, resolveMagnifiedChromeBorderWidth);
-    const restoring = resolveStyle({}, false, bounds, theme, dpr, resolveMagnifiedChromeBorderWidth);
+  for (const dpr of [1, 1.25, 1.5, 2, 3]) {
+    const magnified = resolveStyle({}, true, bounds, theme, dpr);
+    const restoring = resolveStyle({}, false, bounds, theme, dpr);
     assert.deepEqual(restoring, magnified);
-    assert.equal(restoring.borderColor, theme.colors.cursor);
-    assert.equal(restoring.borderWidth, dpr === 1 ? 2 : 1);
+    assert.equal(restoring.outline, `1px solid ${theme.colors.cursor}`);
+    assert.equal(restoring.outlineOffset, -1);
     for (const isMagnified of [false, true]) {
-      const cleared = resolveStyle({}, isMagnified, null, theme, dpr, resolveMagnifiedChromeBorderWidth);
-      assert.equal(cleared.borderColor, undefined);
-      assert.equal(cleared.borderWidth, undefined);
+      const cleared = resolveStyle({}, isMagnified, null, theme, dpr);
+      assert.equal(cleared.outline, undefined);
+      assert.equal(cleared.outlineOffset, undefined);
     }
   }
 });
