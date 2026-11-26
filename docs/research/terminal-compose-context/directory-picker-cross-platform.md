@@ -10,6 +10,7 @@
 | Unix SSH | 活动会话的严格查询／OSC 7 | 同一认证连接的 SFTP | 绑定原终端，按连接能力确认 |
 | Windows PowerShell 5.1／7 | 原 runspace 的 FileSystem ProviderPath | Windows 本地 FS | Set-Location -LiteralPath，等待新位置报告 |
 | Windows CMD | 会话 PROMPT 的 `$P` | Windows 本地 FS | `cd /d`，等待原 CMD 报告目标位置 |
+| Git for Windows Bash | 原 Bash 的 MSYS `/proc/<pid>/cwd` | MSYS 映射的 Windows 盘符路径 | Bash 内建 `cd`，重新读取原进程 cwd |
 
 ## 路径与能力模型
 
@@ -59,6 +60,12 @@ PSDrive 根的 ProviderPath 可能带尾部反斜杠，因此路径比较按根�
 目录切换要求空提示符，使用 `cd /d` 处理盘符绝对路径，随后确认新报告。引号保留空格和 Unicode 目录名，前导空格避开 DOSKEY 别名。含 `%`、`!` 的目标继续作为可浏览的条目，切换时显示路径限制；UNC 映射和扩展关闭的启动方式保留为后续适配。
 
 目录列表遵循 Windows 访问权限。系统兼容链接拒绝枚举时，菜单显示权限原因，并保留父目录入口。等待原 CMD 会话报告位置时，菜单显示对应的 CMD 状态，收到有效报告后恢复目录导航。
+
+## Git Bash 会话集成
+
+根据 Git for Windows 的安装记录识别 Bash。定位启动器下的原 Bash 进程后，用同一安装的 MSYS 工具读取 `/proc/<pid>/cwd`，再通过 `cygpath` 映射为 Windows 盘符路径。菜单按 Windows 文件系统展示父级和子目录，原会话使用 Bash 内建 `cd` 切换，并由新一次读取确认结果。
+
+启动参数、profile 和提示符沿用用户配置。存在子进程时暂缓目录操作，原 Bash 恢复后重新读取。共享路径和虚拟挂载留到各自的路径语义明确后扩展。
 
 ## 后续设计方向
 

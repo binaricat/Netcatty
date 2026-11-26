@@ -9,12 +9,15 @@
 | A：路径与能力 | POSIX／Win32 路径模型；盘符／UNC 根；authority、cwd revision；独立 read／list／change／confirm 能力；可注入命令策略 | 将目标文件系统和 shell 语法分别建模，保持菜单可复用 |
 | B：PowerShell | 5.1／7 会话级脚本；原 runspace ProviderPath；私有位置报告；本地 FS；LiteralPath 切换和实际结果确认 | 用原 shell 状态串联展示、读取和执行 |
 | C：CMD | 交互 CMD 的 PROMPT 上报；盘符目录读取与 `cd /d` 切换；原进程和新提示符确认 | 复用目录控制器，按 CMD 的变量展开和进程继承划定支持范围 |
+| D1：Git Bash | 绑定原 Git for Windows Bash，读取 MSYS cwd 并映射为 Windows 盘符路径 | 保留 Bash 启动行为，复用 Windows 文件系统和目录控制器 |
 | 状态恢复 | provider 切换清空旧目录与列表；恢复 FileSystem 后重新读取；提交输入使旧报告失效 | 让菜单始终对应当前有效的文件系统位置 |
 | 生命周期 | 单会话请求排序、旧控制器失效、受管脚本清理、终端就绪门控 | 将异步操作与实际会话代次绑定 |
 
 Windows CI 使用原生 ConPTY 覆盖 PowerShell 5.1／7 以及 CMD 的特殊字符、跨盘符和嵌套会话。macOS／Linux 继续覆盖真实 POSIX PTY 和 SSH fixture。
 
 ## 后续阶段
+
+Git Bash 后先交付 [Git Branch](git-branch.md) 芯片，再按共享的仓库与 worktree 状态推进 [Git Changes](git-changes.md) 和 [Pull Request](pull-request.md)。[Node Version](node-version.md) 独立接入 shell 与版本管理器。目录兼容性按环境分别提交。
 
 ### PowerShell 覆盖扩展
 
@@ -35,12 +38,12 @@ Windows CI 使用原生 ConPTY 覆盖 PowerShell 5.1／7 以及 CMD 的特殊字
 
 为 `%`、`!` 目录验证保留字面值的传递方式；为自定义 AutoRun、关闭命令扩展和前后台子进程补充原生用例。UNC 的 `pushd`／`popd` 单独定义临时盘符、目录栈和退出清理语义。
 
-### D：WSL、Git Bash 与 Cygwin
+### D2／D3：WSL 与 Cygwin
 
 为每类环境定义文件系统 authority、cwd 来源、结构化目录 helper 与执行策略：
 
 - WSL：绑定所选 distro，验证 Linux home、挂载盘及 wslpath／UNC 映射。
-- MSYS／Cygwin：验证 mount、驱动器、链接和编码转换。
+- Cygwin：验证 mount、驱动器、链接和编码转换。Git Bash 后续补充共享路径和虚拟挂载语义。
 - helper：保留原始名称、类型和目录链接，提供输出边界、取消及权限状态。
 
 交付目标是让目录读取与命令执行处于同一命名空间，并按 distro／mount 身份组织缓存。

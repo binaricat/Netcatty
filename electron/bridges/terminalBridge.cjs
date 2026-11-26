@@ -66,6 +66,7 @@ const moshHandshake = require("./moshHandshake.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
 const { preparePowerShellDirectoryIntegration } = require('./powerShellDirectoryIntegration.cjs');
 const { prepareCmdDirectoryIntegration } = require('./cmdDirectoryIntegration.cjs');
+const { prepareGitBashDirectoryIntegration } = require('./gitBashDirectoryIntegration.cjs');
 const { createTelnetAutoLogin, isAutoLoginWakeInput } = require("./telnetAutoLogin.cjs");
 const telnetProtocol = require("./telnetProtocol.cjs");
 const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
@@ -1127,7 +1128,9 @@ async function startLocalSession(event, payload) {
   }
   
   const directoryIntegration = preparePowerShellDirectoryIntegration(shell, shellArgs)
-    ?? prepareCmdDirectoryIntegration(shell, shellArgs, env);
+    ?? prepareCmdDirectoryIntegration(shell, shellArgs, env)
+    ?? (process.platform === 'win32' && path.win32.basename(shell).toLowerCase() === 'bash.exe'
+      ? prepareGitBashDirectoryIntegration(shell, shellArgs, env, discoverShells().find(item => item.id === 'git-bash')?.command) : null);
   let proc;
   try {
     proc = pty.spawn(shell, directoryIntegration?.args ?? shellArgs, {
@@ -1268,7 +1271,7 @@ async function startLocalSession(event, payload) {
     proc.onData((data) => {
       if (sessions.get(sessionId) !== session) return;
       if (!shouldProcessSessionOutput(session)) return;
-      const visibleData = session.directoryIntegration?.consume(data) ?? data;
+      const visibleData = session.directoryIntegration?.consume?.(data) ?? data;
       if (!visibleData) return;
       trackSessionIdlePrompt(session, visibleData);
       bufferLocalData(visibleData);
@@ -1281,6 +1284,7 @@ async function startLocalSession(event, payload) {
     const finalizeExit = () => {
       if (localExitFinalized) return;
       localExitFinalized = true;
+      session.directoryIntegration?.invalidate();
       directoryIntegration?.cleanup?.();
       sessionLogStreamManager.stopStream(sessionId, logStreamToken);
       if (sessions.get(sessionId) !== session) return;
