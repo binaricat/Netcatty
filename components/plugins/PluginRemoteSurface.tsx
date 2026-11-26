@@ -3,6 +3,7 @@ import { LazyLoadBoundary } from '../ui/lazy-load-boundary';
 import { PluginViewPopover } from './PluginViewPopover';
 import { PluginSplitPane } from './primitives/PluginSplitPane';
 import { parseWidgetPropsJson, PluginSlottedWidget, type SlottedWidgetKind } from './primitives/PluginWidgetRenderer';
+import { matchWorkbenchShortcut } from './primitives/shortcuts';
 import type { PluginSplitPaneWidgetProps } from './primitives/types';
 import { createPortal } from 'react-dom';
 import { validatePluginRemoteTree } from '@/domain/pluginRemoteTreePolicy.cjs';
@@ -343,6 +344,14 @@ export function PluginRemoteSurface({ tree, css, onEvent, settled = true, loadIm
   );
 }
 
+const SHADOW_BASE_SCROLLBAR_CSS = [
+  '*::-webkit-scrollbar{width:6px;height:6px}',
+  '*::-webkit-scrollbar-track,*::-webkit-scrollbar-corner{background:transparent}',
+  '*::-webkit-scrollbar-thumb{min-height:28px;border:1px solid transparent;border-radius:999px;background-color:transparent;background-clip:content-box}',
+  '*:hover::-webkit-scrollbar-thumb{background-color:hsl(var(--muted-foreground) / 0.24)}',
+  '*::-webkit-scrollbar-thumb:hover{background-color:hsl(var(--muted-foreground) / 0.45)}',
+].join('');
+
 function ValidatedPluginRemoteSurface({ tree, css, onEvent, settled, depth }: { settled: boolean; depth: number; tree: { children: RemoteNode[] }; css: string; onEvent(event: PluginSurfaceEvent): void }) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -399,8 +408,15 @@ function ValidatedPluginRemoteSurface({ tree, css, onEvent, settled, depth }: { 
 
       if (event.type === 'submit') event.preventDefault();
       if (event.type === 'contextmenu') event.preventDefault();
+      if (event.type === 'keydown' && event instanceof view.KeyboardEvent) {
+        const sc = matchWorkbenchShortcut(event, { includeUndoRedo: false });
+        if (sc === 'mod+k' || sc === 'mod+s') {
+          event.preventDefault();
+        }
+      }
 
-      const nodeId = target.dataset.netcattyRemoteNode;
+      const nodeId = target.dataset.netcattyRemoteNode
+        ?? (event.type === 'keydown' ? (shadow.querySelector('[data-netcatty-remote-node]') as HTMLElement | null)?.dataset.netcattyRemoteNode : undefined);
       if (!nodeId) return;
 
       if (event.type === 'scroll') {
@@ -456,19 +472,61 @@ function ValidatedPluginRemoteSurface({ tree, css, onEvent, settled, depth }: { 
     };
 
     for (const event of SURFACE_EVENTS) shadow.addEventListener(event, listener, true);
+
+    // When a full-bleed plugin view is visible and focus sits on document.body (e.g.
+    // right after tab switch or drawer close), forward global Cmd/Ctrl+K / Cmd/Ctrl+S
+    // into the plugin so its Command Palette and Save shortcuts work reliably.
+    const view = shadow.ownerDocument.defaultView;
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (depth !== 0 || event.defaultPrevented) return;
+      const surfaceEl = surfaceRef.current;
+      if (!surfaceEl || !surfaceEl.closest('[data-plugin-chrome="full-bleed"]')) return;
+      const rect = surfaceEl.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const doc = surfaceEl.ownerDocument;
+      const hasHostModal = [...doc.querySelectorAll('[role=dialog][aria-modal=true]:not([data-plugin-dialog])')].some((dialog) => {
+        const r = dialog.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      if (hasHostModal) return;
+      const active = doc.activeElement;
+      const focusInsideHostChrome = active
+        && active !== doc.body
+        && active !== doc.documentElement
+        && !surfaceEl.contains(active)
+        && !active.closest?.('[data-plugin-view-slot]');
+      if (focusInsideHostChrome) return;
+      const sc = matchWorkbenchShortcut(event, { includeUndoRedo: false });
+      if (sc !== 'mod+k' && sc !== 'mod+s') return;
+      const rootNodeId = (shadow.querySelector('[data-netcatty-remote-node]') as HTMLElement | null)?.dataset.netcattyRemoteNode;
+      if (!rootNodeId) return;
+      event.preventDefault();
+      onEventRef.current({
+        nodeId: rootNodeId,
+        type: 'keydown',
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        shiftKey: event.shiftKey,
+      });
+    };
+    view?.addEventListener('keydown', onWindowKeyDown, false);
+
     return () => {
+      view?.removeEventListener('keydown', onWindowKeyDown, false);
       for (const timer of scrollTimers.values()) clearTimeout(timer);
       scrollTimers.clear();
       pendingScroll.clear();
       for (const event of SURFACE_EVENTS) shadow.removeEventListener(event, listener, true);
     };
-  }, [shadow]);
+  }, [shadow, depth]);
 
   return (
     <SurfaceContext.Provider value={surfaceContextValue}>
       <div ref={surfaceRef} className="h-full w-full min-h-0 min-w-0 overflow-hidden [contain:paint] isolate relative" data-plugin-remote-surface>
-        <div ref={hostRef} className="h-full min-h-0 overflow-auto [container-type:inline-size]" />
-        {shadow && createPortal(<><style>{css}</style>{tree.children.map((node) => renderRemoteNode(node, settled))}</>, shadow)}
+        <div ref={hostRef} className="h-full min-h-0 overflow-auto [container-type:inline-size] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-corner]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/25" />
+        {shadow && createPortal(<><style>{SHADOW_BASE_SCROLLBAR_CSS}</style><style>{css}</style>{tree.children.map((node) => renderRemoteNode(node, settled))}</>, shadow)}
       </div>
     </SurfaceContext.Provider>
   );

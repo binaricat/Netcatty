@@ -53,7 +53,6 @@ import type { TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePane
 import type { SidePanelTool } from '../../domain/sidePanelLayout';
 import {
   PANE_MAGNIFICATION_DURATION_MS,
-  resolveMagnifiedChromeBorderWidth,
   resolvePaneMagnificationLayoutGeometry,
   resolvePaneMagnificationStyle,
   type PaneMagnificationController,
@@ -1643,14 +1642,14 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",
         isVisible && "z-10",
-        isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl",
+        magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl",
       )}
       style={{
         ...style,
-        borderColor: isMagnified && magnifiedSurfaceBounds ? sessionAppearanceTheme.colors.cursor : undefined,
-        borderWidth: isMagnified && magnifiedSurfaceBounds
-          ? resolveMagnifiedChromeBorderWidth(magnifiedDevicePixelRatio)
+        outline: magnifiedSurfaceBounds
+          ? `1px solid ${sessionAppearanceTheme.colors.cursor}`
           : undefined,
+        outlineOffset: magnifiedSurfaceBounds ? -1 : undefined,
       }}
       tabIndex={-1}
       onClick={handlePaneClick}

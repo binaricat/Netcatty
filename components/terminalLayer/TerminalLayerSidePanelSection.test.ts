@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import { JSDOM } from 'jsdom';
 
 import {
@@ -36,6 +36,17 @@ test('per-pane close button keeps shrink-0 so a narrow pane cannot squeeze it aw
     /className="[^"]*\bshrink-0\b[^"]*"/,
     'pane header close button must carry shrink-0 so it stays visible at narrow widths',
   );
+});
+
+test('magnified side panels use a continuous 1px inset outline in the side panel accent', () => {
+  const source = readFileSync(new URL('./TerminalLayerSidePanelSection.tsx', import.meta.url), 'utf8');
+  const chromeStart = source.indexOf('className="absolute inset-3');
+  const chromeSource = source.slice(chromeStart, source.indexOf('\n        >', chromeStart));
+
+  assert.match(chromeSource, /overflow-hidden rounded-md bg-background shadow-2xl/);
+  assert.match(chromeSource, /outline: `1px solid \$\{sidePanelTheme\.accent\}`/);
+  assert.match(chromeSource, /outlineOffset: -1/);
+  assert.doesNotMatch(chromeSource, /\bborder(?:Color|Width|Style)?\b/);
 });
 
 test('AI side panel shell can be force-hidden for layout isolation', () => {

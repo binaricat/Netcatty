@@ -378,7 +378,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   }, [defaultGroup, form.group, groupConfigs, groupDefaults]);
 
   const effectiveAuthHost = useMemo(
-    () => effectiveGroupDefaults ? applyGroupDefaults(form, effectiveGroupDefaults) : form,
+    () => applyGroupDefaults(form, effectiveGroupDefaults ?? {}),
     [effectiveGroupDefaults, form],
   );
 
@@ -449,7 +449,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   const hasMissingProxyProfile = Boolean(displayProxyProfileId && !selectedProxyProfile);
   const proxyInherited = !hasHostProxyOverride && Boolean(
     displayProxyProfileId || displayProxyConfig?.host || displayProxyConfig?.command,
-  ) && Boolean(effectiveGroupDefaults?.proxyProfileId || effectiveGroupDefaults?.proxyConfig);
+  );
   const proxySummaryType = hasMissingProxyProfile
     ? t("hostDetails.proxyPanel.missing")
     : formatProxyConfigType(selectedProxyProfile?.config || displayProxyConfig) || "HTTP";
@@ -794,6 +794,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     [effectiveAuthHost.hostChain?.hostIds, form.hostChain],
   );
   const hostChainInherited = form.hostChain === undefined && displayHostChainIds.length > 0;
+  const canRestoreHostChain = form.hostChain !== undefined
+    && !form.hostChain.hostIds?.length
+    && resolveFormHostChainIds({ ...form, hostChain: undefined }, effectiveGroupDefaults).length > 0;
 
   const availableHostsForChain = useMemo(() => {
     const chainedIds = new Set(displayHostChainIds);
@@ -1262,6 +1265,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           setShowAlgorithmOverrides={setShowAlgorithmOverrides}
           chainedHosts={chainedHosts}
           hostChainInherited={hostChainInherited}
+          canRestoreHostChain={canRestoreHostChain}
           setActiveSubPanel={setActiveSubPanel}
           clearHostChain={clearHostChain}
           proxySummaryType={proxySummaryType}

@@ -426,7 +426,7 @@ test('hostDom syncs valueAsNumber, valueAsDate, stepUp, stepDown, and setRangeTe
 test('hostReact widgets and extended surface events round-trip cleanly through hostDom', async () => {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost', pretendToBeVisual: true });
   const saved = new Map<string, PropertyDescriptor | undefined>();
-  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLOptionElement', 'HTMLFormElement', 'Node', 'MutationObserver', 'Event', 'CustomEvent', 'MouseEvent']) {
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLOptionElement', 'HTMLFormElement', 'Node', 'MutationObserver', 'Event', 'CustomEvent', 'MouseEvent', 'KeyboardEvent']) {
     saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: key === 'window' ? dom.window : dom.window[key as keyof typeof dom.window] });
   }
@@ -436,6 +436,7 @@ test('hostReact widgets and extended surface events round-trip cleanly through h
   const { remoteId } = await import('@remote-dom/core/elements');
   const {
     registerHostReactView,
+    usePluginShortcuts,
     PluginPopover,
     PluginCodeEditor,
     PluginDataGrid,
@@ -453,7 +454,9 @@ test('hostReact widgets and extended surface events round-trip cleanly through h
   };
 
   const received: Record<string, unknown> = {};
+  const globalShortcuts: string[] = [];
   function IdeView() {
+    usePluginShortcuts((sc) => { globalShortcuts.push(sc); });
     return (
       <div data-plugin-chrome="full-bleed">
         <button
@@ -467,18 +470,24 @@ test('hostReact widgets and extended surface events round-trip cleanly through h
           <span>Action</span>
         </PluginPopover>
         <PluginSplitPane direction="horizontal" initialSize={260} onResizeEnd={(d) => { received.resizeEnd = d; }}>
-          <PluginCodeEditor value="SELECT 1;" language="sql" onExecute={(d) => { received.execute = d; }} />
+          <PluginCodeEditor value="SELECT 1;" language="sql" onExecute={(d) => { received.execute = d; }} onShortcut={(d) => { received.editorShortcut = d; }} />
           <PluginDataGrid
-            columns={[{ name: 'id', primaryKey: true }]}
+            columns={[{ name: 'id', primaryKey: true, foreignKey: { table: 'users', column: 'id' } }]}
+            hiddenColumns={[]}
             rows={[{ id: 1 }]}
             editable
             onCellEdit={(d) => { received.cellEdit = d; }}
+            onFkJump={(d) => { received.fkJump = d; }}
+            onCellCopy={(d) => { received.cellCopy = d; }}
+            onCellDoubleClick={(d) => { received.cellDoubleClick = d; }}
           />
         </PluginSplitPane>
         <PluginErCanvas
           tables={[{ name: 'users', columns: [{ name: 'id', type: 'int', isPk: true }] }]}
           relations={[]}
           onTableClick={(d) => { received.tableClick = d; }}
+          onTableDoubleClick={(d) => { received.tableDoubleClick = d; }}
+          onExportSvg={(d) => { received.exportSvg = d; }}
         />
       </div>
     );
@@ -506,18 +515,35 @@ test('hostReact widgets and extended surface events round-trip cleanly through h
     await act(async () => {
       receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'dblclick', nodeId: remoteId(btn), x: 12, y: 34 } });
       receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'contextmenu', nodeId: remoteId(btn), x: 56, y: 78 } });
+      receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'keydown', nodeId: remoteId(btn), key: 'k', metaKey: true } });
       receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(editorEl), widgetEvent: 'execute', detail: { value: 'SELECT 1;', selectedText: '', currentStatement: 'SELECT 1' } } });
+      receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(editorEl), widgetEvent: 'shortcut', detail: { shortcut: 'mod+s' } } });
+      receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(gridEl), widgetEvent: 'shortcut', detail: { shortcut: 'mod+z' } } });
       receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(gridEl), widgetEvent: 'cellEdit', detail: { rowIndex: 0, colName: 'id', value: '2', isNull: false } } });
+      receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(gridEl), widgetEvent: 'fkJump', detail: { rowIndex: 0, colName: 'id', value: 1, targetTable: 'users', targetColumn: 'id' } } });
+      receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(gridEl), widgetEvent: 'cellCopy', detail: { text: '1', rowIndex: 0, colName: 'id', rowIndices: [0] } } });
+      receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(gridEl), widgetEvent: 'cellDoubleClick', detail: { rowIndex: 0, colName: 'id', value: 1 } } });
       receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(splitEl), widgetEvent: 'resizeEnd', detail: { size: 320, collapsed: false } } });
       receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(erEl), widgetEvent: 'tableClick', detail: { table: 'users' } } });
+      receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(erEl), widgetEvent: 'tableDoubleClick', detail: { table: 'users' } } });
+      receive({ kind: 'host-ui.event', instanceId: 'ide-1', event: { type: 'widget', nodeId: remoteId(erEl), widgetEvent: 'exportSvg', detail: { svg: '<svg/>' } } });
     });
 
     assert.deepEqual(received.dblclick, { x: 12, y: 34 });
     assert.deepEqual(received.contextmenu, { x: 56, y: 78 });
     assert.deepEqual(received.execute, { value: 'SELECT 1;', selectedText: '', currentStatement: 'SELECT 1' });
+    assert.deepEqual(received.editorShortcut, { shortcut: 'mod+s' });
+    // editorEl consumed mod+s via onShortcut (must NOT double-fire usePluginShortcuts);
+    // btn (Shadow DOM) and gridEl (no onShortcut) bubble to usePluginShortcuts once each.
+    assert.deepEqual(globalShortcuts, ['mod+k', 'mod+z']);
     assert.deepEqual(received.cellEdit, { rowIndex: 0, colName: 'id', value: '2', isNull: false });
+    assert.deepEqual(received.fkJump, { rowIndex: 0, colName: 'id', value: 1, targetTable: 'users', targetColumn: 'id' });
+    assert.deepEqual(received.cellCopy, { text: '1', rowIndex: 0, colName: 'id', rowIndices: [0] });
+    assert.deepEqual(received.cellDoubleClick, { rowIndex: 0, colName: 'id', value: 1 });
     assert.deepEqual(received.resizeEnd, { size: 320, collapsed: false });
     assert.deepEqual(received.tableClick, { table: 'users' });
+    assert.deepEqual(received.tableDoubleClick, { table: 'users' });
+    assert.deepEqual(received.exportSvg, { svg: '<svg/>' });
     await act(async () => { receive({ kind: 'host-ui.close', instanceId: 'ide-1' }); });
   } finally {
     await act(async () => { registration.dispose(); });

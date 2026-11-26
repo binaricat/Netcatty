@@ -10,6 +10,89 @@ import { DirectoryPickerError, directoryChangeCommand } from '../../domain/direc
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
+for (const home of [null, '/tmp'] as const) {
+  test(`command invalidation retains only the compose display (home=${home})`, async t => {
+    const id = 'hook-sticky-cwd-' + home;
+    let cwd = '/tmp/test_dir';
+    const writes: string[] = [];
+    const controller = createTerminalDirectoryController({
+      sessionId: id, isCurrent: () => true, isReady: () => true,
+      io: { cwd: async () => cwd, home: async () => home, realpath: async path => path,
+        write: data => { writes.push(data); },
+        list: async () => ({ home, entries: [{ name: 'child', path: cwd + '/child', hidden: false }] }) },
+      publish: path => terminalCwdStore.setCwd(id, path, 'backend-strict'),
+    });
+    const unregister = registerTerminalDirectory(id, controller);
+    let model!: ReturnType<typeof useComposeDirectoryPicker>;
+    function Harness() { model = useComposeDirectoryPicker(id); return null; }
+    let root!: ReactTestRenderer;
+    await act(async () => { root = create(React.createElement(Harness)); });
+    t.after(async () => { await act(async () => { root.unmount(); }); unregister(); });
+    await act(async () => { model.setOpen(true); });
+    const label = home ? '~/test_dir' : cwd;
+    assert.equal(model.display?.label, label);
+    assert.equal(model.display?.title, cwd);
+    assert.equal(model.display?.ariaPath, label);
+    const revision = terminalCwdStore.getSessionRevision(id);
+    await act(async () => { terminalCwdStore.setCwd(id, null); });
+    assert.equal(model.cwd, null);
+    assert.equal(model.home, null);
+    assert.equal(terminalCwdStore.getCwd(id), null);
+    assert.equal(terminalCwdStore.getSource(id), undefined);
+    assert.ok(terminalCwdStore.getSessionRevision(id) > revision);
+    assert.equal(model.display?.label, label);
+    assert.equal(model.display?.title, cwd);
+    assert.equal(model.display?.ariaPath, label);
+    assert.equal(model.parent, null);
+    assert.deepEqual(model.entries, []);
+    await act(async () => { await model.change('/tmp'); });
+    assert.equal(model.error, 'unavailable');
+    await assert.rejects(controller.change('/tmp', new AbortController().signal, () => {}, cwd), { code: 'unavailable' });
+    assert.deepEqual(writes, []);
+    await act(async () => { await controller.refresh(); });
+    assert.equal(model.display?.label, label, 'restoring the same path preserves its home abbreviation');
+    await act(async () => { cwd = '/tmp/next'; await controller.refresh(); });
+    assert.equal(model.display?.label, home ? '~/next' : cwd);
+    assert.equal(model.display?.title, cwd);
+  });
+}
+
+for (const transition of ['session', 'controller', 'disconnect'] as const) {
+  test(`compose display never crosses a ${transition} boundary`, async t => {
+    const id = 'hook-display-boundary-' + transition;
+    const makeController = (sessionId: string, initial: boolean) => createTerminalDirectoryController({
+      sessionId, isCurrent: () => true, isReady: () => true,
+      io: { cwd: async () => { if (!initial) throw new DirectoryPickerError('unknown'); return '/old/path'; },
+        home: async () => '/old', realpath: async path => path, write() {}, list: async () => ({ home: null, entries: [] }) },
+      publish: path => terminalCwdStore.setCwd(sessionId, path, 'backend-strict'),
+    });
+    const unregister = registerTerminalDirectory(id, makeController(id, true));
+    let unregisterNext = () => {};
+    const renders: Array<ReturnType<typeof useComposeDirectoryPicker>['display']> = [];
+    let model!: ReturnType<typeof useComposeDirectoryPicker>;
+    function Harness({ session }: { session: string }) {
+      model = useComposeDirectoryPicker(session); renders.push(model.display); return null;
+    }
+    let root!: ReactTestRenderer;
+    await act(async () => { root = create(React.createElement(Harness, { session: id })); });
+    t.after(async () => { await act(async () => { root.unmount(); }); unregister(); unregisterNext(); });
+    assert.equal(model.display?.label, '~/path');
+    renders.length = 0;
+    await act(async () => {
+      if (transition === 'session') {
+        unregisterNext = registerTerminalDirectory(id + '-next', makeController(id + '-next', false));
+        root.update(React.createElement(Harness, { session: id + '-next' }));
+      } else if (transition === 'controller') {
+        // Leave the old backend value in the store: a new controller has not confirmed it.
+        unregisterNext = registerTerminalDirectory(id, makeController(id, false));
+      } else unregister();
+    });
+    assert.equal(model.cwd, null);
+    assert.equal(model.display, null);
+    assert.ok(renders.every(display => display === null), 'even the first render must discard the old display');
+  });
+}
+
 for (const outcome of ['complete', 'close', 'switch', 'repeated-reports'] as const) {
   test(`unchanged OSC 7 during directory loading retries within the active menu (${outcome})`, async t => {
     const id = 'hook-list-revision-' + outcome;
@@ -89,9 +172,11 @@ test('PowerShell non-filesystem reports clear an open menu and recover after ret
   assert.equal(model.pathFlavor, 'win32');
   assert.equal(model.parent, 'C:\\');
   assert.equal(model.entries.length, 1);
+  assert.equal(model.display?.title, 'C:\\base');
   await act(async () => { filesystem = false; await controller.refresh().catch(() => {}); });
   assert.equal(model.cwd, null);
   assert.equal(model.home, null);
+  assert.equal(model.display, null, 'native provider failures must not retain a filesystem label');
   assert.equal(model.error, 'nonFilesystem');
   assert.deepEqual(model.entries, []);
   await act(async () => { filesystem = true; await controller.refresh(); });
