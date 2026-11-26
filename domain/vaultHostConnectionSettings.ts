@@ -7,7 +7,8 @@ import { MAX_SSH_CONNECTION_TIMEOUT_SECONDS } from './sshConnectionTimeouts';
  * Connection settings that agents may change on a saved host through
  * vault_hosts_update, in addition to the fields handled directly by
  * applyVaultHostUpdate. Credentials (password, keys, identities, SSH agent,
- * MFA/TOTP) and security-sensitive switches stay GUI-only on purpose.
+ * MFA/TOTP) and security-sensitive switches such as sftpSudo, which runs file
+ * operations as root, stay GUI-only on purpose.
  */
 export const VAULT_HOST_CONNECTION_SETTING_FIELDS = [
   'authMethod',
@@ -20,7 +21,6 @@ export const VAULT_HOST_CONNECTION_SETTING_FIELDS = [
   'keepaliveCountMax',
   'sshTcpConnectTimeoutSeconds',
   'sshAuthReadyTimeoutSeconds',
-  'sftpSudo',
   'sftpFileProtocol',
   'sftpEncoding',
 ] as const;
@@ -161,6 +161,7 @@ export function applyVaultHostResetFields(
 
 export function hasVaultHostConnectionSettingPatch(source: Record<string, unknown>): boolean {
   return hasOwn(source, 'resetFields')
+    || hasOwn(source, 'sftpSudo')
     || VAULT_HOST_CONNECTION_SETTING_FIELDS.some((field) => hasOwn(source, field));
 }
 
@@ -176,7 +177,6 @@ const PLUGIN_HOST_DROPPED_FIELDS = [
   'keepaliveCountMax',
   'sshTcpConnectTimeoutSeconds',
   'sshAuthReadyTimeoutSeconds',
-  'sftpSudo',
 ] as const;
 
 export interface VaultHostConnectionSettingsOptions {
@@ -202,6 +202,9 @@ export function applyVaultHostConnectionSettings(
   const isPlainSsh = isSshProtocol && !effective.moshEnabled && !effective.etEnabled;
   const usesSshLogin = isSshProtocol || protocol === 'mosh' || protocol === 'et';
 
+  if (hasOwn(source, 'sftpSudo')) {
+    return { ok: false, error: 'sftpSudo can only be turned on in Host Details. Use resetFields ["sftpSudo"] to turn it off.' };
+  }
   if (isPluginHostProtocol(protocol)) {
     const dropped = PLUGIN_HOST_DROPPED_FIELDS.find((field) => hasOwn(source, field));
     if (dropped) return { ok: false, error: `${dropped} does not apply to plugin hosts.` };
@@ -272,23 +275,15 @@ export function applyVaultHostConnectionSettings(
     updated[field] = value;
   }
 
-  const sftpSudoProvided = hasOwn(source, 'sftpSudo');
-  const sftpSudo = sftpSudoProvided ? parseBooleanInput(source.sftpSudo) : undefined;
-  if (sftpSudoProvided && sftpSudo === undefined) return { ok: false, error: 'sftpSudo must be true or false.' };
   if (hasOwn(source, 'sftpFileProtocol')) {
     const value = parseEnumInput(source.sftpFileProtocol, ['auto', 'sftp', 'scp'] as const);
     if (!value) return { ok: false, error: 'sftpFileProtocol must be auto, sftp, or scp.' };
     updated.sftpFileProtocol = value;
-  }
-  if (sftpSudoProvided) updated.sftpSudo = sftpSudo;
-  // SFTP connections reject sudo with SCP, so mirror Host Details: selecting
-  // SCP turns sudo off, and enabling sudo while SCP is selected is rejected.
-  if (updated.sftpFileProtocol === 'scp' && updated.sftpSudo) {
-    if (sftpSudo === true) {
-      return { ok: false, error: 'sftpSudo cannot be used with sftpFileProtocol scp. Set sftpFileProtocol to auto or sftp.' };
+    // SFTP connections reject sudo with SCP, so turn sudo off like Host Details.
+    if (value === 'scp' && updated.sftpSudo) {
+      updated.sftpSudo = false;
+      warnings.push('sftpSudo was turned off because SCP cannot use sudo.');
     }
-    updated.sftpSudo = false;
-    warnings.push('sftpSudo was turned off because SCP cannot use sudo.');
   }
   if (hasOwn(source, 'sftpEncoding')) {
     const value = parseEnumInput(source.sftpEncoding, ['auto', 'utf-8', 'gb18030'] as const);

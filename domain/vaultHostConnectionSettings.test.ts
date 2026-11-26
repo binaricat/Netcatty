@@ -41,7 +41,6 @@ test('vault host update sets timeouts, SFTP and input settings', () => {
   const result = expectOk(update(makeHost(), {
     sshTcpConnectTimeoutSeconds: 60,
     sshAuthReadyTimeoutSeconds: '300',
-    sftpSudo: 'true',
     sftpFileProtocol: 'SFTP',
     sftpEncoding: 'gb18030',
     sshInputCompatibility: false,
@@ -49,7 +48,6 @@ test('vault host update sets timeouts, SFTP and input settings', () => {
   }));
   assert.equal(result.updatedHost.sshTcpConnectTimeoutSeconds, 60);
   assert.equal(result.updatedHost.sshAuthReadyTimeoutSeconds, 300);
-  assert.equal(result.updatedHost.sftpSudo, true);
   assert.equal(result.updatedHost.sftpFileProtocol, 'sftp');
   assert.equal(result.updatedHost.sftpEncoding, 'gb18030');
   assert.equal(result.updatedHost.sshInputCompatibility, false);
@@ -83,7 +81,6 @@ test('vault host update rejects invalid connection settings', () => {
     { patch: { keepaliveCountMax: 0 }, error: /keepaliveCountMax must be an integer between 1 and 100/i },
     { patch: { sshTcpConnectTimeoutSeconds: 0 }, error: /sshTcpConnectTimeoutSeconds must be an integer between 1 and 3600/i },
     { patch: { sshAuthReadyTimeoutSeconds: '' }, error: /sshAuthReadyTimeoutSeconds must be an integer/i },
-    { patch: { sftpSudo: 'maybe' }, error: /sftpSudo must be true or false/i },
     { patch: { sftpFileProtocol: 'ftp' }, error: /sftpFileProtocol must be auto, sftp, or scp/i },
     { patch: { sftpEncoding: 'latin1' }, error: /sftpEncoding must be auto, utf-8, or gb18030/i },
     { patch: { authMethod: 'agent' }, error: /authMethod must be auto, password, key, or certificate/i },
@@ -172,25 +169,27 @@ test('vault host update keeps an inherited login method when the same method is 
   assert.equal(switched.updatedHost.username, 'deploy', 'the effective username is kept');
 });
 
-test('vault host update never stores sudo together with SCP', () => {
+test('vault host update cannot turn on sftpSudo but can turn it off', () => {
+  for (const patch of [{ sftpSudo: true }, { sftpSudo: 'true', sftpFileProtocol: 'sftp' }, { sftpSudo: false }]) {
+    const result = update(makeHost(), patch);
+    assert.equal(result.ok, false, JSON.stringify(patch));
+    if (!result.ok) assert.match(result.error, /sftpSudo can only be turned on in Host Details/);
+  }
+
+  const reset = expectOk(update(makeHost({ sftpSudo: true }), { resetFields: ['sftpSudo'] }));
+  assert.equal(reset.updatedHost.sftpSudo, undefined);
+});
+
+test('vault host update turns sudo off when SCP is selected', () => {
   const selectScp = expectOk(update(makeHost({ sftpSudo: true }), { sftpFileProtocol: 'scp' }));
   assert.equal(selectScp.updatedHost.sftpFileProtocol, 'scp');
   assert.equal(selectScp.updatedHost.sftpSudo, false);
   assert.match(selectScp.warnings.join('\n'), /sftpSudo was turned off/);
-
-  for (const [host, patch] of [
-    [makeHost(), { sftpSudo: true, sftpFileProtocol: 'scp' }],
-    [makeHost({ sftpFileProtocol: 'scp' }), { sftpSudo: true }],
-  ] as const) {
-    const result = update(host, patch);
-    assert.equal(result.ok, false, JSON.stringify(patch));
-    if (!result.ok) assert.match(result.error, /sftpSudo cannot be used with sftpFileProtocol scp/);
-  }
 });
 
 test('vault host update rejects settings that plugin hosts drop on save', () => {
-  for (const field of ['authMethod', 'keepaliveOverride', 'keepaliveInterval', 'keepaliveCountMax', 'sshTcpConnectTimeoutSeconds', 'sshAuthReadyTimeoutSeconds', 'sftpSudo']) {
-    const value = field === 'authMethod' ? 'key' : field === 'keepaliveOverride' || field === 'sftpSudo' ? 'true' : 30;
+  for (const field of ['authMethod', 'keepaliveOverride', 'keepaliveInterval', 'keepaliveCountMax', 'sshTcpConnectTimeoutSeconds', 'sshAuthReadyTimeoutSeconds']) {
+    const value = field === 'authMethod' ? 'key' : field === 'keepaliveOverride' ? 'true' : 30;
     const result = update(makeHost({ protocol: pluginProtocol }), { [field]: value } as VaultHostUpdatePatch);
     assert.equal(result.ok, false, field);
     if (!result.ok) assert.match(result.error, new RegExp(`${field} does not apply to plugin hosts`));

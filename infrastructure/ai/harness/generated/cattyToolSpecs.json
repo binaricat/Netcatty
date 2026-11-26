@@ -851,11 +851,6 @@
         "optional": true,
         "description": "Login timeout in seconds (1-3600, default 120)."
       },
-      "sftpSudo": {
-        "type": "string",
-        "optional": true,
-        "description": "true or false. Runs SFTP operations with sudo. Not available with sftpFileProtocol scp."
-      },
       "sftpFileProtocol": {
         "type": "string",
         "optional": true,
@@ -869,7 +864,7 @@
       "resetFields": {
         "type": "string",
         "optional": true,
-        "description": "JSON array or comma-separated fields to remove from the host so the group or default value applies: port, proxy, jumpHostIds, startupCommand, startupCommandRunMode, environmentVariables, the Mosh and ET fields, and the connection settings above. Not credentials or protocol."
+        "description": "JSON array or comma-separated fields to remove from the host so the group or default value applies: port, proxy, jumpHostIds, startupCommand, startupCommandRunMode, environmentVariables, the Mosh and ET fields, sftpSudo (turns sudo off), and the connection settings above. Not credentials or protocol."
       },
       "serialConfig": {
         "type": "string",
