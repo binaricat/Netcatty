@@ -138,7 +138,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
         ? (passwordCleared ? undefined : password)
         : (initialData.password ?? undefined),
       tags,
-      group: resolveHostGroupForSave(group, originalGroupRef.current),
+      group: resolveHostGroupForSave(group, originalGroupRef.current, group !== originalGroupRef.current),
       charset,
       serialConfig: config,
       backspaceBehavior: undefined,

@@ -135,7 +135,7 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
       notes: initialData?.notes,
     });
     // Apply after the factory's outer trim to retain unchanged legacy paths exactly.
-    host.group = resolveHostGroupForSave(group, originalGroupRef.current);
+    host.group = resolveHostGroupForSave(group, originalGroupRef.current, group !== originalGroupRef.current);
     // On edits, merge over the existing host so fields this form does not
     // expose (pinned, lastConnectedAt, order, ...) and the original
     // creation timestamp survive a save.

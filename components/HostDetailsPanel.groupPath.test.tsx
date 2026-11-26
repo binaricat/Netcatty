@@ -81,7 +81,7 @@ function groupPicker(renderer: ReactTestRenderer, kind: PanelKind) {
 for (const kind of ['ssh', 'local', 'serial'] as const) {
   const initialData = { ...host, protocol: kind, ...(kind === 'serial' ? { hostname: 'COM3' } : {}) };
   test(`${kind} Host Details keeps the exact stored group on a label-only edit`, async () => {
-    for (const group of ['prod / web', ' prod / web ']) {
+    for (const group of ['prod / web', ' prod / web ', ' prod/web ']) {
       await withPanel(kind, { ...initialData, group }, async ({ renderer, save }) => {
         await act(async () => {
           renderer.root.findAllByType(Input).find((input) => input.props.value === host.label)!
@@ -91,6 +91,15 @@ for (const kind of ['ssh', 'local', 'serial'] as const) {
         assert.equal(saved.label, 'Updated label');
         assert.equal(saved.group, group);
       });
+    }
+  });
+
+  test(`${kind} Host Details normalizes an explicitly selected trimmed-equivalent group`, async () => {
+    for (const group of [' prod/web ', ' prod / web ']) {
+      await withPanel(kind, { ...initialData, group }, async ({ renderer, save }) => {
+        await act(async () => { groupPicker(renderer, kind).props.onValueChange(group.trim()); });
+        assert.equal((await save()).group, 'prod/web');
+      }, [group.trim()]);
     }
   });
 

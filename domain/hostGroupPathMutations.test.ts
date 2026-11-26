@@ -27,6 +27,12 @@ test('Host Details preserves unchanged stored paths on unrelated edits', () => {
   }
 });
 
+test('Host Details normalizes an explicitly changed group equivalent after trimming', () => {
+  for (const storedGroup of [' prod/web ', ' prod / web ']) {
+    assert.equal(resolveHostGroupForSave(storedGroup.trim(), storedGroup, true), 'prod/web');
+  }
+});
+
 test('Host Details allows changed paths to normalize to ungrouped', () => {
   for (const value of ['', ' / / \\ ']) {
     assert.equal(resolveHostGroupForSave(value, 'prod / web'), '');

@@ -586,6 +586,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     const finalGroup = resolveHostGroupForSave(
       groupInputValue.trim() || form.group || "",
       originalGroupRef.current,
+      groupInputValue !== originalGroupRef.current,
     );
 
     const targetManagedSource = managedSources
@@ -1133,7 +1134,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
                 // path normalized while preserving a reselected legacy group.
                 const groupPath = val === createdGroupInputRef.current
                   ? normalizeGroupTargetPath(val)
-                  : resolveHostGroupForSave(val, originalGroupRef.current);
+                  : resolveHostGroupForSave(val, originalGroupRef.current, val !== originalGroupRef.current);
                 createdGroupInputRef.current = null;
                 update("group", groupPath);
                 setGroupInputValue(groupPath);

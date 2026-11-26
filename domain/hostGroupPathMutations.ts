@@ -11,8 +11,9 @@ export function normalizeGroupTargetPath(value: string): string {
 
 // Undefined means a new host; existing ungrouped hosts use ''. Preserve legacy
 // paths on unrelated edits so their exact-path connection defaults do not change.
-export function resolveHostGroupForSave(value: string, originalGroup?: string): string {
-  if (originalGroup !== undefined && (value === originalGroup || value === originalGroup.trim())) {
+// Compare the raw field before save-time trimming to determine groupChanged.
+export function resolveHostGroupForSave(value: string, originalGroup?: string, groupChanged = false): string {
+  if (!groupChanged && originalGroup !== undefined && (value === originalGroup || value === originalGroup.trim())) {
     return originalGroup;
   }
   return normalizeGroupTargetPath(value);
