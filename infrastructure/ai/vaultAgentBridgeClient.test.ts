@@ -1931,7 +1931,7 @@ describe('handleVaultAgentOp vault management gaps', () => {
     assert.equal(result.host?.charset, 'GBK');
     assert.equal(result.valueSources?.charset, 'group:prod');
     assert.equal(result.valueSources?.backspaceBehavior, 'host');
-    assert.equal(result.valueSources?.proxy, 'none');
+    assert.equal(result.valueSources?.proxy, undefined);
   });
 
   it('updates connection settings, returns warnings and accepts resetFields alone', async () => {

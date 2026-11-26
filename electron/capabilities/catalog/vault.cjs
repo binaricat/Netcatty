@@ -8,7 +8,7 @@ const VAULT_CAPABILITIES = [
     id: "vault.host.get",
     domain: "vault",
     status: CAPABILITY_STATUS.IMPLEMENTED,
-    description: "Get host metadata from the vault. Values include group and global defaults; valueSources tells whether each one is set on the host (host), inherited (group:<path>, global-default) or the app default, and whether the proxy is direct or none.",
+    description: "Get host metadata from the vault, including inherited values. valueSources marks values set on the host (host) or inherited (group:<path>, global-default); proxy can also be direct. Missing keys use the app default.",
     policy: {
       write: false,
       sensitiveRead: true,

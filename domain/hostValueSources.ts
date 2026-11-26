@@ -7,9 +7,11 @@ import type { GroupConfig, Host } from './models';
  *
  * - `host`: stored on the host itself.
  * - `group:<path>`: inherited from that group (the nearest group that sets it).
- * - `default`: neither the host nor a group sets it; the app default applies.
- * - proxy only: `direct` (host forces no proxy), `global-default`, or `none`.
- * - keepalive only: `host` or `global`.
+ * - proxy only: `direct` (host forces no proxy) or `global-default`.
+ * - keepalive only: `host`.
+ *
+ * Fields that use the app default (no proxy, global keepalive) are left out
+ * to keep tool results small.
  */
 export type HostValueSource = string;
 
@@ -68,22 +70,20 @@ export function resolveHostValueSources(
       continue;
     }
     const effectiveValue = effectiveHost[key];
-    if (effectiveValue === undefined || effectiveValue === null || effectiveValue === '') {
-      sources[field] = 'default';
-      continue;
-    }
+    if (effectiveValue === undefined || effectiveValue === null || effectiveValue === '') continue;
     const group = ancestors.find((config) => (
       config[key] !== undefined && sameValue(config[key], effectiveValue)
     ));
-    sources[field] = group ? `group:${group.path}` : 'default';
+    if (group) sources[field] = `group:${group.path}`;
   }
 
-  sources.proxy = resolveProxySource(host, effectiveHost, ancestors);
-  sources.keepalive = host.keepaliveOverride === true ? 'host' : 'global';
+  const proxySource = resolveProxySource(host, effectiveHost, ancestors);
+  if (proxySource) sources.proxy = proxySource;
+  if (host.keepaliveOverride === true) sources.keepalive = 'host';
   return sources;
 }
 
-function resolveProxySource(host: Host, effectiveHost: Host, ancestors: GroupConfig[]): HostValueSource {
+function resolveProxySource(host: Host, effectiveHost: Host, ancestors: GroupConfig[]): HostValueSource | undefined {
   if (host.directProxy === true) return 'direct';
   if (host.proxyProfileId || host.proxyConfig !== undefined) return 'host';
   const group = ancestors.find((config) => (
@@ -93,5 +93,5 @@ function resolveProxySource(host: Host, effectiveHost: Host, ancestors: GroupCon
   ));
   if (group) return `group:${group.path}`;
   if (effectiveHost.proxyProfileId || effectiveHost.proxyConfig) return 'global-default';
-  return 'none';
+  return undefined;
 }

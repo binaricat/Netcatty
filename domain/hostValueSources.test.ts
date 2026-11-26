@@ -27,8 +27,8 @@ test('valueSources separates host values, the nearest group and app defaults', (
   assert.equal(sources.deviceType, 'group:prod');
   assert.equal(sources.startupCommand, 'group:prod');
   assert.equal(sources.backspaceBehavior, 'host');
-  assert.equal(sources.etPort, 'default');
-  assert.equal(sources.keepalive, 'global');
+  assert.equal(sources.etPort, undefined, 'app defaults are left out');
+  assert.equal(sources.keepalive, undefined, 'global keepalive is left out');
 });
 
 test('valueSources treats empty strings like applyGroupDefaults does', () => {
@@ -48,7 +48,7 @@ test('valueSources reports every proxy source', () => {
   assert.equal(sourcesFor(makeHost({ group: 'prod' }), configs, 'global-proxy').proxy, 'group:prod');
   assert.equal(sourcesFor(makeHost({ group: 'prod' }), groupOneOff).proxy, 'group:prod');
   assert.equal(sourcesFor(makeHost(), [], 'global-proxy').proxy, 'global-default');
-  assert.equal(sourcesFor(makeHost(), []).proxy, 'none');
+  assert.equal(sourcesFor(makeHost(), []).proxy, undefined, 'no proxy is left out');
 });
 
 test('valueSources reports host keepalive and jump hosts', () => {
