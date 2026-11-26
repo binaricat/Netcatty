@@ -1354,7 +1354,7 @@
       "defaults": {
         "type": "string",
         "optional": true,
-        "description": "JSON object of group defaults: username, identityId, proxyProfileId, jumpHostIds, startupCommand, environmentVariables, moshEnabled, moshServerPath, etEnabled, etPort, deviceType (general or network), charset (UTF-8 or GB18030; GBK and GB2312 are saved as GB18030), backspaceBehavior (ctrl-h). Hosts in the group inherit them unless they set their own value."
+        "description": "JSON object of group defaults: username, identityId, proxyProfileId, jumpHostIds, startupCommand, environmentVariables, moshEnabled, moshServerPath, etEnabled, etPort, deviceType, charset (UTF-8 or GB18030), backspaceBehavior (ctrl-h)."
       }
     },
     "policy": {
@@ -1388,12 +1388,12 @@
       "defaults": {
         "type": "string",
         "optional": true,
-        "description": "JSON object containing only group defaults to change. Same fields as vault_groups_create. An empty proxyProfileId removes the group proxy so a parent group proxy or the global default applies."
+        "description": "JSON object containing only group defaults to change. Empty proxyProfileId removes the group proxy."
       },
       "removeDefaults": {
         "type": "string",
         "optional": true,
-        "description": "JSON array or comma-separated group defaults to remove so a parent group, or the app default, applies again: proxy, jumpHostIds, startupCommand, startupCommandRunMode, environmentVariables, moshEnabled, moshServerPath, etEnabled, etPort, deviceType, charset, backspaceBehavior. Credentials cannot be removed here."
+        "description": "JSON array or comma-separated group defaults to remove so the parent group applies: proxy, jumpHostIds, startupCommand, startupCommandRunMode, environmentVariables, the Mosh and ET fields, deviceType, charset, backspaceBehavior. Not credentials."
       }
     },
     "policy": {
