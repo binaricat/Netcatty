@@ -175,6 +175,7 @@ export function applyVaultHostConnectionSettings(
   let updated: Host = { ...host };
   const warnings: string[] = [];
   const isSsh = updated.protocol === undefined || updated.protocol === 'ssh';
+  const usesSshLogin = isSsh || updated.protocol === 'mosh' || updated.protocol === 'et';
 
   if (hasOwn(source, 'deviceType')) {
     const deviceType = parseEnumInput(source.deviceType, ['general', 'network'] as const);
@@ -260,6 +261,9 @@ export function applyVaultHostConnectionSettings(
   if (hasOwn(source, 'authMethod')) {
     const authMethod = parseEnumInput(source.authMethod, AUTH_METHODS);
     if (!authMethod) return { ok: false, error: 'authMethod must be auto, password, key, or certificate.' };
+    if (!usesSshLogin) {
+      return { ok: false, error: 'authMethod only applies to SSH, Mosh, and Eternal Terminal hosts.' };
+    }
     const conflict = AUTH_METHOD_CONFLICT_KEYS.find((key) => hasOwn(source, key));
     if (conflict) {
       return { ok: false, error: `authMethod cannot be combined with ${conflict}. Change the login method and the credentials in separate updates.` };

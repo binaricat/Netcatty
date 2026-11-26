@@ -804,7 +804,7 @@
       "authMethod": {
         "type": "string",
         "optional": true,
-        "description": "Login method: auto, password, key, or certificate. Uses the same rules as Host Details: switching to another method detaches a reusable identity and the selected key but keeps a saved password. Cannot be combined with password, keyPath, identityId, or passphrase; pick the key or password in Host Details. The response lists warnings when the host has no key or password for the new method."
+        "description": "Login method for SSH, Mosh, and Eternal Terminal hosts: auto, password, key, or certificate. Uses the same rules as Host Details: switching to another method detaches a reusable identity and the selected key but keeps a saved password. Cannot be combined with password, keyPath, identityId, or passphrase; pick the key or password in Host Details. The response lists warnings when the host has no key or password for the new method."
       },
       "deviceType": {
         "type": "string",

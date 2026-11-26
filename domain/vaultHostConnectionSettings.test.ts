@@ -87,6 +87,8 @@ test('vault host update rejects invalid connection settings', () => {
     { patch: { sftpFileProtocol: 'ftp' }, error: /sftpFileProtocol must be auto, sftp, or scp/i },
     { patch: { sftpEncoding: 'latin1' }, error: /sftpEncoding must be auto, utf-8, or gb18030/i },
     { patch: { authMethod: 'agent' }, error: /authMethod must be auto, password, key, or certificate/i },
+    { host: makeHost({ protocol: 'telnet', port: 23 }), patch: { authMethod: 'password' }, error: /only applies to SSH/i },
+    { host: makeHost({ protocol: 'local', hostname: 'localhost' }), patch: { authMethod: 'key' }, error: /only applies to SSH/i },
   ];
   for (const entry of cases) {
     const result = update(entry.host ?? makeHost(), entry.patch);
