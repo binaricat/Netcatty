@@ -809,12 +809,12 @@
       "deviceType": {
         "type": "string",
         "optional": true,
-        "description": "general or network. network sends commands without shell wrapping."
+        "description": "general or network. network sends commands without shell wrapping; SSH without Mosh or ET, and serial hosts only."
       },
       "sshInputCompatibility": {
         "type": "string",
         "optional": true,
-        "description": "true or false. SSH only. Sends IME text and short pastes character by character; applies after reconnecting."
+        "description": "true or false. SSH without Mosh or ET only. Sends IME text and short pastes character by character; applies after reconnecting."
       },
       "backspaceBehavior": {
         "type": "string",
@@ -854,12 +854,12 @@
       "sftpSudo": {
         "type": "string",
         "optional": true,
-        "description": "true or false. Runs SFTP operations with sudo."
+        "description": "true or false. Runs SFTP operations with sudo. Not available with sftpFileProtocol scp."
       },
       "sftpFileProtocol": {
         "type": "string",
         "optional": true,
-        "description": "auto, sftp, or scp."
+        "description": "auto, sftp, or scp. scp turns sftpSudo off."
       },
       "sftpEncoding": {
         "type": "string",

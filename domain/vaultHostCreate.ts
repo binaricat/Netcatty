@@ -466,6 +466,7 @@ export function applyVaultHostUpdate(
     if (
       nextProtocol !== 'serial'
       && !port.provided
+      && !reset.fields.includes('port')
       && (
         current.protocol === 'serial'
         || current.port === undefined
@@ -830,7 +831,10 @@ export function applyVaultHostUpdate(
     }
     updated.notes = notes.value.trim() || undefined;
   }
-  const connectionSettings = applyVaultHostConnectionSettings(updated, source, options.resolveEffectiveHost);
+  const connectionSettings = applyVaultHostConnectionSettings(updated, source, {
+    resolveEffectiveHost: options.resolveEffectiveHost,
+    identities: options.identities,
+  });
   if ('error' in connectionSettings) return { ok: false, error: connectionSettings.error };
   updated = connectionSettings.host;
   if (options.managedSources) {

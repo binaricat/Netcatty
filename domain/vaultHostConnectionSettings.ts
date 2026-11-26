@@ -1,5 +1,6 @@
-import type { Host, HostAuthMethod } from './models';
-import { applyHostAuthMethodSelection } from './sshAuth';
+import type { Host, HostAuthMethod, Identity } from './models';
+import { isPluginHostProtocol } from './pluginConnection';
+import { applyHostAuthMethodSelection, resolveHostAuthMethodSelection } from './sshAuth';
 import { MAX_SSH_CONNECTION_TIMEOUT_SECONDS } from './sshConnectionTimeouts';
 
 /**
@@ -139,8 +140,8 @@ export function parseVaultHostResetFields(raw: unknown): { ok: true; fields: str
 export function applyVaultHostResetFields(
   host: Host,
   source: Record<string, unknown>,
-): { ok: true; host: Host } | Failure {
-  if (!hasOwn(source, 'resetFields')) return { ok: true, host };
+): { ok: true; host: Host; fields: string[] } | Failure {
+  if (!hasOwn(source, 'resetFields')) return { ok: true, host, fields: [] };
   const parsed = parseVaultHostResetFields(source.resetFields);
   if ('error' in parsed) return { ok: false, error: parsed.error };
   for (const field of parsed.fields) {
@@ -155,7 +156,7 @@ export function applyVaultHostResetFields(
   for (const field of parsed.fields) {
     for (const key of RESETTABLE_FIELDS[field]) delete next[key];
   }
-  return { ok: true, host: next as unknown as Host };
+  return { ok: true, host: next as unknown as Host, fields: parsed.fields };
 }
 
 export function hasVaultHostConnectionSettingPatch(source: Record<string, unknown>): boolean {
@@ -167,21 +168,50 @@ export function hasVaultHostConnectionSettingPatch(source: Record<string, unknow
  * Apply the agent-editable connection settings. Runs after the credential
  * fields so authMethod follows the same selection rules as Host Details.
  */
+/** Inputs that plugin hosts drop on save (stripBuiltInConnectionFieldsForPluginHost). */
+const PLUGIN_HOST_DROPPED_FIELDS = [
+  'authMethod',
+  'keepaliveOverride',
+  'keepaliveInterval',
+  'keepaliveCountMax',
+  'sshTcpConnectTimeoutSeconds',
+  'sshAuthReadyTimeoutSeconds',
+  'sftpSudo',
+] as const;
+
+export interface VaultHostConnectionSettingsOptions {
+  resolveEffectiveHost?: (host: Host) => Host;
+  identities?: Identity[];
+}
+
+/**
+ * Apply the agent-editable connection settings. Runs after the other patch
+ * fields, so transport checks use the effective protocol and Mosh/ET state
+ * (including group values) and authMethod follows the Host Details rules.
+ */
 export function applyVaultHostConnectionSettings(
   host: Host,
   source: Record<string, unknown>,
-  resolveEffectiveHost?: (host: Host) => Host,
+  options: VaultHostConnectionSettingsOptions = {},
 ): { ok: true; host: Host; warnings: string[] } | Failure {
   let updated: Host = { ...host };
   const warnings: string[] = [];
-  const isSsh = updated.protocol === undefined || updated.protocol === 'ssh';
-  const usesSshLogin = isSsh || updated.protocol === 'mosh' || updated.protocol === 'et';
+  const effective = options.resolveEffectiveHost?.(updated) ?? updated;
+  const protocol = effective.protocol;
+  const isSshProtocol = protocol === undefined || protocol === 'ssh';
+  const isPlainSsh = isSshProtocol && !effective.moshEnabled && !effective.etEnabled;
+  const usesSshLogin = isSshProtocol || protocol === 'mosh' || protocol === 'et';
+
+  if (isPluginHostProtocol(protocol)) {
+    const dropped = PLUGIN_HOST_DROPPED_FIELDS.find((field) => hasOwn(source, field));
+    if (dropped) return { ok: false, error: `${dropped} does not apply to plugin hosts.` };
+  }
 
   if (hasOwn(source, 'deviceType')) {
     const deviceType = parseEnumInput(source.deviceType, ['general', 'network'] as const);
     if (!deviceType) return { ok: false, error: 'deviceType must be general or network.' };
-    if (deviceType === 'network' && updated.protocol === 'local') {
-      return { ok: false, error: 'deviceType network does not apply to local shell hosts.' };
+    if (deviceType === 'network' && !isPlainSsh && protocol !== 'serial') {
+      return { ok: false, error: 'deviceType network only applies to SSH hosts without Mosh or ET, and to serial hosts.' };
     }
     updated.deviceType = deviceType;
   }
@@ -189,7 +219,7 @@ export function applyVaultHostConnectionSettings(
   if (hasOwn(source, 'sshInputCompatibility')) {
     const value = parseBooleanInput(source.sshInputCompatibility);
     if (value === undefined) return { ok: false, error: 'sshInputCompatibility must be true or false.' };
-    if (!isSsh) return { ok: false, error: 'sshInputCompatibility only applies to SSH hosts.' };
+    if (!isPlainSsh) return { ok: false, error: 'sshInputCompatibility only applies to SSH hosts without Mosh or ET.' };
     updated.sshInputCompatibility = value;
   }
 
@@ -242,15 +272,23 @@ export function applyVaultHostConnectionSettings(
     updated[field] = value;
   }
 
-  if (hasOwn(source, 'sftpSudo')) {
-    const value = parseBooleanInput(source.sftpSudo);
-    if (value === undefined) return { ok: false, error: 'sftpSudo must be true or false.' };
-    updated.sftpSudo = value;
-  }
+  const sftpSudoProvided = hasOwn(source, 'sftpSudo');
+  const sftpSudo = sftpSudoProvided ? parseBooleanInput(source.sftpSudo) : undefined;
+  if (sftpSudoProvided && sftpSudo === undefined) return { ok: false, error: 'sftpSudo must be true or false.' };
   if (hasOwn(source, 'sftpFileProtocol')) {
     const value = parseEnumInput(source.sftpFileProtocol, ['auto', 'sftp', 'scp'] as const);
     if (!value) return { ok: false, error: 'sftpFileProtocol must be auto, sftp, or scp.' };
     updated.sftpFileProtocol = value;
+  }
+  if (sftpSudoProvided) updated.sftpSudo = sftpSudo;
+  // SFTP connections reject sudo with SCP, so mirror Host Details: selecting
+  // SCP turns sudo off, and enabling sudo while SCP is selected is rejected.
+  if (updated.sftpFileProtocol === 'scp' && updated.sftpSudo) {
+    if (sftpSudo === true) {
+      return { ok: false, error: 'sftpSudo cannot be used with sftpFileProtocol scp. Set sftpFileProtocol to auto or sftp.' };
+    }
+    updated.sftpSudo = false;
+    warnings.push('sftpSudo was turned off because SCP cannot use sudo.');
   }
   if (hasOwn(source, 'sftpEncoding')) {
     const value = parseEnumInput(source.sftpEncoding, ['auto', 'utf-8', 'gb18030'] as const);
@@ -268,18 +306,31 @@ export function applyVaultHostConnectionSettings(
     if (conflict) {
       return { ok: false, error: `authMethod cannot be combined with ${conflict}. Change the login method and the credentials in separate updates.` };
     }
-    updated = applyHostAuthMethodSelection(updated, authMethod);
-    const effective = resolveEffectiveHost?.(updated) ?? updated;
-    if (
-      (authMethod === 'key' || authMethod === 'certificate')
-      && !effective.identityId
-      && !effective.identityFileId
-      && !effective.identityFilePaths?.some((path) => path.trim())
-    ) {
-      warnings.push(`No ${authMethod === 'key' ? 'key' : 'certificate'} is selected for this host. Choose one in Host Details before connecting.`);
-    }
-    if (authMethod === 'password' && !effective.identityId && !effective.password) {
-      warnings.push('No password is saved for this host. Netcatty will ask for it when connecting.');
+    // Compare with the method that applies today, including group and identity
+    // values, like applyEffectiveHostAuthMethodSelection in Host Details.
+    const beforeAuth = options.resolveEffectiveHost?.(updated) ?? updated;
+    const identity = beforeAuth.identityId
+      ? options.identities?.find((item) => item.id === beforeAuth.identityId)
+      : undefined;
+    const effectiveMethod = identity?.authMethod ?? resolveHostAuthMethodSelection(beforeAuth);
+    const effectiveUsername = identity?.username || beforeAuth.username;
+    if (authMethod !== effectiveMethod) {
+      const selected = applyHostAuthMethodSelection(updated, authMethod, effectiveMethod);
+      updated = !selected.username?.trim() && effectiveUsername?.trim()
+        ? { ...selected, username: effectiveUsername }
+        : selected;
+      const after = options.resolveEffectiveHost?.(updated) ?? updated;
+      if (
+        (authMethod === 'key' || authMethod === 'certificate')
+        && !after.identityId
+        && !after.identityFileId
+        && !after.identityFilePaths?.some((path) => path.trim())
+      ) {
+        warnings.push(`No ${authMethod === 'key' ? 'key' : 'certificate'} is selected for this host. Choose one in Host Details before connecting.`);
+      }
+      if (authMethod === 'password' && !after.identityId && !after.password) {
+        warnings.push('No password is saved for this host. Netcatty will ask for it when connecting.');
+      }
     }
   }
 

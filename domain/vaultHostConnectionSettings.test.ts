@@ -42,7 +42,7 @@ test('vault host update sets timeouts, SFTP and input settings', () => {
     sshTcpConnectTimeoutSeconds: 60,
     sshAuthReadyTimeoutSeconds: '300',
     sftpSudo: 'true',
-    sftpFileProtocol: 'SCP',
+    sftpFileProtocol: 'SFTP',
     sftpEncoding: 'gb18030',
     sshInputCompatibility: false,
     keepaliveCountMax: 5,
@@ -50,7 +50,7 @@ test('vault host update sets timeouts, SFTP and input settings', () => {
   assert.equal(result.updatedHost.sshTcpConnectTimeoutSeconds, 60);
   assert.equal(result.updatedHost.sshAuthReadyTimeoutSeconds, 300);
   assert.equal(result.updatedHost.sftpSudo, true);
-  assert.equal(result.updatedHost.sftpFileProtocol, 'scp');
+  assert.equal(result.updatedHost.sftpFileProtocol, 'sftp');
   assert.equal(result.updatedHost.sftpEncoding, 'gb18030');
   assert.equal(result.updatedHost.sshInputCompatibility, false);
   assert.equal(result.updatedHost.keepaliveCountMax, 5);
@@ -68,7 +68,7 @@ test('vault host update keepaliveOverride false returns to the global keepalive 
 test('vault host update rejects invalid connection settings', () => {
   const cases: Array<{ host?: Host; patch: VaultHostUpdatePatch; error: RegExp }> = [
     { patch: { deviceType: 'router' }, error: /deviceType must be general or network/i },
-    { host: makeHost({ protocol: 'local' }), patch: { deviceType: 'network' }, error: /local shell/i },
+    { host: makeHost({ protocol: 'local' }), patch: { deviceType: 'network' }, error: /deviceType network only applies to SSH hosts without Mosh or ET/i },
     { patch: { sshInputCompatibility: 'maybe' }, error: /sshInputCompatibility must be true or false/i },
     { host: makeHost({ protocol: 'telnet', port: 23 }), patch: { sshInputCompatibility: true }, error: /only applies to SSH/i },
     { patch: { backspaceBehavior: 'default' }, error: /backspaceBehavior must be ctrl-h/i },
@@ -122,6 +122,85 @@ test('vault host update rejects authMethod combined with credential fields', () 
     assert.equal(result.ok, false, key);
     if (!result.ok) assert.match(result.error, new RegExp(`authMethod cannot be combined with ${key}`));
   }
+});
+
+const pluginProtocol = 'plugin:com.example.transport.connection' as Host['protocol'];
+const groupResolver = (group: Partial<GroupConfig>) => (host: Host) => applyGroupDefaults(host, group);
+const updateWith = (host: Host, patch: VaultHostUpdatePatch, options: Parameters<typeof applyVaultHostUpdate>[4]) => (
+  applyVaultHostUpdate([host], [], host.id, patch, { proxyProfiles: [proxyProfile], ...options })
+);
+
+test('vault host update checks transport-only settings against the effective host', () => {
+  const inheritsTelnet = groupResolver({ protocol: 'telnet' });
+  const inheritsMosh = groupResolver({ moshEnabled: true });
+  const cases: Array<{ host?: Host; resolve: (host: Host) => Host; patch: VaultHostUpdatePatch; error: RegExp }> = [
+    { resolve: inheritsTelnet, patch: { authMethod: 'key' }, error: /authMethod only applies to SSH/i },
+    { resolve: inheritsTelnet, patch: { sshInputCompatibility: true }, error: /sshInputCompatibility only applies to SSH hosts without Mosh or ET/i },
+    { resolve: inheritsTelnet, patch: { deviceType: 'network' }, error: /deviceType network only applies/i },
+    { resolve: inheritsMosh, patch: { sshInputCompatibility: true }, error: /sshInputCompatibility only applies to SSH hosts without Mosh or ET/i },
+    { resolve: inheritsMosh, patch: { deviceType: 'network' }, error: /deviceType network only applies/i },
+    { host: makeHost({ etEnabled: true }), resolve: (host) => host, patch: { deviceType: 'network' }, error: /deviceType network only applies/i },
+  ];
+  for (const entry of cases) {
+    const result = updateWith(entry.host ?? makeHost({ group: 'prod' }), entry.patch, { resolveEffectiveHost: entry.resolve });
+    assert.equal(result.ok, false, JSON.stringify(entry.patch));
+    if (!result.ok) assert.match(result.error, entry.error);
+  }
+
+  const serial = makeHost({ protocol: 'serial', hostname: '/dev/ttyUSB0', port: 9600, serialConfig: { path: '/dev/ttyUSB0', baudRate: 9600 } });
+  assert.equal(updateWith(serial, { deviceType: 'network' }, {}).ok, true, 'serial hosts may use network mode');
+  assert.equal(updateWith(makeHost({ protocol: 'telnet', port: 23 }), { deviceType: 'general' }, {}).ok, true, 'general is always allowed');
+});
+
+test('vault host update keeps an inherited login method when the same method is requested', () => {
+  const identity = { id: 'identity-1', label: 'deploy', username: 'deploy', authMethod: 'key' as const, keyId: 'key-1', created: 1 };
+  const host = makeHost({ group: 'prod', username: '' });
+  const result = expectOk(updateWith(host, { authMethod: 'key' }, {
+    resolveEffectiveHost: groupResolver({ identityId: identity.id, username: identity.username }),
+    identities: [identity],
+  }));
+  assert.equal(result.updatedHost.identityId, undefined, 'the inherited identity is not detached');
+  assert.equal(result.updatedHost.authMethod, undefined);
+  assert.deepEqual(result.warnings, []);
+
+  const switched = expectOk(updateWith(host, { authMethod: 'password' }, {
+    resolveEffectiveHost: groupResolver({ identityId: identity.id, username: identity.username }),
+    identities: [identity],
+  }));
+  assert.equal(switched.updatedHost.authMethod, 'password');
+  assert.equal(switched.updatedHost.identityId, '', 'switching detaches the identity like Host Details');
+  assert.equal(switched.updatedHost.username, 'deploy', 'the effective username is kept');
+});
+
+test('vault host update never stores sudo together with SCP', () => {
+  const selectScp = expectOk(update(makeHost({ sftpSudo: true }), { sftpFileProtocol: 'scp' }));
+  assert.equal(selectScp.updatedHost.sftpFileProtocol, 'scp');
+  assert.equal(selectScp.updatedHost.sftpSudo, false);
+  assert.match(selectScp.warnings.join('\n'), /sftpSudo was turned off/);
+
+  for (const [host, patch] of [
+    [makeHost(), { sftpSudo: true, sftpFileProtocol: 'scp' }],
+    [makeHost({ sftpFileProtocol: 'scp' }), { sftpSudo: true }],
+  ] as const) {
+    const result = update(host, patch);
+    assert.equal(result.ok, false, JSON.stringify(patch));
+    if (!result.ok) assert.match(result.error, /sftpSudo cannot be used with sftpFileProtocol scp/);
+  }
+});
+
+test('vault host update rejects settings that plugin hosts drop on save', () => {
+  for (const field of ['authMethod', 'keepaliveOverride', 'keepaliveInterval', 'keepaliveCountMax', 'sshTcpConnectTimeoutSeconds', 'sshAuthReadyTimeoutSeconds', 'sftpSudo']) {
+    const value = field === 'authMethod' ? 'key' : field === 'keepaliveOverride' || field === 'sftpSudo' ? 'true' : 30;
+    const result = update(makeHost({ protocol: pluginProtocol }), { [field]: value } as VaultHostUpdatePatch);
+    assert.equal(result.ok, false, field);
+    if (!result.ok) assert.match(result.error, new RegExp(`${field} does not apply to plugin hosts`));
+  }
+});
+
+test('vault host update keeps a port reset when the protocol is also sent', () => {
+  const result = expectOk(update(makeHost({ port: 22 }), { protocol: 'ssh', resetFields: ['port'] }));
+  assert.equal(result.updatedHost.port, undefined);
+  assert.equal(applyGroupDefaults(result.updatedHost, { port: 2200 }).port, 2200);
 });
 
 test('vault host update resetFields lets group values apply again', () => {
