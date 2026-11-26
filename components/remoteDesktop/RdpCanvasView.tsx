@@ -1064,10 +1064,16 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         }
       };
 
-      void start();
+      // Defer WebSocket/IronRDP connect by a macrotask so React StrictMode's
+      // synthetic unmount never opens a phantom socket that consumes the
+      // one-time loopback WS token before the real mount connects.
+      const startTimer = window.setTimeout(() => {
+        if (!disposed) void start();
+      }, 0);
 
       return () => {
         disposed = true;
+        window.clearTimeout(startTimer);
         const session = sessionRef.current;
         sessionRef.current = null;
         if (session) {

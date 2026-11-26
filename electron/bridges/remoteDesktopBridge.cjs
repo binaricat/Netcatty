@@ -944,6 +944,7 @@ function createRemoteDesktopService(options = {}) {
       server.on("upgrade", (req, socket, head) => {
         const origin = req.headers?.origin;
         if (!isAllowedLoopbackOrigin(origin, { allowDevOrigins, extraAllowedOrigins })) {
+          console.warn(`[RemoteDesktop] WS upgrade rejected (403 origin): ${origin || "(empty)"}`);
           socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
           socket.destroy();
           return;
@@ -968,6 +969,9 @@ function createRemoteDesktopService(options = {}) {
         const token = parsedUrl.searchParams.get("token") || "";
         const session = sessions.get(sessionId);
         if (!session || !consumeOneTimeToken(sessionId, token)) {
+          console.warn(
+            `[RemoteDesktop] WS upgrade rejected (401 auth): sessionId=${sessionId} hasSession=${Boolean(session)}`,
+          );
           socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
           socket.destroy();
           return;

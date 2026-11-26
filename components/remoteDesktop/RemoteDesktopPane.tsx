@@ -144,6 +144,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   const canvasAreaRef = useRef<HTMLDivElement | null>(null);
   const canvasHandleRef = useRef<RemoteDesktopCanvasHandle | null>(null);
   const activeBackendSessionIdRef = useRef<string | null>(null);
+  const attemptNonceRef = useRef(0);
   const closeCaptureNeverConnectedRef = useRef(false);
   const closeCaptureDoneRef = useRef(false);
 
@@ -593,7 +594,8 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     }
 
     let cancelled = false;
-    const attemptSessionId = `${sessionId}:${connectAttempt}`;
+    let startedBackend = false;
+    const attemptSessionId = `${sessionId}:${connectAttempt}:${++attemptNonceRef.current}`;
     activeBackendSessionIdRef.current = attemptSessionId;
     setWsUrl(null);
     setDisconnectError(null);
@@ -625,30 +627,39 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       ignoreCertErrors: spec.rdpConfig?.ignoreCertErrors,
     });
 
-    void rdBridge
-      .start(payload)
-      .then((result) => {
-        if (cancelled) {
-          void rdBridge.stop(result.sessionId).catch(() => {});
-          return;
-        }
-        activeBackendSessionIdRef.current = result.sessionId;
-        setWsUrl(result.wsUrl);
-        setStageMessage(isRdp ? 'Completing TLS & NLA handshake...' : 'Completing RFB handshake...');
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        const msg = err instanceof Error ? err.message : String(err);
-        setDisconnectError(msg);
-        updateStatus('disconnected');
-      });
+    // Defer backend start by a macrotask so React StrictMode's immediate
+    // mount->cleanup->remount pass cancels cleanly before creating a session
+    // or racing stop() against the live attempt.
+    const startTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      startedBackend = true;
+      void rdBridge
+        .start(payload)
+        .then((result) => {
+          if (cancelled) {
+            void rdBridge.stop(result.sessionId).catch(() => {});
+            return;
+          }
+          activeBackendSessionIdRef.current = result.sessionId;
+          setWsUrl(result.wsUrl);
+          setStageMessage(isRdp ? 'Completing TLS & NLA handshake...' : 'Completing RFB handshake...');
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          const msg = err instanceof Error ? err.message : String(err);
+          setDisconnectError(msg);
+          updateStatus('disconnected');
+        });
+    }, 0);
 
     return () => {
       cancelled = true;
-      const toStop = activeBackendSessionIdRef.current;
-      activeBackendSessionIdRef.current = null;
-      if (toStop) {
-        void rdBridge.stop(toStop).catch(() => {});
+      window.clearTimeout(startTimer);
+      if (activeBackendSessionIdRef.current === attemptSessionId) {
+        activeBackendSessionIdRef.current = null;
+      }
+      if (startedBackend) {
+        void rdBridge.stop(attemptSessionId).catch(() => {});
       }
     };
     // Intentionally reconnect only when connectAttempt, credentials, needsAuthPrompt, quality, or fallback change.

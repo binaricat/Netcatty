@@ -714,11 +714,24 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     [effectiveGroupDefaults?.port, effectiveGroupDefaults?.telnetPort, effectiveGroupDefaults?.username, initialData],
   );
 
+  const isUntouchedNewHost = !initialData
+    && enabledProtocolCount === 1
+    && !form.password
+    && !form.identityId
+    && !form.keyId
+    && !form.identityFilePaths?.length
+    && !form.telnetPassword
+    && !form.telnetIdentityId;
+
   const handleSelectProtocolTab = useCallback(
     (tab: EditableHostProtocol) => {
+      if (isUntouchedNewHost && !enabledProtocols[tab]) {
+        handleSwitchOnlyProtocol(tab);
+        return;
+      }
       setActiveProtocolTab(tab);
     },
-    [],
+    [enabledProtocols, handleSwitchOnlyProtocol, isUntouchedNewHost],
   );
 
   const handleEnableSecondaryProtocol = useCallback(

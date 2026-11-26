@@ -374,9 +374,20 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
     useEffect(() => {
       let disposed = false;
       let reportedError = false;
-      const ws = new WebSocket(wsUrl);
-      ws.binaryType = 'arraybuffer';
-      wsRef.current = ws;
+      let ws: WebSocket | null = null;
+
+      // Defer WebSocket creation by a macrotask so React StrictMode's synthetic
+      // unmount cancels cleanly without consuming the one-time loopback token.
+      const connectTimer = window.setTimeout(() => {
+        if (disposed) return;
+        const socket = new WebSocket(wsUrl);
+        socket.binaryType = 'arraybuffer';
+        ws = socket;
+        wsRef.current = socket;
+        attachSocketHandlers(socket);
+      }, 0);
+
+      const attachSocketHandlers = (ws: WebSocket) => {
 
       const enqueuePaint = (fn: () => void | Promise<void>) => {
         paintChainRef.current = paintChainRef.current
@@ -597,13 +608,19 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
         wsRef.current = null;
         callbacksRef.current.onDisconnected(ev.reason || undefined);
       };
+      };
 
       return () => {
         disposed = true;
-        wsRef.current = null;
-        try {
-          ws.close();
-        } catch { /* ignore */ }
+        window.clearTimeout(connectTimer);
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+        }
+        if (ws) {
+          try {
+            ws.close();
+          } catch { /* ignore */ }
+        }
       };
     }, [getCanvasContext, resizeBackingCanvas, wsUrl]);
 

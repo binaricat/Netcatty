@@ -343,24 +343,37 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
               <p className="text-xs text-muted-foreground">
                 {t("hostDetails.protocol.notEnabledDesc", { protocol: protocolLabels[currentTab] })}
               </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-9 gap-1.5 px-4 text-xs font-medium"
-                onClick={() => {
-                  if (canAddCurrentAsSecondary && onEnableSecondaryProtocol) {
-                    onEnableSecondaryProtocol(currentTab);
-                  } else {
-                    onSwitchOnlyProtocol?.(currentTab);
-                  }
-                }}
-              >
-                <Plus size={14} />
-                {canAddCurrentAsSecondary
-                  ? t("hostDetails.protocol.addProtocol", { protocol: protocolLabels[currentTab] })
-                  : t("hostDetails.protocol.switchOnly", { protocol: protocolLabels[currentTab] })}
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 gap-1.5 px-4 text-xs font-medium"
+                  onClick={() => {
+                    if (canAddCurrentAsSecondary && onEnableSecondaryProtocol) {
+                      onEnableSecondaryProtocol(currentTab);
+                    } else {
+                      onSwitchOnlyProtocol?.(currentTab);
+                    }
+                  }}
+                >
+                  <Plus size={14} />
+                  {canAddCurrentAsSecondary
+                    ? t("hostDetails.protocol.addProtocol", { protocol: protocolLabels[currentTab] })
+                    : t("hostDetails.protocol.switchOnly", { protocol: protocolLabels[currentTab] })}
+                </Button>
+                {canAddCurrentAsSecondary && onSwitchOnlyProtocol ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 px-3 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    onClick={() => onSwitchOnlyProtocol(currentTab)}
+                  >
+                    {t("hostDetails.protocol.switchOnly", { protocol: protocolLabels[currentTab] })}
+                  </Button>
+                ) : null}
+              </div>
             </div>
           ) : isCompanionVncTab ? (
             <CompanionRemoteDesktopInlineFields
