@@ -6,12 +6,13 @@ import { createRoot } from 'react-dom/client';
 import { JSDOM } from 'jsdom';
 
 import {
+  resetModelCatalogWarningDismissals,
   useModelCatalogWarningDismissal,
   type ModelCatalogWarningDismissalState,
 } from './useModelCatalogWarningDismissal.ts';
 import { isModelCatalogWarningVisible } from '../../components/AIChatSidePanelHelpers.ts';
 
-test('useModelCatalogWarningDismissal dismisses per cacheKey and rearms on clean catalog', async () => {
+test('useModelCatalogWarningDismissal dismisses per cacheKey, survives remounts, and rearms on clean catalog', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
   const prevWindow = globalThis.window;
   const prevDocument = globalThis.document;
@@ -20,6 +21,7 @@ test('useModelCatalogWarningDismissal dismisses per cacheKey and rearms on clean
   (globalThis as Record<string, unknown>).window = dom.window;
   (globalThis as Record<string, unknown>).document = dom.window.document;
   (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  resetModelCatalogWarningDismissals();
 
   let latest!: ModelCatalogWarningDismissalState;
   const Probe: React.FC = () => {
@@ -28,7 +30,7 @@ test('useModelCatalogWarningDismissal dismisses per cacheKey and rearms on clean
   };
 
   const container = dom.window.document.getElementById('root')!;
-  const root = createRoot(container);
+  let root = createRoot(container);
   try {
     await React.act(async () => {
       root.render(React.createElement(Probe));
@@ -52,6 +54,18 @@ test('useModelCatalogWarningDismissal dismisses per cacheKey and rearms on clean
       isModelCatalogWarningVisible(warningK2, 'k2', latest.dismissedKeys),
       'Other catalog unavailable',
     );
+
+    // Unmounting and remounting (e.g., empty panel hidden on tab/tool switch)
+    // must keep the dismissed cacheKey hidden until a clean catalog arrives.
+    await React.act(async () => {
+      root.unmount();
+    });
+    root = createRoot(container);
+    await React.act(async () => {
+      root.render(React.createElement(Probe));
+    });
+    assert.equal(latest.dismissedKeys.has('k1'), true);
+    assert.equal(isModelCatalogWarningVisible(warningK1, 'k1', latest.dismissedKeys), undefined);
 
     // Undefined and duplicate dismissals are no-ops that keep state identity.
     const setBeforeNoop = latest.dismissedKeys;
@@ -82,6 +96,7 @@ test('useModelCatalogWarningDismissal dismisses per cacheKey and rearms on clean
     await React.act(async () => {
       root.unmount();
     });
+    resetModelCatalogWarningDismissals();
     (globalThis as Record<string, unknown>).window = prevWindow;
     (globalThis as Record<string, unknown>).document = prevDocument;
     (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = prevActEnv;
