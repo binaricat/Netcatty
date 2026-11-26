@@ -343,6 +343,14 @@ export function PluginRemoteSurface({ tree, css, onEvent, settled = true, loadIm
   );
 }
 
+const SHADOW_BASE_SCROLLBAR_CSS = [
+  '*::-webkit-scrollbar{width:6px;height:6px}',
+  '*::-webkit-scrollbar-track,*::-webkit-scrollbar-corner{background:transparent}',
+  '*::-webkit-scrollbar-thumb{min-height:28px;border:1px solid transparent;border-radius:999px;background-color:transparent;background-clip:content-box}',
+  '*:hover::-webkit-scrollbar-thumb{background-color:hsl(var(--muted-foreground) / 0.24)}',
+  '*::-webkit-scrollbar-thumb:hover{background-color:hsl(var(--muted-foreground) / 0.45)}',
+].join('');
+
 function ValidatedPluginRemoteSurface({ tree, css, onEvent, settled, depth }: { settled: boolean; depth: number; tree: { children: RemoteNode[] }; css: string; onEvent(event: PluginSurfaceEvent): void }) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -467,8 +475,8 @@ function ValidatedPluginRemoteSurface({ tree, css, onEvent, settled, depth }: { 
   return (
     <SurfaceContext.Provider value={surfaceContextValue}>
       <div ref={surfaceRef} className="h-full w-full min-h-0 min-w-0 overflow-hidden [contain:paint] isolate relative" data-plugin-remote-surface>
-        <div ref={hostRef} className="h-full min-h-0 overflow-auto [container-type:inline-size]" />
-        {shadow && createPortal(<><style>{css}</style>{tree.children.map((node) => renderRemoteNode(node, settled))}</>, shadow)}
+        <div ref={hostRef} className="h-full min-h-0 overflow-auto [container-type:inline-size] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-corner]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/25" />
+        {shadow && createPortal(<><style>{SHADOW_BASE_SCROLLBAR_CSS}</style><style>{css}</style>{tree.children.map((node) => renderRemoteNode(node, settled))}</>, shadow)}
       </div>
     </SurfaceContext.Provider>
   );
