@@ -73,7 +73,17 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
         {t("vault.groups.details.inherited")}
       </Badge>
     ) : (
-      <HostDetailsOverrideReset size="sm" label={t("common.useGroup")} onClick={() => update(key, undefined)} />
+      <HostDetailsOverrideReset size="sm" label={t("common.useGroup")} onClick={() => {
+        if ((key === "moshEnabled" || key === "etEnabled") && effectiveGroupDefaults[key] === true) {
+          setForm(prev => ({
+            ...prev,
+            [key]: undefined,
+            [key === "moshEnabled" ? "etEnabled" : "moshEnabled"]: false,
+          }));
+        } else {
+          update(key, undefined);
+        }
+      }} />
     );
   };
   const inheritedStartupCommandRunMode = effectiveGroupDefaults?.startupCommandRunMode ?? "paste";

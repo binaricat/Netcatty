@@ -5,6 +5,7 @@ import { act, create, type ReactTestInstance, type ReactTestRenderer } from "rea
 import { I18nProvider } from "../application/i18n/I18nProvider";
 import { applyGroupDefaults } from "../domain/groupConfig";
 import type { GroupConfig, Host } from "../domain/models";
+import { resolveEffectiveTerminalProtocol } from "../domain/terminalProtocol";
 import HostDetailsPanel from "./HostDetailsPanel";
 import { ChainPanel } from "./host-details/ChainPanel";
 import { HostDetailsOverrideReset } from "./host-details/HostDetailsOverrideReset";
@@ -110,6 +111,32 @@ for (const [key, label] of [["moshEnabled", "Mosh"], ["etEnabled", "EternalTermi
       assert.equal(row().findByType(Switch).props.checked, true);
       assertInherited(row());
     });
+  });
+
+  test(`Host Details restores inherited ${label} and disables the competing transport`, async () => {
+    const competingKey = key === "moshEnabled" ? "etEnabled" : "moshEnabled";
+    const competingLabel = key === "moshEnabled" ? "EternalTerminal" : "Mosh";
+    const group = { [key]: true };
+    await withPanel(group, async ({ root, save }) => {
+      const row = () => setting(root, label);
+      assert.equal(row().findByType(Switch).props.checked, false);
+      assert.equal(setting(root, competingLabel).findByType(Switch).props.checked, true);
+
+      const reset = row().findByType(HostDetailsOverrideReset);
+      assert.equal(reset.props.label, "Use group");
+      await act(async () => { reset.props.onClick(); });
+      const inherited = await save();
+      assert.equal(inherited[key], undefined);
+      assert.equal(inherited[competingKey], false);
+      assert.equal(row().findByType(Switch).props.checked, true);
+      assertInherited(row());
+      assert.equal(setting(root, competingLabel).findByType(Switch).props.checked, false);
+
+      const effective = applyGroupDefaults(inherited, group);
+      assert.equal(effective[key], true);
+      assert.equal(effective[competingKey], false);
+      assert.equal(resolveEffectiveTerminalProtocol(effective), key === "moshEnabled" ? "mosh" : "et");
+    }, { ...host, [key]: false, [competingKey]: true });
   });
 }
 
