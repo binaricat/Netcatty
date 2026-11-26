@@ -15,6 +15,8 @@ export type ChainProgress = {
   currentHop: number;
   totalHops: number;
   currentHostLabel: string;
+  /** host:port of the hop being connected; absent from older progress events. */
+  currentHostAddress?: string;
   connectionPhase: string;
 } | null;
 
@@ -117,13 +119,14 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
 
   // Subscribe to chain progress for the active attempt.
   useEffect(() => {
-    const unsub = backend.onChainProgress?.((sessionId, hop, total, label, phase, phaseError) => {
+    const unsub = backend.onChainProgress?.((sessionId, hop, total, label, phase, phaseError, address) => {
       if (sessionId !== sessionIdRef.current) return;
       if (total > 1) {
         setChainProgress({
           currentHop: hop,
           totalHops: total,
           currentHostLabel: label,
+          currentHostAddress: address,
           connectionPhase: phase,
         });
       }

@@ -28,7 +28,28 @@ export interface ChainProgress {
     currentHop: number;
     totalHops: number;
     currentHostLabel: string;
+    /** host:port of the hop being connected; falls back to the target's address. */
+    currentHostAddress?: string;
 }
+
+/**
+ * Address line under the "Chain X of Y" heading. Jump hops are always SSH, so
+ * they show the hop's own address; the final hop keeps the target's
+ * protocol-aware line (Mosh/ET/Telnet ports differ from the SSH port).
+ */
+export const resolveChainProgressAddressLine = (
+    chainProgress: Pick<ChainProgress, 'currentHop' | 'totalHops' | 'currentHostAddress'>,
+    host: Pick<Host, 'hostname'>,
+    protocolInfo: { i18nKey: string; showPort: boolean; port: number },
+    t: (key: string) => string,
+): string => {
+    const isJumpHop = chainProgress.currentHop < chainProgress.totalHops;
+    if (isJumpHop && chainProgress.currentHostAddress) {
+        return `${t('terminal.connection.protocol.ssh')} ${chainProgress.currentHostAddress}`;
+    }
+    const address = protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname;
+    return `${t(protocolInfo.i18nKey)} ${address}`;
+};
 
 export interface TerminalConnectionDialogProps {
     host: Host;
@@ -304,7 +325,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                                         className="text-[10px] font-mono truncate"
                                         style={{ color: 'color-mix(in srgb, var(--terminal-ui-fg, var(--foreground)) 58%, transparent)' }}
                                     >
-                                        {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname}
+                                        {resolveChainProgressAddressLine(chainProgress, host, protocolInfo, t)}
                                     </div>
                                 </>
                             ) : (

@@ -31,6 +31,10 @@ const {
   buildRemoteShellExitPayload,
   normalizeRemoteExitSignal,
 } = require("./remoteShellExit.cjs");
+const {
+  resolveChainHopAddress,
+  resolveChainTargetLabel,
+} = require("./chainProgress.cjs");
 const { looksLikeSkOpenSshMaterial } = require("../sshAuthHelper.cjs");
 
 const SSH_TCP_CONNECT_TIMEOUT_MS = 20000;
@@ -1521,7 +1525,13 @@ function createStartSessionApi(ctx) {
 
       const sendProgress = (hop, total, label, status, error) => {
         if (!sender.isDestroyed()) {
-          sender.send("netcatty:chain:progress", { sessionId, hop, total, label, status, error });
+          const address = resolveChainHopAddress(
+            options.jumpHosts,
+            options.hostname,
+            options.port,
+            hop,
+          );
+          sender.send("netcatty:chain:progress", { sessionId, hop, total, label, status, error, address });
         }
       };
 
@@ -1557,6 +1567,9 @@ function createStartSessionApi(ctx) {
         const hasJumpHosts = jumpHosts.length > 0;
         const hasProxy = !!options.proxy;
         const totalHops = jumpHosts.length + 1; // +1 for final target
+        // Name the final hop by its vault label (like the jump hops) instead of
+        // its raw address; the address is sent separately per hop.
+        const targetProgressLabel = resolveChainTargetLabel(options, hasJumpHosts);
 
         // Build base connection options for final target
         const keepalivePolicy = resolveConnectionKeepalivePolicy(options);
@@ -1708,10 +1721,10 @@ function createStartSessionApi(ctx) {
             bootEpoch: options.bootEpoch,
             logPrefix: "[SSH]",
             onPassphrasePromptShown: () => sendProgress(
-              totalHops, totalHops, options.hostname, "auth-attempt", "waiting for user input...",
+              totalHops, totalHops, targetProgressLabel, "auth-attempt", "waiting for user input...",
             ),
             onPassphrasePromptResolved: () => sendProgress(
-              totalHops, totalHops, options.hostname, "auth-attempt", "user responded",
+              totalHops, totalHops, targetProgressLabel, "auth-attempt", "user responded",
             ),
             onLoaded: (loaded) => {
               log("Loaded identity file", { keyPath: loaded.keyPath, encrypted: !!loaded.passphrase });
@@ -1737,10 +1750,10 @@ function createStartSessionApi(ctx) {
             bootEpoch: options.bootEpoch,
             logPrefix: "[SSH]",
             onPassphrasePromptShown: () => sendProgress(
-              totalHops, totalHops, options.hostname, "auth-attempt", "waiting for user input...",
+              totalHops, totalHops, targetProgressLabel, "auth-attempt", "waiting for user input...",
             ),
             onPassphrasePromptResolved: () => sendProgress(
-              totalHops, totalHops, options.hostname, "auth-attempt", "user responded",
+              totalHops, totalHops, targetProgressLabel, "auth-attempt", "user responded",
             ),
           })
           : null;
@@ -2057,7 +2070,7 @@ function createStartSessionApi(ctx) {
 
               // Log rejection of previous method
               if (lastTriedMethod && !partialSuccess) {
-                sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', `${lastTriedMethod} rejected`);
+                sendProgress(totalHops, totalHops, targetProgressLabel, 'auth-attempt', `${lastTriedMethod} rejected`);
                 if (
                   lastTriedMethod === "password" &&
                   passwordAttemptSawKeyboardInteractive &&
@@ -2081,7 +2094,7 @@ function createStartSessionApi(ctx) {
               if (methodsLeft === null && !attemptedMethodIds.has("none")) {
                 attemptedMethodIds.add("none");
                 lastTriedMethod = "none";
-                sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'none (no credentials)');
+                sendProgress(totalHops, totalHops, targetProgressLabel, 'auth-attempt', 'none (no credentials)');
                 return callback("none");
               }
 
@@ -2218,7 +2231,7 @@ function createStartSessionApi(ctx) {
                   // Only log safe identifier, not the full agent object which may contain private keys
                   const agentType = typeof method.agent === "string" ? "path" : "NetcattyAgent";
                   log("Trying agent auth", { id: method.id, agentType });
-                  sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'SSH agent');
+                  sendProgress(totalHops, totalHops, targetProgressLabel, 'auth-attempt', 'SSH agent');
                   return method.agent === connectOpts.agent
                     ? callback("agent")
                     : callback({
@@ -2235,7 +2248,7 @@ function createStartSessionApi(ctx) {
                       : method.id === "publickey-user"
                         ? "configured key"
                         : method.id;
-                  sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', keyLabel);
+                  sendProgress(totalHops, totalHops, targetProgressLabel, 'auth-attempt', keyLabel);
                   return callback({
                     type: "publickey",
                     username: connectOpts.username,
@@ -2244,7 +2257,7 @@ function createStartSessionApi(ctx) {
                   });
                 } else if (method.type === "password") {
                   log("Trying password auth", { id: method.id });
-                  sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'password');
+                  sendProgress(totalHops, totalHops, targetProgressLabel, 'auth-attempt', 'password');
                   passwordAttemptSawKeyboardInteractive = availableMethods.includes("keyboard-interactive");
                   return callback({
                     type: "password",
@@ -2253,7 +2266,7 @@ function createStartSessionApi(ctx) {
                   });
                 } else if (method.type === "keyboard-interactive") {
                   log("Trying keyboard-interactive auth", { id: method.id });
-                  sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'keyboard-interactive');
+                  sendProgress(totalHops, totalHops, targetProgressLabel, 'auth-attempt', 'keyboard-interactive');
                   // Return string instead of object - ssh2 requires a prompt function
                   // for keyboard-interactive objects. Returning the string lets ssh2
                   // use its default handling and trigger the keyboard-interactive event.
@@ -2262,7 +2275,7 @@ function createStartSessionApi(ctx) {
               }
 
               log("All auth methods exhausted");
-              sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'all methods exhausted');
+              sendProgress(totalHops, totalHops, targetProgressLabel, 'auth-attempt', 'all methods exhausted');
               return callback(false);
             };
 
@@ -2313,7 +2326,7 @@ function createStartSessionApi(ctx) {
           delete connectOpts.host;
           delete connectOpts.port;
 
-          sendProgress(totalHops, totalHops, options.hostname, 'connecting');
+          sendProgress(totalHops, totalHops, targetProgressLabel, 'connecting');
         } else if (hasProxy) {
           sendProgress(1, 1, options.hostname, 'connecting');
           connectionSocket = await createProxySocket(
@@ -2391,7 +2404,7 @@ function createStartSessionApi(ctx) {
                 elapsedMs: Date.now() - connectionStartedAt,
                 authReadyTimeoutMs,
               });
-              sendProgress(totalHops, totalHops, options.hostname, 'tcp-connected');
+              sendProgress(totalHops, totalHops, targetProgressLabel, 'tcp-connected');
               enableSshNoDelay(conn);
             });
           });
@@ -2405,7 +2418,7 @@ function createStartSessionApi(ctx) {
               hostname: options.hostname,
               elapsedMs: Date.now() - connectionStartedAt,
             });
-            sendProgress(totalHops, totalHops, options.hostname, 'authenticating');
+            sendProgress(totalHops, totalHops, targetProgressLabel, 'authenticating');
           });
 
           conn.on("banner", (message) => {
@@ -2436,7 +2449,7 @@ function createStartSessionApi(ctx) {
               }
             }
 
-            sendProgress(totalHops, totalHops, options.hostname, 'authenticated');
+            sendProgress(totalHops, totalHops, targetProgressLabel, 'authenticated');
 
             if (testMode) {
               // Headless connection test: authentication succeeded. Report the
@@ -2462,7 +2475,7 @@ function createStartSessionApi(ctx) {
               return;
             }
 
-            sendProgress(totalHops, totalHops, options.hostname, 'shell');
+            sendProgress(totalHops, totalHops, targetProgressLabel, 'shell');
 
             let establishedOwnerSession = null;
             const sendTerminalMessage = (data) => {
@@ -2525,12 +2538,12 @@ function createStartSessionApi(ctx) {
                   if (options.x11Forwarding && /x11/i.test(err.message || "")) {
                     sendTerminalMessage("\r\n[X11] Could not enable X11 forwarding. Make sure X11 forwarding is allowed on the server and xauth is installed.\r\n");
                   }
-                  sendProgress(totalHops, totalHops, options.hostname, 'error', `Failed to open shell: ${err.message}`);
+                  sendProgress(totalHops, totalHops, targetProgressLabel, 'error', `Failed to open shell: ${err.message}`);
                   reject(err);
                   return;
                 }
 
-                sendProgress(totalHops, totalHops, options.hostname, 'connected');
+                sendProgress(totalHops, totalHops, targetProgressLabel, 'connected');
 
                 // Create the shared reference-counted descriptor for this
                 // connection now that the owning channel is open, then wire the
@@ -2667,7 +2680,7 @@ function createStartSessionApi(ctx) {
             }
 
             const visibleError = userVisibleSshErrorMessage(err, options);
-            sendProgress(totalHops, totalHops, options.hostname, 'error', visibleError);
+            sendProgress(totalHops, totalHops, targetProgressLabel, 'error', visibleError);
             const suppressPreShellAuthExit = Boolean(options._suppressPreShellAuthExit && isAuthError);
             if (suppressPreShellAuthExit) {
               log("suppressing pre-shell auth exit for wrapper-managed retry", {
@@ -2712,7 +2725,7 @@ function createStartSessionApi(ctx) {
               authReadyTimeoutMs,
             });
             const contents = event.sender;
-            sendProgress(totalHops, totalHops, options.hostname, 'error', err.message);
+            sendProgress(totalHops, totalHops, targetProgressLabel, 'error', err.message);
             safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, { sessionId, exitCode: 1, error: err.message, reason: "timeout" });
             sessionLogStreamManager.stopStream(sessionId, ownerLogStreamToken);
             sessions.get(sessionId)?.zmodemSentry?.cancel();
@@ -2743,7 +2756,7 @@ function createStartSessionApi(ctx) {
               transportError: ownsCurrentSession ? currentSession?._transportError : undefined,
             });
             if (!settled) {
-              sendProgress(totalHops, totalHops, options.hostname, 'error', `Connection to ${options.hostname} closed unexpectedly`);
+              sendProgress(totalHops, totalHops, targetProgressLabel, 'error', `Connection to ${options.hostname} closed unexpectedly`);
             }
             // This handler owns teardown for the *owner* session only. ssh2
             // fires conn "close" before the owner's stream "close" on a
@@ -2844,14 +2857,14 @@ function createStartSessionApi(ctx) {
             getAuthBanner: () => authBanner,
             shouldSkipAutoFill: () => shouldSkipKiPasswordAutoFill(authPhase),
             onAutoFill: (kind) => sendProgress(
-              totalHops, totalHops, options.hostname, 'auth-attempt',
+              totalHops, totalHops, targetProgressLabel, 'auth-attempt',
               kind === 'totp' ? 'using authenticator code' : 'using saved password',
             ),
             onPromptShown: () => sendProgress(
-              totalHops, totalHops, options.hostname, 'auth-attempt', 'waiting for user input...',
+              totalHops, totalHops, targetProgressLabel, 'auth-attempt', 'waiting for user input...',
             ),
             onUserResponded: () => sendProgress(
-              totalHops, totalHops, options.hostname, 'auth-attempt', 'user responded',
+              totalHops, totalHops, targetProgressLabel, 'auth-attempt', 'user responded',
             ),
           }));
 

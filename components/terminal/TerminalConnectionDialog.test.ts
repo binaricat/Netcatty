@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { I18nProvider } from "../../application/i18n/I18nProvider.tsx";
 import type { Host } from "../../types.ts";
-import { TerminalConnectionDialog } from "./TerminalConnectionDialog.tsx";
+import { TerminalConnectionDialog, resolveChainProgressAddressLine } from "./TerminalConnectionDialog.tsx";
 
 const host: Host = {
   id: "host-1",
@@ -191,6 +191,68 @@ test("keeps connection log padding inside the scrollable content", () => {
   assert.match(markup, /class="[^"]*max-h-44/);
   assert.doesNotMatch(markup, /class="[^"]*max-h-44[^"]*p-2\.5/);
   assert.match(markup, /class="[^"]*p-2\.5[^"]*pb-4[^"]*pr-4/);
+});
+
+test("chain progress shows the current jump hop's address, not the target's", () => {
+  const markup = renderDialog({
+    host: { ...host, label: "Prod DB", hostname: "10.0.0.5" },
+    chainProgress: {
+      currentHop: 2,
+      totalHops: 3,
+      currentHostLabel: "Bastion B",
+      currentHostAddress: "b.example.com:2201",
+    },
+  });
+
+  assert.match(markup, /Chain 2 of 3: <\/span><span>Bastion B<\/span>/);
+  assert.match(markup, /SSH b\.example\.com:2201/);
+  assert.equal(markup.includes("10.0.0.5"), false);
+});
+
+test("chain progress shows the target's label and address on the final hop", () => {
+  const markup = renderDialog({
+    host: { ...host, label: "Prod DB", hostname: "10.0.0.5" },
+    chainProgress: {
+      currentHop: 3,
+      totalHops: 3,
+      currentHostLabel: "Prod DB",
+      currentHostAddress: "10.0.0.5:22",
+    },
+  });
+
+  assert.match(markup, /Chain 3 of 3: <\/span><span>Prod DB<\/span>/);
+  assert.match(markup, /SSH 10\.0\.0\.5:22/);
+});
+
+test("chain progress address line keeps the target's protocol on the final hop", () => {
+  const t = (key: string) => ({
+    "terminal.connection.protocol.ssh": "SSH",
+    "terminal.connection.protocol.et": "ET",
+  }[key] ?? key);
+  const etInfo = { i18nKey: "terminal.connection.protocol.et", showPort: true, port: 2022 };
+  const target = { hostname: "10.0.0.5" };
+
+  // Jump hop: always SSH with the hop's own address.
+  assert.equal(
+    resolveChainProgressAddressLine(
+      { currentHop: 1, totalHops: 2, currentHostAddress: "bastion.example.com:22" },
+      target, etInfo, t,
+    ),
+    "SSH bastion.example.com:22",
+  );
+  // Final hop: the target's protocol and port (ET 2022, not the SSH port).
+  assert.equal(
+    resolveChainProgressAddressLine(
+      { currentHop: 2, totalHops: 2, currentHostAddress: "10.0.0.5:22" },
+      target, etInfo, t,
+    ),
+    "ET 10.0.0.5:2022",
+  );
+  // Older progress events without an address fall back to the target.
+  assert.equal(
+    resolveChainProgressAddressLine({ currentHop: 1, totalHops: 2 }, target, etInfo, t),
+    "ET 10.0.0.5:2022",
+  );
 });
 
 test("shows the ET server port (not the SSH port) for an ET host with a custom etPort", () => {
