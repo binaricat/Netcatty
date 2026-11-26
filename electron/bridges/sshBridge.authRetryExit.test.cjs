@@ -1562,6 +1562,50 @@ test("jump-host auth failure does not emit exit before encrypted-key retry succe
   );
 });
 
+test("chain progress names every hop by its label and reports each hop's address", async (t) => {
+  const { bridge } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["ready", "ready", "ready"],
+    encryptedKeys: [],
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions: new Map(), electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+  const start = ipcMain.handlers.get("netcatty:start");
+  const sender = makeSender();
+
+  const result = await start(
+    { sender },
+    {
+      sessionId: "chain-label-session",
+      hostname: "10.0.0.5",
+      hostLabel: "Prod DB",
+      username: "alice",
+      port: 22,
+      knownHosts: [],
+      jumpHosts: [
+        { hostname: "a.example.com", username: "alice", port: 22, label: "Bastion A" },
+        { hostname: "b.example.com", username: "alice", port: 2201 },
+      ],
+    },
+  );
+
+  assert.deepEqual(result, { sessionId: "chain-label-session" });
+  const progress = sender.sent
+    .filter((message) => message.channel === "netcatty:chain:progress")
+    .map((message) => message.payload);
+  const hopSummary = (hop) => [
+    ...new Set(progress.filter((p) => p.hop === hop).map((p) => `${p.label} @ ${p.address}`)),
+  ];
+
+  assert.ok(progress.every((p) => p.total === 3));
+  assert.deepEqual(hopSummary(1), ["Bastion A @ a.example.com:22"]);
+  // An unlabeled jump host keeps its host:port label.
+  assert.deepEqual(hopSummary(2), ["b.example.com:2201 @ b.example.com:2201"]);
+  // The final target is named by its label, not its raw IP.
+  assert.deepEqual(hopSummary(3), ["Prod DB @ 10.0.0.5:22"]);
+  assert.ok(progress.some((p) => p.hop === 3 && p.status === "connected"));
+});
+
 test("jump-host auth failure is attributed to the failing jump host", async (t) => {
   const { bridge } = loadBridgeWithAuthRetryMocks(t, {
     connectEvents: ["auth-error"],
