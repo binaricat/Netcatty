@@ -501,3 +501,40 @@ test("terminal_execute_bulk is MCP-only: no sidebar or global agent exposure", (
   assert.equal(listCattyToolSpecs().some((spec) => spec.capabilityId === "terminal.executeBulk"), false);
   assert.equal(listAgentToolSpecs(AGENT_KINDS.GLOBAL).some((spec) => spec.capabilityId === "terminal.executeBulk"), false);
 });
+
+test("observer mode still lets MCP stop tools through, and blocks other writes before RPC", async () => {
+  const handlers = new Map();
+  const fakeServer = {
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      handlers.set(name, mcpToolHandler(schemaOrHandler, maybeHandler));
+    },
+  };
+  const rpcCalls = [];
+  registerMcpTools(fakeServer, {
+    rpcCall: async (method, params) => {
+      rpcCalls.push(method);
+      return { ok: true, jobs: [], params };
+    },
+    scopeParams: { chatSessionId: "chat-1" },
+    // Same refusal the MCP server returns in observer mode.
+    guardWriteOperation: () => 'Operation denied: permission mode is "observer" (read-only).',
+    catalogDescription: (_name, fallback) => fallback,
+  });
+
+  // Declared bypassesObserverBlock: reaches the bridge, which applies the same policy.
+  const stopped = await handlers.get("terminal_stop_bulk")({ bulkId: "bulk-1" });
+  assert.equal(stopped.isError, undefined);
+  assert.deepEqual(rpcCalls, ["netcatty/jobStopBulk"]);
+
+  // Other writes are refused before any RPC.
+  for (const name of ["terminal_start_bulk", "terminal_execute_bulk", "sftp_mkdir"]) {
+    const refused = await handlers.get(name)({ command: "uptime", sessionIds: '["a","b"]', sessionId: "a", path: "/tmp/x" });
+    assert.equal(refused.isError, true, name);
+    assert.match(refused.content[0].text, /observer/, name);
+  }
+  assert.deepEqual(rpcCalls, ["netcatty/jobStopBulk"], "no write RPC was sent");
+
+  // Reads are never guarded.
+  await handlers.get("terminal_poll_bulk")({ bulkId: "bulk-1" });
+  assert.deepEqual(rpcCalls, ["netcatty/jobStopBulk", "netcatty/jobPollBulk"]);
+});
