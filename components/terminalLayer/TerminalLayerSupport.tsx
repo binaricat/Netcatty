@@ -1803,6 +1803,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     },
     [session.id],
   );
+  const handleRemoteDesktopStatusChange = useCallback(
+    (sid: string, nextStatus: 'connecting' | 'connected' | 'disconnected') => {
+      onStatusChange(sid, nextStatus);
+    },
+    [onStatusChange],
+  );
 
   return (
     <div
@@ -1843,7 +1849,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
               isVisible={isVisible}
               isFocused={isFocusedPane}
               inWorkspace={keepsWorkspacePresentation}
-              onStatusChange={(sid, nextStatus) => onStatusChange(sid, nextStatus)}
+              onStatusChange={handleRemoteDesktopStatusChange}
               onCloseSession={onCloseSession}
               onPopOut={onCopySessionToNewWindow}
               onOpenSftp={canOpenCompanionSftp ? handleOpenCompanionSftp : undefined}

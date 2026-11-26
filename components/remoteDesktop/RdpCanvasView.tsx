@@ -108,7 +108,7 @@ function extractAuthTokenFromWsUrl(wsUrl: string): string {
   }
 }
 
-export const RdpCanvasView = forwardRef<RemoteDesktopCanvasHandle, RdpCanvasViewProps>(
+export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, RdpCanvasViewProps>(
   function RdpCanvasView(
     {
       wsUrl,
@@ -141,6 +141,10 @@ export const RdpCanvasView = forwardRef<RemoteDesktopCanvasHandle, RdpCanvasView
     const { t } = useI18n();
     const containerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const cachedCanvasRectRef = useRef<DOMRect | null>(null);
+    const pendingPointerRef = useRef<{ x: number; y: number } | null>(null);
+    const pointerRafRef = useRef<number | null>(null);
+    const lastSentPointerRef = useRef<{ x: number; y: number } | null>(null);
     const imeInputRef = useRef<HTMLTextAreaElement | null>(null);
     const sessionRef = useRef<IronSession | null>(null);
     const modRef = useRef<IronRdpModule | null>(null);
@@ -1122,23 +1126,67 @@ export const RdpCanvasView = forwardRef<RemoteDesktopCanvasHandle, RdpCanvasView
       };
     }, [displayMode, remoteSize.height, remoteSize.width]);
 
-    const mapPointerCoords = useCallback((clientX: number, clientY: number) => {
+    // Keep cached canvas DOMRect in sync so high-frequency pointer moves avoid forced layout reads
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      const container = containerRef.current;
+      const refreshRect = () => {
+        cachedCanvasRectRef.current = canvasRef.current?.getBoundingClientRect() ?? null;
+      };
+      refreshRect();
+      const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(refreshRect) : null;
+      if (observer && canvas) observer.observe(canvas);
+      if (observer && container) observer.observe(container);
+      window.addEventListener('resize', refreshRect, { passive: true });
+      container?.addEventListener('scroll', refreshRect, { passive: true });
+      return () => {
+        observer?.disconnect();
+        window.removeEventListener('resize', refreshRect);
+        container?.removeEventListener('scroll', refreshRect);
+        if (pointerRafRef.current !== null) {
+          window.cancelAnimationFrame(pointerRafRef.current);
+          pointerRafRef.current = null;
+        }
+      };
+    }, [displayMode, isVisible, remoteSize.height, remoteSize.width]);
+
+    const mapPointerCoords = useCallback((clientX: number, clientY: number, forceMeasure = false) => {
       const canvas = canvasRef.current;
       if (!canvas) return { x: 0, y: 0 };
-      const rect = canvas.getBoundingClientRect();
+      let rect = forceMeasure ? null : cachedCanvasRectRef.current;
+      if (!rect || rect.width <= 0 || rect.height <= 0) {
+        rect = canvas.getBoundingClientRect();
+        cachedCanvasRectRef.current = rect;
+      }
       if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0 };
       const x = Math.max(0, Math.min(canvas.width - 1, Math.round(((clientX - rect.left) / rect.width) * canvas.width)));
       const y = Math.max(0, Math.min(canvas.height - 1, Math.round(((clientY - rect.top) / rect.height) * canvas.height)));
       return { x, y };
     }, []);
 
+    const flushPendingPointerMove = useCallback(() => {
+      if (pointerRafRef.current !== null) {
+        window.cancelAnimationFrame(pointerRafRef.current);
+        pointerRafRef.current = null;
+      }
+      const pending = pendingPointerRef.current;
+      if (!pending) return;
+      pendingPointerRef.current = null;
+      const lastSent = lastSentPointerRef.current;
+      if (lastSent && lastSent.x === pending.x && lastSent.y === pending.y) return;
+      lastSentPointerRef.current = pending;
+      applyDeviceEvents((mod) => [mod.DeviceEvent.mouseMove(pending.x, pending.y)]);
+    }, [applyDeviceEvents]);
+
     const handleMouseMove = useCallback(
       (e: React.MouseEvent<HTMLCanvasElement>) => {
         if (propsRef.current.viewOnly) return;
-        const { x, y } = mapPointerCoords(e.clientX, e.clientY);
-        applyDeviceEvents((mod) => [mod.DeviceEvent.mouseMove(x, y)]);
+        pendingPointerRef.current = mapPointerCoords(e.clientX, e.clientY);
+        if (pointerRafRef.current === null) {
+          pointerRafRef.current = window.requestAnimationFrame(flushPendingPointerMove);
+        }
       },
-      [applyDeviceEvents, mapPointerCoords],
+      [flushPendingPointerMove, mapPointerCoords],
     );
 
     const handleMouseDown = useCallback(
@@ -1147,7 +1195,13 @@ export const RdpCanvasView = forwardRef<RemoteDesktopCanvasHandle, RdpCanvasView
         audioPlayerRef.current?.resume();
         if (propsRef.current.viewOnly) return;
         e.preventDefault();
-        const { x, y } = mapPointerCoords(e.clientX, e.clientY);
+        if (pointerRafRef.current !== null) {
+          window.cancelAnimationFrame(pointerRafRef.current);
+          pointerRafRef.current = null;
+        }
+        pendingPointerRef.current = null;
+        const { x, y } = mapPointerCoords(e.clientX, e.clientY, true);
+        lastSentPointerRef.current = { x, y };
         applyDeviceEvents((mod) => [
           mod.DeviceEvent.mouseMove(x, y),
           mod.DeviceEvent.mouseButtonPressed(e.button),
@@ -1160,7 +1214,13 @@ export const RdpCanvasView = forwardRef<RemoteDesktopCanvasHandle, RdpCanvasView
       (e: React.MouseEvent<HTMLCanvasElement>) => {
         if (propsRef.current.viewOnly) return;
         e.preventDefault();
+        if (pointerRafRef.current !== null) {
+          window.cancelAnimationFrame(pointerRafRef.current);
+          pointerRafRef.current = null;
+        }
+        pendingPointerRef.current = null;
         const { x, y } = mapPointerCoords(e.clientX, e.clientY);
+        lastSentPointerRef.current = { x, y };
         applyDeviceEvents((mod) => [
           mod.DeviceEvent.mouseMove(x, y),
           mod.DeviceEvent.mouseButtonReleased(e.button),
@@ -1173,6 +1233,7 @@ export const RdpCanvasView = forwardRef<RemoteDesktopCanvasHandle, RdpCanvasView
       (e: React.WheelEvent<HTMLCanvasElement>) => {
         if (propsRef.current.viewOnly) return;
         e.preventDefault();
+        flushPendingPointerMove();
         const vertical = Math.abs(e.deltaY) >= Math.abs(e.deltaX);
         const rawDelta = vertical ? -e.deltaY : e.deltaX;
         if (rawDelta === 0) return;
@@ -1190,7 +1251,7 @@ export const RdpCanvasView = forwardRef<RemoteDesktopCanvasHandle, RdpCanvasView
           return [mod.DeviceEvent.wheelRotations(vertical, amount, unit)];
         });
       },
-      [applyDeviceEvents],
+      [applyDeviceEvents, flushPendingPointerMove],
     );
 
     const handleKeyDown = useCallback(
@@ -1517,4 +1578,4 @@ export const RdpCanvasView = forwardRef<RemoteDesktopCanvasHandle, RdpCanvasView
       </div>
     );
   },
-);
+));

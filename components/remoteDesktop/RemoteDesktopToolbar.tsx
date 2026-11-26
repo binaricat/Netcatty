@@ -229,7 +229,7 @@ const QUALITY_OPTIONS: ReadonlyArray<{
   { id: 'lossless', fallback: 'Lossless', badge: 'Raw' },
 ];
 
-export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = ({
+export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.memo(({
   protocol,
   hostLabel,
   status,
@@ -1196,4 +1196,4 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = ({
       </div>
     </div>
   );
-};
+});

@@ -119,7 +119,7 @@ function formatBackendStage(stage: string, isRdp: boolean): string {
   }
 }
 
-export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
+export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   sessionId,
   workspaceId,
   protocol,
@@ -821,6 +821,115 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
     setConnectAttempt((n) => n + 1);
   }, []);
 
+  const handleToggleKeyboardGrab = useCallback(() => {
+    applyKeyboardGrab(!keyboardGrabActive);
+  }, [applyKeyboardGrab, keyboardGrabActive]);
+
+  const handleSendSpecialKey = useCallback((id: RemoteDesktopSpecialKeyId) => {
+    canvasHandleRef.current?.sendSpecialKey(id);
+  }, []);
+
+  const handleTypeClipboardClick = useCallback(() => {
+    void handleTypeClipboard();
+  }, [handleTypeClipboard]);
+
+  const handleToggleAudioMute = useCallback(() => {
+    setAudioMuted((m) => !m);
+  }, []);
+
+  const handleChangeAudioVolume = useCallback((vol: number) => {
+    setAudioVolume(vol);
+    if (vol > 0) setAudioMuted(false);
+  }, []);
+
+  const handleDismissClipboardTransfer = useCallback(() => {
+    setClipboardTransfer(null);
+    setClipboardFileTransferStatus(null);
+  }, []);
+
+  const handleDownloadClipboardFile = useCallback((idx: number) => {
+    void canvasHandleRef.current?.downloadRemoteClipboardFile?.(idx);
+  }, []);
+
+  const handleUploadLocalClipboardFiles = useCallback((files: FileList | File[]) => {
+    void canvasHandleRef.current?.uploadLocalClipboardFiles?.(files);
+  }, []);
+
+  const handleAskAiFullClick = useCallback(() => {
+    void handleAskAiFull();
+  }, [handleAskAiFull]);
+
+  const toggleRecording = recorder.toggleRecording;
+  const handleToggleRecordingClick = useCallback(() => {
+    void toggleRecording();
+  }, [toggleRecording]);
+
+  const handleScreenshotCopyClick = useCallback(() => {
+    void handleScreenshotCopy();
+  }, [handleScreenshotCopy]);
+
+  const handleScreenshotSaveClick = useCallback(() => {
+    void handleScreenshotSave();
+  }, [handleScreenshotSave]);
+
+  const handlePopOutClick = useCallback(() => {
+    onPopOut?.(sessionId);
+  }, [onPopOut, sessionId]);
+
+  const handleOpenSystemClientClick = useCallback(() => {
+    void handleOpenSystemClient();
+  }, [handleOpenSystemClient]);
+
+  const handleVncConnected = useCallback(
+    (info: { width: number; height: number; name?: string; encrypted?: boolean }) => {
+      setResolution({ width: info.width, height: info.height });
+      if (info.name) setDesktopTitle(info.name);
+      setEncrypted(Boolean(info.encrypted));
+      setStageMessage('Desktop connected');
+      updateStatus('connected');
+    },
+    [updateStatus],
+  );
+
+  const handleRdpConnected = useCallback(
+    (info: { width: number; height: number; encrypted?: boolean }) => {
+      setResolution({ width: info.width, height: info.height });
+      setEncrypted(Boolean(info.encrypted));
+      setStageMessage('Desktop connected');
+      updateStatus('connected');
+    },
+    [updateStatus],
+  );
+
+  const handleRemoteClipboardFilesChange = useCallback(
+    (files: RemoteDesktopClipboardFileOffer[]) => {
+      setRemoteClipboardFiles(files);
+      if (files.length > 0) {
+        toast.info(
+          tr(
+            t,
+            'remoteDesktop.clipboard.filesAvailable',
+            '{{count}} remote file(s) copied — click the clipboard icon in the toolbar to save.',
+            { count: files.length },
+          ),
+        );
+      }
+    },
+    [t],
+  );
+
+  const handleGetSnipCanvasRect = useCallback(
+    () => canvasHandleRef.current?.getCanvasRect?.() ?? null,
+    [],
+  );
+
+  const handleSnipSelectClick = useCallback(
+    (rect: RemoteDesktopSnipRect) => {
+      void handleSnipSelect(rect);
+    },
+    [handleSnipSelect],
+  );
+
   const showRemoteAppNotice =
     isRdp && Boolean(spec.rdpConfig?.remoteApplicationMode) && !remoteAppBannerDismissed;
 
@@ -846,37 +955,31 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
         fps={fps}
         isFullscreen={isFullscreen}
         keyboardGrabActive={keyboardGrabActive}
-        onToggleKeyboardGrab={() => applyKeyboardGrab(!keyboardGrabActive)}
-        onSendSpecialKey={(id: RemoteDesktopSpecialKeyId) => canvasHandleRef.current?.sendSpecialKey(id)}
-        onTypeClipboard={() => void handleTypeClipboard()}
+        onToggleKeyboardGrab={handleToggleKeyboardGrab}
+        onSendSpecialKey={handleSendSpecialKey}
+        onTypeClipboard={handleTypeClipboardClick}
         displayMode={displayMode}
         onChangeDisplayMode={setDisplayMode}
         audioEnabled={isRdp && Boolean(spec.rdpConfig?.audioEnabled)}
         audioMuted={audioMuted}
         audioVolume={audioVolume}
-        onToggleAudioMute={() => setAudioMuted((m) => !m)}
-        onChangeAudioVolume={(vol) => {
-          setAudioVolume(vol);
-          if (vol > 0 && audioMuted) setAudioMuted(false);
-        }}
+        onToggleAudioMute={handleToggleAudioMute}
+        onChangeAudioVolume={handleChangeAudioVolume}
         clipboardSyncEnabled={clipboardSyncEnabled}
         onToggleClipboardSync={setClipboardSyncEnabled}
         remoteClipboardFiles={remoteClipboardFiles}
         clipboardFileTransferStatus={clipboardFileTransferStatus}
         clipboardTransfer={clipboardTransfer}
-        onDismissClipboardTransfer={() => {
-          setClipboardTransfer(null);
-          setClipboardFileTransferStatus(null);
-        }}
-        onDownloadClipboardFile={(idx) => void canvasHandleRef.current?.downloadRemoteClipboardFile?.(idx)}
+        onDismissClipboardTransfer={handleDismissClipboardTransfer}
+        onDownloadClipboardFile={handleDownloadClipboardFile}
         onUploadLocalClipboardFiles={
           isRdp && spec.rdpConfig?.clipboardFilesEnabled
-            ? (files) => void canvasHandleRef.current?.uploadLocalClipboardFiles?.(files)
+            ? handleUploadLocalClipboardFiles
             : undefined
         }
         onOpenSftp={onOpenSftp ? handleOpenSftpClick : undefined}
         isSftpOpen={isSftpOpen}
-        onAskAiFull={onAskAi ? () => void handleAskAiFull() : undefined}
+        onAskAiFull={onAskAi ? handleAskAiFullClick : undefined}
         onAskAiRegion={onAskAi ? handleStartAskAiRegion : undefined}
         onOpenAiChat={onAskAi ? handleOpenAiChat : undefined}
         aiReadBlocked={aiReadBlocked}
@@ -884,16 +987,16 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
         isRecording={recorder.isRecording}
         recordingElapsedLabel={recorder.formattedElapsed}
         recordingSupported={recorder.isSupported}
-        onToggleRecording={() => void recorder.toggleRecording()}
+        onToggleRecording={handleToggleRecordingClick}
         quality={quality}
         onChangeQuality={setQuality}
         viewOnly={viewOnly}
         onToggleViewOnly={setViewOnly}
-        onScreenshotCopy={() => void handleScreenshotCopy()}
-        onScreenshotSave={() => void handleScreenshotSave()}
+        onScreenshotCopy={handleScreenshotCopyClick}
+        onScreenshotSave={handleScreenshotSaveClick}
         onToggleFullscreen={handleToggleFullscreen}
-        onPopOut={onPopOut ? () => onPopOut(sessionId) : undefined}
-        onOpenSystemClient={() => void handleOpenSystemClient()}
+        onPopOut={onPopOut ? handlePopOutClick : undefined}
+        onOpenSystemClient={handleOpenSystemClientClick}
         onReconnect={handleReconnect}
         onDisconnect={handleDisconnect}
       />
@@ -946,13 +1049,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
             showRemoteCursor={spec.vncConfig?.showRemoteCursor ?? true}
             keyboardGrabActive={keyboardGrabActive}
             onRequestReleaseGrab={releaseKeyboardGrab}
-            onConnected={(info) => {
-              setResolution({ width: info.width, height: info.height });
-              if (info.name) setDesktopTitle(info.name);
-              setEncrypted(Boolean(info.encrypted));
-              setStageMessage('Desktop connected');
-              updateStatus('connected');
-            }}
+            onConnected={handleVncConnected}
             onDesktopResize={setResolution}
             onDesktopName={setDesktopTitle}
             onFpsChange={setFps}
@@ -980,26 +1077,9 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
             audioVolume={audioVolume}
             keyboardGrabActive={keyboardGrabActive}
             onRequestReleaseGrab={releaseKeyboardGrab}
-            onConnected={(info) => {
-              setResolution({ width: info.width, height: info.height });
-              setEncrypted(Boolean(info.encrypted));
-              setStageMessage('Desktop connected');
-              updateStatus('connected');
-            }}
+            onConnected={handleRdpConnected}
             onDesktopResize={setResolution}
-            onRemoteClipboardFilesChange={(files) => {
-              setRemoteClipboardFiles(files);
-              if (files.length > 0) {
-                toast.info(
-                  tr(
-                    t,
-                    'remoteDesktop.clipboard.filesAvailable',
-                    '{{count}} remote file(s) copied — click the clipboard icon in the toolbar to save.',
-                    { count: files.length },
-                  ),
-                );
-              }
-            }}
+            onRemoteClipboardFilesChange={handleRemoteClipboardFilesChange}
             onClipboardFileTransferStatus={setClipboardFileTransferStatus}
             onClipboardTransferChange={handleClipboardTransferChange}
             onNegotiationFallbackNeeded={handleNegotiationFallback}
@@ -1046,8 +1126,8 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
           open={isSnipping && status === 'connected'}
           naturalWidth={resolution?.width || 1280}
           naturalHeight={resolution?.height || 800}
-          getCanvasRect={() => canvasHandleRef.current?.getCanvasRect?.() ?? null}
-          onSelect={(rect) => void handleSnipSelect(rect)}
+          getCanvasRect={handleGetSnipCanvasRect}
+          onSelect={handleSnipSelectClick}
           onCancel={() => setIsSnipping(false)}
         />
 
@@ -1304,6 +1384,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = ({
       </div>
     </div>
   );
-};
+});
+RemoteDesktopPane.displayName = 'RemoteDesktopPane';
 
 export default RemoteDesktopPane;

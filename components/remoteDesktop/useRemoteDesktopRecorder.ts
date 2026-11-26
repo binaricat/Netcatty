@@ -283,7 +283,7 @@ export function useRemoteDesktopRecorder({
     };
   }, []);
 
-  // Elapsed timer while recording
+  // Elapsed timer while recording (1s granularity avoids redundant React re-renders)
   useEffect(() => {
     if (!isRecording) {
       setElapsedMs(0);
@@ -292,9 +292,12 @@ export function useRemoteDesktopRecorder({
     const timer = window.setInterval(() => {
       const run = activeRunRef.current;
       if (run) {
-        setElapsedMs(Math.max(0, Date.now() - run.startedAt));
+        const nextMs = Math.max(0, Date.now() - run.startedAt);
+        setElapsedMs((prev) =>
+          Math.floor(prev / 1000) === Math.floor(nextMs / 1000) ? prev : nextMs,
+        );
       }
-    }, 500);
+    }, 1000);
     return () => window.clearInterval(timer);
   }, [isRecording]);
 

@@ -123,11 +123,28 @@ export const RemoteDesktopSnipOverlay: React.FC<RemoteDesktopSnipOverlayProps> =
 }) => {
   const { t } = useI18n();
   const overlayRef = useRef<HTMLDivElement>(null);
-  const dragStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+  const dragStartRef = useRef<{
+    x: number;
+    y: number;
+    pointerId: number;
+    overlayRect: SnipClientRect;
+    canvasRect: SnipClientRect;
+  } | null>(null);
+  const pendingDragPointRef = useRef<{ x: number; y: number } | null>(null);
+  const dragRafRef = useRef<number | null>(null);
   const [selection, setSelection] = useState<ComputedSnipSelection | null>(null);
+
+  const cancelPendingDragRaf = useCallback(() => {
+    if (dragRafRef.current !== null) {
+      window.cancelAnimationFrame(dragRafRef.current);
+      dragRafRef.current = null;
+    }
+    pendingDragPointRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (!open) {
+      cancelPendingDragRaf();
       dragStartRef.current = null;
       setSelection(null);
       return;
@@ -136,71 +153,90 @@ export const RemoteDesktopSnipOverlay: React.FC<RemoteDesktopSnipOverlayProps> =
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
+        cancelPendingDragRaf();
         dragStartRef.current = null;
         setSelection(null);
         onCancel();
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [open, onCancel]);
-
-  const computeFromPoints = useCallback((
-    start: { x: number; y: number },
-    current: { x: number; y: number },
-  ): ComputedSnipSelection | null => {
-    const overlayEl = overlayRef.current;
-    if (!overlayEl) return null;
-    const overlayRect = overlayEl.getBoundingClientRect();
-    const canvasRect = getCanvasRect?.() ?? overlayRect;
-    return computeSnipSelectionRect(
-      start,
-      current,
-      overlayRect,
-      canvasRect,
-      naturalWidth,
-      naturalHeight,
-    );
-  }, [getCanvasRect, naturalWidth, naturalHeight]);
+    return () => {
+      cancelPendingDragRaf();
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [cancelPendingDragRaf, open, onCancel]);
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     if ((event.target as HTMLElement | null)?.closest('[data-snip-control="true"]')) {
       return;
     }
+    const overlayEl = overlayRef.current;
+    if (!overlayEl) return;
     event.preventDefault();
     event.stopPropagation();
+    const overlayRect = overlayEl.getBoundingClientRect();
+    const canvasRect = getCanvasRect?.() ?? overlayRect;
     dragStartRef.current = {
       x: event.clientX,
       y: event.clientY,
       pointerId: event.pointerId,
+      overlayRect,
+      canvasRect,
     };
     setSelection(null);
     event.currentTarget.setPointerCapture(event.pointerId);
-  }, []);
+  }, [getCanvasRect]);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const start = dragStartRef.current;
     if (!start || start.pointerId !== event.pointerId) return;
     event.preventDefault();
-    setSelection(computeFromPoints(start, { x: event.clientX, y: event.clientY }));
-  }, [computeFromPoints]);
+    pendingDragPointRef.current = { x: event.clientX, y: event.clientY };
+    if (dragRafRef.current === null) {
+      dragRafRef.current = window.requestAnimationFrame(() => {
+        dragRafRef.current = null;
+        const activeStart = dragStartRef.current;
+        const currentPoint = pendingDragPointRef.current;
+        pendingDragPointRef.current = null;
+        if (!activeStart || !currentPoint) return;
+        setSelection(
+          computeSnipSelectionRect(
+            activeStart,
+            currentPoint,
+            activeStart.overlayRect,
+            activeStart.canvasRect,
+            naturalWidth,
+            naturalHeight,
+          ),
+        );
+      });
+    }
+  }, [naturalHeight, naturalWidth]);
 
   const finishDrag = useCallback((event: React.PointerEvent<HTMLDivElement>, commit: boolean) => {
     const start = dragStartRef.current;
     if (!start || start.pointerId !== event.pointerId) return;
+    cancelPendingDragRaf();
     dragStartRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     const finalSelection = commit
-      ? computeFromPoints(start, { x: event.clientX, y: event.clientY })
+      ? computeSnipSelectionRect(
+          start,
+          { x: event.clientX, y: event.clientY },
+          start.overlayRect,
+          start.canvasRect,
+          naturalWidth,
+          naturalHeight,
+        )
       : null;
     setSelection(null);
     if (commit && finalSelection) {
       onSelect(finalSelection.normalizedRect);
     }
-  }, [computeFromPoints, onSelect]);
+  }, [cancelPendingDragRaf, naturalHeight, naturalWidth, onSelect]);
 
   if (!open) return null;
 
