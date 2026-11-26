@@ -8,6 +8,7 @@ import {
   readClipboardTextWithFallbacks,
 } from '@/infrastructure/monaco/monacoClipboardPaste';
 import { useNetcattyMonacoTheme } from '@/infrastructure/monaco/useNetcattyMonacoTheme';
+import { matchWorkbenchShortcut } from './shortcuts';
 import { extractCurrentSqlStatement, extractSqlTableAliases } from './sqlStatement';
 import type {
   PluginCodeEditorCompletionSchema,
@@ -62,8 +63,10 @@ export default function PluginCodeEditorInner({
   const editorId = useId();
   const modelPath = `inmemory://netcatty-plugin-editor/${editorId.replace(/[^a-zA-Z0-9_-]/g, '_')}.${language}`;
 
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
+  const handledKeyEventsRef = useRef<WeakSet<Event>>(new WeakSet());
   const disposablesRef = useRef<Array<{ dispose(): void }>>([]);
   const onWidgetEventRef = useRef(onWidgetEvent);
   onWidgetEventRef.current = onWidgetEvent;
@@ -316,6 +319,26 @@ export default function PluginCodeEditorInner({
         ],
         run: emitFormat,
       }),
+      editor.onKeyDown((monacoKeyEvent) => {
+        const nativeEvent = monacoKeyEvent.browserEvent;
+        if (handledKeyEventsRef.current.has(nativeEvent)) return;
+        const shortcut = matchWorkbenchShortcut(nativeEvent, { includeUndoRedo: false });
+        if (!shortcut) return;
+        if (shortcut === 'escape') {
+          const target = nativeEvent.target as Element | null;
+          if (target?.closest?.('.suggest-widget, .find-widget, .parameter-hints-widget')) return;
+          handledKeyEventsRef.current.add(nativeEvent);
+          onWidgetEventRef.current('shortcut', { shortcut });
+          return;
+        }
+        handledKeyEventsRef.current.add(nativeEvent);
+        monacoKeyEvent.preventDefault();
+        monacoKeyEvent.stopPropagation();
+        nativeEvent.preventDefault();
+        nativeEvent.stopImmediatePropagation?.();
+        nativeEvent.stopPropagation();
+        onWidgetEventRef.current('shortcut', { shortcut });
+      }),
       editor.addAction({
         id: 'netcatty.pluginCodeEditor.paste',
         label: 'Paste',
@@ -354,10 +377,38 @@ export default function PluginCodeEditorInner({
     }, 80);
   }, []);
 
+  // Native capture listener runs BEFORE Monaco's textarea / chord-prefix handler
+  // so Cmd/Ctrl+K never enters Monaco's chord state and always reaches the plugin once.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const onNativeKeyDownCapture = (event: KeyboardEvent) => {
+      if (handledKeyEventsRef.current.has(event)) return;
+      // Keep Monaco's native Cmd/Ctrl+Z undo/redo intact while forwarding global workbench shortcuts.
+      const shortcut = matchWorkbenchShortcut(event, { includeUndoRedo: false });
+      if (!shortcut) return;
+      if (shortcut === 'escape') {
+        const target = event.target as Element | null;
+        if (target?.closest?.('.suggest-widget, .find-widget, .parameter-hints-widget')) return;
+        handledKeyEventsRef.current.add(event);
+        onWidgetEventRef.current('shortcut', { shortcut });
+        return;
+      }
+      handledKeyEventsRef.current.add(event);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      event.stopPropagation();
+      onWidgetEventRef.current('shortcut', { shortcut });
+    };
+    el.addEventListener('keydown', onNativeKeyDownCapture, true);
+    return () => el.removeEventListener('keydown', onNativeKeyDownCapture, true);
+  }, []);
+
   const resolvedHeight = typeof height === 'number' ? `${height}px` : height;
 
   return (
     <div
+      ref={wrapperRef}
       className="relative h-full w-full min-h-0 min-w-0 overflow-hidden bg-background"
       style={resolvedHeight !== '100%' ? { height: resolvedHeight } : undefined}
       data-plugin-code-editor=""

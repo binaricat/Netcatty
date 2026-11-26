@@ -331,6 +331,26 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
       if (binding.category === 'sftp') {
         continue;
       }
+      if (binding.action === 'commandPalette') {
+        const hasOpenHostModal = Array.from(
+          document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]:not([data-plugin-dialog])'),
+        ).some((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        });
+        if (!hasOpenHostModal) {
+          const inPluginSurface = Boolean(target?.closest?.('[data-plugin-remote-surface]'));
+          const activeFullBleedSurface = inPluginSurface || Array.from(
+            document.querySelectorAll<HTMLElement>('[data-plugin-chrome="full-bleed"] [data-plugin-remote-surface]'),
+          ).some((el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+          });
+          if (activeFullBleedSurface) {
+            return;
+          }
+        }
+      }
       if (TERMINAL_PASSTHROUGH_ACTIONS.has(binding.action)) {
         if (isTerminalElement) {
           return;

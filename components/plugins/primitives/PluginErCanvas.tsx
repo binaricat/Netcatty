@@ -1,16 +1,22 @@
-import { Maximize2, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
+import { Download, Maximize2, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  abbreviateSqlType,
+  buildStandaloneErSvg,
+  ER_CARD_HEADER_HEIGHT,
+  ER_CARD_ROW_HEIGHT,
+  ER_CARD_WIDTH,
+  erCardHeight,
+  erTableKey,
+} from './erFormat';
+import { matchWorkbenchShortcut } from './shortcuts';
 import type {
   PluginErCanvasWidgetProps,
   PluginErTable,
   PluginWidgetEventCallback,
 } from './types';
 
-const CARD_WIDTH = 236;
-const CARD_HEADER_HEIGHT = 34;
-const CARD_ROW_HEIGHT = 24;
-const CARD_FOOTER_PADDING = 8;
-const GRID_GAP_X = 76;
+const GRID_GAP_X = 80;
 const GRID_GAP_Y = 56;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.5;
@@ -19,33 +25,43 @@ export interface PluginErCanvasProps extends PluginErCanvasWidgetProps {
   onWidgetEvent: PluginWidgetEventCallback;
 }
 
-function tableKey(table: Pick<PluginErTable, 'name' | 'schema'>): string {
-  return table.schema ? `${table.schema}.${table.name}` : table.name;
-}
-
-function cardHeight(table: PluginErTable): number {
-  return CARD_HEADER_HEIGHT + Math.max(1, table.columns.length) * CARD_ROW_HEIGHT + CARD_FOOTER_PADDING;
-}
-
 function computeInitialPositions(tables: PluginErTable[]): Record<string, { x: number; y: number }> {
   const result: Record<string, { x: number; y: number }> = {};
   const colsPerRow = Math.max(1, Math.min(4, Math.ceil(Math.sqrt(tables.length || 1))));
   const colY = Array.from({ length: colsPerRow }, () => 40);
 
   tables.forEach((table, index) => {
-    const key = tableKey(table);
+    const key = erTableKey(table);
     if (typeof table.x === 'number' && Number.isFinite(table.x) && typeof table.y === 'number' && Number.isFinite(table.y)) {
       result[key] = { x: table.x, y: table.y };
       return;
     }
     const colIdx = index % colsPerRow;
-    const x = 40 + colIdx * (CARD_WIDTH + GRID_GAP_X);
+    const x = 40 + colIdx * (ER_CARD_WIDTH + GRID_GAP_X);
     const y = colY[colIdx];
     result[key] = { x, y };
-    colY[colIdx] = y + cardHeight(table) + GRID_GAP_Y;
+    colY[colIdx] = y + erCardHeight(table) + GRID_GAP_Y;
   });
 
   return result;
+}
+
+function resolveCanvasPalette(el: HTMLElement | null) {
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  const readVar = (name: string, fallback: string) => {
+    if (!el || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return fallback;
+    const val = window.getComputedStyle(el).getPropertyValue(name).trim();
+    return val ? `hsl(${val})` : fallback;
+  };
+  return {
+    background: readVar('--background', isDark ? '#0f1117' : '#ffffff'),
+    card: readVar('--card', isDark ? '#161922' : '#ffffff'),
+    cardForeground: readVar('--card-foreground', isDark ? '#f1f5f9' : '#0f172a'),
+    muted: readVar('--muted', isDark ? '#1e2230' : '#f1f5f9'),
+    mutedForeground: readVar('--muted-foreground', isDark ? '#94a3b8' : '#64748b'),
+    border: readVar('--border', isDark ? '#2a3040' : '#e2e8f0'),
+    primary: readVar('--primary', isDark ? '#38bdf8' : '#2563eb'),
+  };
 }
 
 export function PluginErCanvas({
@@ -61,7 +77,7 @@ export function PluginErCanvas({
   const [panning, setPanning] = useState(false);
 
   const tableSignature = useMemo(
-    () => tables.map((t) => `${tableKey(t)}:${t.x ?? ''}:${t.y ?? ''}`).join('|'),
+    () => tables.map((t) => `${erTableKey(t)}:${t.x ?? ''}:${t.y ?? ''}`).join('|'),
     [tables],
   );
 
@@ -70,7 +86,7 @@ export function PluginErCanvas({
       const defaults = computeInitialPositions(tables);
       const next: Record<string, { x: number; y: number }> = {};
       for (const tbl of tables) {
-        const key = tableKey(tbl);
+        const key = erTableKey(tbl);
         next[key] = prev[key] ?? defaults[key];
       }
       return next;
@@ -81,7 +97,7 @@ export function PluginErCanvas({
     const byKey = new Map<string, PluginErTable>();
     const byName = new Map<string, PluginErTable>();
     for (const tbl of tables) {
-      byKey.set(tableKey(tbl), tbl);
+      byKey.set(erTableKey(tbl), tbl);
       if (!byName.has(tbl.name)) byName.set(tbl.name, tbl);
     }
     return { byKey, byName };
@@ -104,11 +120,11 @@ export function PluginErCanvas({
     let maxX = -Infinity;
     let maxY = -Infinity;
     for (const tbl of tables) {
-      const pos = positions[tableKey(tbl)] ?? { x: 0, y: 0 };
+      const pos = positions[erTableKey(tbl)] ?? { x: 0, y: 0 };
       minX = Math.min(minX, pos.x);
       minY = Math.min(minY, pos.y);
-      maxX = Math.max(maxX, pos.x + CARD_WIDTH);
-      maxY = Math.max(maxY, pos.y + cardHeight(tbl));
+      maxX = Math.max(maxX, pos.x + ER_CARD_WIDTH);
+      maxY = Math.max(maxY, pos.y + erCardHeight(tbl));
     }
     const contentW = Math.max(1, maxX - minX);
     const contentH = Math.max(1, maxY - minY);
@@ -154,6 +170,7 @@ export function PluginErCanvas({
     if (event.button !== 0) return;
     if ((event.target as Element).closest?.('[data-er-table]')) return;
     event.preventDefault();
+    containerRef.current?.focus();
     const startX = event.clientX;
     const startY = event.clientY;
     const initialX = viewport.x;
@@ -180,7 +197,8 @@ export function PluginErCanvas({
   const startCardDrag = useCallback((event: React.PointerEvent<SVGGElement>, table: PluginErTable) => {
     if (event.button !== 0) return;
     event.stopPropagation();
-    const key = tableKey(table);
+    containerRef.current?.focus();
+    const key = erTableKey(table);
     const startX = event.clientX;
     const startY = event.clientY;
     const origin = positions[key] ?? { x: 0, y: 0 };
@@ -216,6 +234,14 @@ export function PluginErCanvas({
     window.addEventListener('pointercancel', onUp);
   }, [positions, viewport.zoom, onWidgetEvent]);
 
+  const handleCardDoubleClick = useCallback((event: React.MouseEvent<SVGGElement>, table: PluginErTable) => {
+    event.stopPropagation();
+    onWidgetEvent('tableDoubleClick', {
+      table: table.name,
+      ...(table.schema ? { schema: table.schema } : {}),
+    });
+  }, [onWidgetEvent]);
+
   const zoomBy = useCallback((factor: number) => {
     const el = containerRef.current;
     const rect = el?.getBoundingClientRect();
@@ -234,15 +260,35 @@ export function PluginErCanvas({
 
   const resetLayout = useCallback(() => {
     setPositions(computeInitialPositions(tables));
-    requestAnimationFrame(fitToView);
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(fitToView);
+    } else {
+      fitToView();
+    }
   }, [tables, fitToView]);
+
+  const handleExportSvg = useCallback(() => {
+    const palette = resolveCanvasPalette(containerRef.current);
+    const svg = buildStandaloneErSvg(tables, relations, positions, palette);
+    onWidgetEvent('exportSvg', { svg });
+  }, [tables, relations, positions, onWidgetEvent]);
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const shortcut = matchWorkbenchShortcut(event, { includeUndoRedo: true });
+    if (!shortcut) return;
+    if (shortcut !== 'escape') event.preventDefault();
+    event.stopPropagation();
+    onWidgetEvent('shortcut', { shortcut });
+  }, [onWidgetEvent]);
 
   return (
     <div
       ref={containerRef}
       data-plugin-er-canvas=""
+      tabIndex={0}
       onWheel={handleWheel}
-      className="relative h-full w-full min-h-0 min-w-0 overflow-hidden bg-background text-foreground select-none"
+      onKeyDown={handleKeyDown}
+      className="relative h-full w-full min-h-0 min-w-0 overflow-hidden bg-background text-foreground select-none outline-none"
     >
       {/* Floating Canvas Controls */}
       <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-border bg-background/95 p-1 shadow-sm backdrop-blur-sm">
@@ -251,7 +297,7 @@ export function PluginErCanvas({
           onClick={() => zoomBy(1.2)}
           aria-label="Zoom in"
           title="Zoom in"
-          className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+          className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
         >
           <ZoomIn size={13} />
         </button>
@@ -263,7 +309,7 @@ export function PluginErCanvas({
           onClick={() => zoomBy(1 / 1.2)}
           aria-label="Zoom out"
           title="Zoom out"
-          className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+          className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
         >
           <ZoomOut size={13} />
         </button>
@@ -273,7 +319,7 @@ export function PluginErCanvas({
           onClick={fitToView}
           aria-label="Fit to view"
           title="Fit to view"
-          className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <Maximize2 size={12} />
           Fit
@@ -283,9 +329,21 @@ export function PluginErCanvas({
           onClick={resetLayout}
           aria-label="Reset layout"
           title="Reset layout"
-          className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+          className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground"
         >
           <RotateCcw size={12} />
+        </button>
+        <div className="mx-0.5 h-4 w-px bg-border" />
+        <button
+          type="button"
+          data-er-export-svg=""
+          onClick={handleExportSvg}
+          aria-label="Export SVG"
+          title="Export SVG"
+          className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <Download size={12} />
+          Export SVG
         </button>
       </div>
 
@@ -314,28 +372,34 @@ export function PluginErCanvas({
               const fromTable = resolveTable(rel.fromTable);
               const toTable = resolveTable(rel.toTable);
               if (!fromTable || !toTable) return null;
-              const fromKey = tableKey(fromTable);
-              const toKey = tableKey(toTable);
+              const fromKey = erTableKey(fromTable);
+              const toKey = erTableKey(toTable);
               const fromPos = positions[fromKey] ?? { x: 0, y: 0 };
               const toPos = positions[toKey] ?? { x: 0, y: 0 };
               const fromColIdx = Math.max(0, fromTable.columns.findIndex((c) => c.name === rel.fromColumn));
               const toColIdx = Math.max(0, toTable.columns.findIndex((c) => c.name === rel.toColumn));
-              const y1 = fromPos.y + CARD_HEADER_HEIGHT + fromColIdx * CARD_ROW_HEIGHT + CARD_ROW_HEIGHT / 2;
-              const y2 = toPos.y + CARD_HEADER_HEIGHT + toColIdx * CARD_ROW_HEIGHT + CARD_ROW_HEIGHT / 2;
-              const fromCenter = fromPos.x + CARD_WIDTH / 2;
-              const toCenter = toPos.x + CARD_WIDTH / 2;
+              const y1 = fromPos.y + ER_CARD_HEADER_HEIGHT + fromColIdx * ER_CARD_ROW_HEIGHT + ER_CARD_ROW_HEIGHT / 2;
+              const y2 = toPos.y + ER_CARD_HEADER_HEIGHT + toColIdx * ER_CARD_ROW_HEIGHT + ER_CARD_ROW_HEIGHT / 2;
+              const fromCenter = fromPos.x + ER_CARD_WIDTH / 2;
+              const toCenter = toPos.x + ER_CARD_WIDTH / 2;
               const goRight = toCenter >= fromCenter;
-              const x1 = goRight ? fromPos.x + CARD_WIDTH : fromPos.x;
-              const x2 = goRight ? toPos.x : toPos.x + CARD_WIDTH;
+              const x1 = goRight ? fromPos.x + ER_CARD_WIDTH : fromPos.x;
+              const x2 = goRight ? toPos.x : toPos.x + ER_CARD_WIDTH;
               const dx = Math.max(48, Math.abs(x2 - x1) * 0.45);
               const c1x = goRight ? x1 + dx : x1 - dx;
               const c2x = goRight ? x2 - dx : x2 + dx;
-              const highlighted = hoveredRelation === idx || selectedTable === fromKey || selectedTable === toKey;
+              const isHovered = hoveredRelation === idx;
+              const highlighted = isHovered || selectedTable === fromKey || selectedTable === toKey;
               const stroke = highlighted ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))';
+              const midX = (x1 + x2) / 2;
+              const midY = (y1 + y2) / 2;
+              const edgeLabel = `${rel.fromColumn} -> ${rel.toColumn}${rel.onDelete ? ` (ON DELETE ${rel.onDelete})` : ''}`;
+              const labelWidth = Math.min(260, Math.max(72, edgeLabel.length * 6.2 + 14));
 
               return (
                 <g
                   key={rel.name ?? `${fromKey}.${rel.fromColumn}->${toKey}.${rel.toColumn}:${idx}`}
+                  data-er-relation={`${rel.fromTable}.${rel.fromColumn}->${rel.toTable}.${rel.toColumn}`}
                   onPointerEnter={() => setHoveredRelation(idx)}
                   onPointerLeave={() => setHoveredRelation(null)}
                 >
@@ -343,7 +407,7 @@ export function PluginErCanvas({
                     d={`M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}`}
                     fill="none"
                     stroke="transparent"
-                    strokeWidth={12}
+                    strokeWidth={14}
                   />
                   <path
                     d={`M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}`}
@@ -354,17 +418,27 @@ export function PluginErCanvas({
                   />
                   <circle cx={x1} cy={y1} r={3.5} fill={stroke} />
                   <circle cx={x2} cy={y2} r={3.5} fill="hsl(var(--background))" stroke={stroke} strokeWidth={1.8} />
-                  {rel.name && highlighted && (
-                    <text
-                      x={(x1 + x2) / 2}
-                      y={(y1 + y2) / 2 - 6}
-                      textAnchor="middle"
-                      fontSize={10}
-                      fontFamily="var(--font-mono)"
-                      fill="hsl(var(--primary))"
-                    >
-                      {rel.name}
-                    </text>
+                  {isHovered && (
+                    <g transform={`translate(${midX - labelWidth / 2}, ${midY - 12})`}>
+                      <rect
+                        width={labelWidth}
+                        height={18}
+                        rx={4}
+                        fill="hsl(var(--popover))"
+                        stroke="hsl(var(--primary))"
+                        strokeWidth={1}
+                      />
+                      <text
+                        x={labelWidth / 2}
+                        y={12}
+                        textAnchor="middle"
+                        fontSize={10}
+                        fontFamily="var(--font-mono)"
+                        fill="hsl(var(--popover-foreground))"
+                      >
+                        {edgeLabel}
+                      </text>
+                    </g>
                   )}
                 </g>
               );
@@ -372,9 +446,9 @@ export function PluginErCanvas({
 
             {/* Table Cards */}
             {tables.map((table) => {
-              const key = tableKey(table);
+              const key = erTableKey(table);
               const pos = positions[key] ?? { x: 0, y: 0 };
-              const height = cardHeight(table);
+              const height = erCardHeight(table);
               const isSelected = selectedTable === key;
 
               return (
@@ -383,11 +457,12 @@ export function PluginErCanvas({
                   data-er-table={table.name}
                   transform={`translate(${pos.x}, ${pos.y})`}
                   onPointerDown={(e) => startCardDrag(e, table)}
+                  onDoubleClick={(e) => handleCardDoubleClick(e, table)}
                   className="cursor-pointer"
                   filter="url(#nc-er-shadow)"
                 >
                   <rect
-                    width={CARD_WIDTH}
+                    width={ER_CARD_WIDTH}
                     height={height}
                     rx={8}
                     fill="hsl(var(--card))"
@@ -396,14 +471,14 @@ export function PluginErCanvas({
                   />
                   {/* Header band */}
                   <path
-                    d={`M 0 8 Q 0 0 8 0 L ${CARD_WIDTH - 8} 0 Q ${CARD_WIDTH} 0 ${CARD_WIDTH} 8 L ${CARD_WIDTH} ${CARD_HEADER_HEIGHT} L 0 ${CARD_HEADER_HEIGHT} Z`}
+                    d={`M 0 8 Q 0 0 8 0 L ${ER_CARD_WIDTH - 8} 0 Q ${ER_CARD_WIDTH} 0 ${ER_CARD_WIDTH} 8 L ${ER_CARD_WIDTH} ${ER_CARD_HEADER_HEIGHT} L 0 ${ER_CARD_HEADER_HEIGHT} Z`}
                     fill="hsl(var(--muted))"
                   />
                   <line
                     x1={0}
-                    y1={CARD_HEADER_HEIGHT}
-                    x2={CARD_WIDTH}
-                    y2={CARD_HEADER_HEIGHT}
+                    y1={ER_CARD_HEADER_HEIGHT}
+                    x2={ER_CARD_WIDTH}
+                    y2={ER_CARD_HEADER_HEIGHT}
                     stroke="hsl(var(--border))"
                     strokeWidth={1}
                   />
@@ -420,15 +495,19 @@ export function PluginErCanvas({
 
                   {/* Columns */}
                   {table.columns.map((col, colIdx) => {
-                    const rowY = CARD_HEADER_HEIGHT + colIdx * CARD_ROW_HEIGHT;
+                    const rowY = ER_CARD_HEADER_HEIGHT + colIdx * ER_CARD_ROW_HEIGHT;
                     const badgeOffset = (col.isPk ? 26 : 0) + (col.isFk ? 26 : 0);
+                    const maxNameChars = badgeOffset >= 52 ? 12 : badgeOffset >= 26 ? 15 : 19;
+                    const displayName = col.name.length > maxNameChars ? `${col.name.slice(0, maxNameChars - 1)}…` : col.name;
+                    const displayType = `${abbreviateSqlType(col.type)}${col.nullable ? '?' : ''}`;
                     return (
                       <g key={col.name} transform={`translate(0, ${rowY})`}>
+                        <title>{`${col.name}: ${col.type}${col.nullable ? ' NULL' : ' NOT NULL'}`}</title>
                         {colIdx > 0 && (
                           <line
                             x1={8}
                             y1={0}
-                            x2={CARD_WIDTH - 8}
+                            x2={ER_CARD_WIDTH - 8}
                             y2={0}
                             stroke="hsl(var(--border))"
                             strokeOpacity={0.45}
@@ -458,17 +537,17 @@ export function PluginErCanvas({
                           fontFamily="var(--font-mono)"
                           fill="hsl(var(--card-foreground))"
                         >
-                          {col.name.length > 18 ? `${col.name.slice(0, 17)}…` : col.name}
+                          {displayName}
                         </text>
                         <text
-                          x={CARD_WIDTH - 10}
+                          x={ER_CARD_WIDTH - 10}
                           y={16}
                           textAnchor="end"
                           fontSize={10}
                           fontFamily="var(--font-mono)"
                           fill="hsl(var(--muted-foreground))"
                         >
-                          {`${col.type}${col.nullable ? '?' : ''}`.slice(0, 14)}
+                          {displayType}
                         </text>
                       </g>
                     );

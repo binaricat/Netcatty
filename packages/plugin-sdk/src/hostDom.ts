@@ -107,6 +107,24 @@ function subscribeControlPropertyMutations(container: HTMLElement, onMutation: (
 const MAX_PLUGIN_CSS_LENGTH = 131072;
 const MAX_PLUGIN_EVENT_VALUE_LENGTH = 131072;
 
+function matchShortcutFromKeyEvent(event: HostDrawnViewEvent, isTextControl: boolean): string | null {
+  const key = event.key ?? '';
+  if (key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey) return 'escape';
+  const mod = Boolean(event.metaKey || event.ctrlKey);
+  if (!mod || event.altKey) return null;
+  const lower = key.toLowerCase();
+  if (lower === 'k' && !event.shiftKey) return 'mod+k';
+  if (lower === 's' && !event.shiftKey) return 'mod+s';
+  if (lower === 't' && !event.shiftKey) return 'mod+t';
+  if (lower === 'w' && !event.shiftKey) return 'mod+w';
+  if (!isTextControl) {
+    if (lower === 'z' && event.shiftKey) return 'mod+shift+z';
+    if (lower === 'z' && !event.shiftKey) return 'mod+z';
+    if (lower === 'y' && event.ctrlKey && !event.metaKey && !event.shiftKey) return 'mod+shift+z';
+  }
+  return null;
+}
+
 /** Build ordinary DOM in the isolated runtime; only validated data reaches the visible host. */
 export function registerHostDomView(views: PluginViews, viewId: string, mount: (container: HTMLElement, stateScope: string) => (() => void) | void, css = ''): Disposable {
   if (css.length > MAX_PLUGIN_CSS_LENGTH) throw new TypeError('Plugin CSS exceeds the view limit');
@@ -148,10 +166,18 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
     const eventType = event.type;
     if (eventType === 'dismiss') { element.dispatchEvent(new Event('netcatty-dismiss')); return; }
     if (eventType === 'widget') {
-      element.dispatchEvent(new CustomEvent('netcatty-widget-event', {
+      const widgetEvent = new CustomEvent('netcatty-widget-event', {
         bubbles: false,
+        cancelable: true,
         detail: { widgetEvent: event.widgetEvent, detail: event.detail },
-      }));
+      });
+      element.dispatchEvent(widgetEvent);
+      if (!widgetEvent.defaultPrevented && event.widgetEvent === 'shortcut' && event.detail && typeof event.detail === 'object' && !Array.isArray(event.detail)) {
+        const shortcut = (event.detail as Record<string, unknown>).shortcut;
+        if (typeof shortcut === 'string') {
+          element.dispatchEvent(new CustomEvent('netcatty-shortcut', { bubbles: true, detail: { shortcut } }));
+        }
+      }
       return;
     }
     if (eventType === 'dblclick') {
@@ -209,11 +235,18 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
     if (eventType === 'reset' && element instanceof HTMLFormElement) { element.reset(); return; }
     if (eventType === 'submit') { const action = new Event(eventType, { bubbles: true, cancelable: true }); action.preventDefault(); element.dispatchEvent(action); return; }
     if (eventType === 'keydown' || eventType === 'keyup') {
-      if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
-        && typeof event.selectionStart === 'number' && typeof event.selectionEnd === 'number') {
+      const isTextControl = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+      if (isTextControl && typeof event.selectionStart === 'number' && typeof event.selectionEnd === 'number') {
         try { element.setSelectionRange(event.selectionStart, event.selectionEnd); } catch {}
       }
-      element.dispatchEvent(new KeyboardEvent(eventType, { key: event.key ?? '', ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey, bubbles: true, cancelable: true })); return;
+      element.dispatchEvent(new KeyboardEvent(eventType, { key: event.key ?? '', ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey, bubbles: true, cancelable: true }));
+      if (eventType === 'keydown') {
+        const shortcut = matchShortcutFromKeyEvent(event, isTextControl);
+        if (shortcut) {
+          element.dispatchEvent(new CustomEvent('netcatty-shortcut', { bubbles: true, detail: { shortcut } }));
+        }
+      }
+      return;
     }
     if (eventType.startsWith('composition')) { element.dispatchEvent(new CompositionEvent(eventType, { data: event.data ?? '', bubbles: true })); return; }
     if (eventType === 'focusin' || eventType === 'focusout') { element.dispatchEvent(new FocusEvent(eventType, { bubbles: true })); return; }

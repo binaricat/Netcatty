@@ -3,6 +3,15 @@ export type PluginWidgetEventCallback = (
   detail?: Record<string, unknown>,
 ) => void;
 
+export type PluginWorkbenchShortcut =
+  | 'mod+k'
+  | 'mod+s'
+  | 'mod+t'
+  | 'mod+w'
+  | 'mod+z'
+  | 'mod+shift+z'
+  | 'escape';
+
 export interface PluginCodeEditorCompletionColumn {
   name: string;
   type?: string;
@@ -48,6 +57,12 @@ export interface PluginCodeEditorWidgetProps {
   height?: number | string;
 }
 
+export interface PluginDataGridForeignKey {
+  table: string;
+  column: string;
+  schema?: string;
+}
+
 export interface PluginDataGridColumn {
   name: string;
   type?: string;
@@ -55,6 +70,7 @@ export interface PluginDataGridColumn {
   nullable?: boolean;
   width?: number;
   sortable?: boolean;
+  foreignKey?: PluginDataGridForeignKey;
 }
 
 export interface PluginDataGridSort {
@@ -67,6 +83,7 @@ export type PluginDataGridRow = Record<string, unknown> | unknown[];
 export interface PluginDataGridWidgetProps {
   columns?: PluginDataGridColumn[];
   rows?: PluginDataGridRow[];
+  hiddenColumns?: string[];
   rowKeyField?: string;
   dirtyCells?: Record<string, unknown>;
   deletedRowIndices?: number[];
@@ -109,6 +126,8 @@ export interface PluginErRelation {
   toTable: string;
   toColumn: string;
   name?: string;
+  onDelete?: string;
+  onUpdate?: string;
 }
 
 export interface PluginErCanvasWidgetProps {
