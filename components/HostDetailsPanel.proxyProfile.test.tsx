@@ -4,9 +4,10 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { I18nProvider } from "../application/i18n/I18nProvider.tsx";
-import type { Host, Identity } from "../types.ts";
+import type { Host, Identity, ProxyProfile } from "../types.ts";
 import HostDetailsPanel, { parseOptionalPortInput } from "./HostDetailsPanel.tsx";
 import { applyGroupDefaults } from "../domain/groupConfig.ts";
+import { getActiveGlobalDefaultProxyProfileId, publishActiveGlobalDefaultProxyProfileId } from "../domain/globalDefaultProxy.ts";
 import {
   mapProxySaveErrorKey,
   prepareProxyConfigForSave,
@@ -37,7 +38,7 @@ const hostWithMissingProxyProfile: Host = {
 
 const renderHostDetails = (
   initialData: Host = hostWithMissingProxyProfile,
-  options: { identities?: Identity[] } = {},
+  options: { identities?: Identity[]; proxyProfiles?: ProxyProfile[] } = {},
 ) =>
   renderToStaticMarkup(
     React.createElement(
@@ -50,7 +51,7 @@ const renderHostDetails = (
           initialData,
           availableKeys: [],
           identities: options.identities ?? [],
-          proxyProfiles: [],
+          proxyProfiles: options.proxyProfiles ?? [],
           groups: [],
           managedSources: [],
           allTags: [],
@@ -99,6 +100,31 @@ test("HostDetailsPanel labels command proxy summaries consistently", () => {
   assert.doesNotMatch(markup, /COMMAND/);
   assert.doesNotMatch(markup, /cloudflared access ssh/);
   assert.doesNotMatch(markup, /--token secret/);
+});
+
+test("HostDetailsPanel displays the inherited global default proxy without a group proxy", () => {
+  const previous = getActiveGlobalDefaultProxyProfileId();
+  try {
+    publishActiveGlobalDefaultProxyProfileId("global-proxy");
+    const markup = renderHostDetails({ ...hostWithMissingProxyProfile, proxyProfileId: undefined }, {
+      proxyProfiles: [{
+        id: "global-proxy",
+        label: "Global Office Proxy",
+        config: { type: "http", host: "global-proxy.example.com", port: 8080 },
+        createdAt: 1,
+      }],
+    });
+
+    assert.match(markup, /Global Office Proxy/);
+    assert.match(markup, /Inherited from group/);
+    assert.doesNotMatch(markup, /Configure proxy/);
+
+    const direct = renderHostDetails({ ...hostWithMissingProxyProfile, proxyProfileId: undefined, directProxy: true });
+    assert.match(direct, /Direct \(no proxy\)/);
+    assert.doesNotMatch(direct, /Global Office Proxy|Inherited from group/);
+  } finally {
+    publishActiveGlobalDefaultProxyProfileId(previous);
+  }
 });
 
 test("HostDetailsPanel keeps explicitly cleared telnet credentials empty", () => {
@@ -698,6 +724,19 @@ test("clearing an inherited-only chain keeps an empty override instead of restor
   assert.deepEqual(applyGroupDefaults(cleared, group).hostChain, { hostIds: [] });
 });
 
+test("clearing an empty host-chain override restores group hops on the second clear", () => {
+  const group = { hostChain: { hostIds: ["jump-1", "jump-host"] } };
+  for (const hostChain of [undefined, { hostIds: ["jump-host"] }]) {
+    const cleared = nextFormAfterClearHostChain({ ...networkSshHost, hostChain }, group);
+    assert.deepEqual(cleared.hostChain, { hostIds: [] });
+
+    const restored = nextFormAfterClearHostChain(cleared, group);
+    assert.equal(restored.hostChain, undefined);
+    assert.equal(Object.hasOwn(restored, "hostChain"), false);
+    assert.deepEqual(applyGroupDefaults(restored, group).hostChain, group.hostChain);
+  }
+});
+
 test("HostDetailsPanel custom proxy draft hides the inherited saved proxy", () => {
   const markup = renderToStaticMarkup(
     React.createElement(
@@ -749,6 +788,7 @@ test("HostDetailsPanel empty jump-host override hides the inherited group chain"
   assert.doesNotMatch(markup, /bastion\.example\.com/);
   assert.doesNotMatch(markup, /edge\.example\.com/);
   assert.doesNotMatch(markup, /Inherited from group/);
+  assert.match(markup, /aria-label="Use group"/);
 });
 
 test("mapProxySaveErrorKey maps every proxy save validation error to its i18n key", () => {

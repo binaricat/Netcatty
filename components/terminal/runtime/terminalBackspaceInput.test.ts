@@ -21,5 +21,6 @@ test("Ctrl-H mode makes Backspace delete on network-device serial consoles", () 
 
 test("default mode preserves xterm Backspace and ordinary input", () => {
   assert.equal(mapTerminalBackspaceInput("\x7f", undefined), "\x7f");
+  assert.equal(mapTerminalBackspaceInput("\x7f", "default"), "\x7f");
   assert.equal(mapTerminalBackspaceInput("show version", "ctrl-h"), "show version");
 });

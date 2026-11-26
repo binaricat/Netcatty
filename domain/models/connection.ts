@@ -314,8 +314,8 @@ export interface Host {
   // Show local timestamps for this host beside terminal output rows.
   // Kept per-host because timestamp visibility is usually a host/workflow preference.
   showLineTimestamps?: boolean;
-  // What the Backspace key sends: undefined = xterm default (no interception), 'ctrl-h' = ^H (0x08)
-  backspaceBehavior?: 'ctrl-h';
+  // Undefined inherits; 'default' sends DEL (0x7F), 'ctrl-h' sends ^H (0x08).
+  backspaceBehavior?: 'default' | 'ctrl-h';
   // When true, tab titles stay on the connection label instead of following the
   // shell-reported window title (OSC 0/2). Useful when many hosts share one
   // bastion profile name.
