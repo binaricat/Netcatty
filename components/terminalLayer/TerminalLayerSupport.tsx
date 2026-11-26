@@ -1643,12 +1643,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",
         isVisible && "z-10",
-        isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl",
+        magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl",
       )}
       style={{
         ...style,
-        borderColor: isMagnified && magnifiedSurfaceBounds ? sessionAppearanceTheme.colors.cursor : undefined,
-        borderWidth: isMagnified && magnifiedSurfaceBounds
+        borderColor: magnifiedSurfaceBounds ? sessionAppearanceTheme.colors.cursor : undefined,
+        borderWidth: magnifiedSurfaceBounds
           ? resolveMagnifiedChromeBorderWidth(magnifiedDevicePixelRatio)
           : undefined,
       }}
