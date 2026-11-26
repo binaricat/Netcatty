@@ -48,6 +48,7 @@ export interface VaultHostUpdatePatch extends VaultHostDraft {
   identityId?: unknown;
   jumpHostIds?: unknown;
   proxyProfileId?: unknown;
+  directProxy?: unknown;
   startupCommand?: unknown;
   startupCommandRunMode?: unknown;
   environmentVariables?: unknown;
@@ -375,6 +376,7 @@ export function applyVaultHostUpdate(
   const identityId = firstProvided(source, ['identityId']);
   const jumpHostIds = firstProvided(source, ['jumpHostIds']);
   const proxyProfileId = firstProvided(source, ['proxyProfileId']);
+  const directProxy = firstProvided(source, ['directProxy']);
   const startupCommand = firstProvided(source, ['startupCommand']);
   const startupCommandRunMode = firstProvided(source, ['startupCommandRunMode']);
   const environmentVariables = firstProvided(source, ['environmentVariables']);
@@ -384,7 +386,7 @@ export function applyVaultHostUpdate(
   const etPort = firstProvided(source, ['etPort']);
   const serialConfig = firstProvided(source, ['serialConfig']);
   const provided = [label, hostname, port, username, password, savePassword, keyPath, group, tags, notes, protocol, os,
-    identityId, jumpHostIds, proxyProfileId, startupCommand, startupCommandRunMode, environmentVariables,
+    identityId, jumpHostIds, proxyProfileId, directProxy, startupCommand, startupCommandRunMode, environmentVariables,
     moshEnabled, moshServerPath, etEnabled, etPort, serialConfig]
     .some((entry) => entry.provided);
   if (!provided) return { ok: false, error: 'At least one host field is required.' };
@@ -508,14 +510,32 @@ export function applyVaultHostUpdate(
     if (unsupported) return { ok: false, error: `Jump host "${unsupported}" does not support SSH jump connections.` };
     updated.hostChain = { hostIds: normalizedIds };
   }
+  const nextDirectProxy = directProxy.provided ? parseBoolean(directProxy.value) : undefined;
+  if (directProxy.provided && nextDirectProxy === undefined) {
+    return { ok: false, error: 'directProxy must be true or false.' };
+  }
   if (proxyProfileId.provided) {
     if (typeof proxyProfileId.value !== 'string') return { ok: false, error: 'proxyProfileId must be a string.' };
     const nextProxyProfileId = proxyProfileId.value.trim();
+    if (nextProxyProfileId && nextDirectProxy === true) {
+      return { ok: false, error: 'directProxy cannot be combined with a proxyProfileId.' };
+    }
     if (nextProxyProfileId && !options.proxyProfiles?.some((profile) => profile.id === nextProxyProfileId)) {
       return { ok: false, error: `Proxy profile "${nextProxyProfileId}" was not found.` };
     }
-    updated.proxyProfileId = nextProxyProfileId;
+    // Mirror the Host Details proxy panel: a selected profile replaces any
+    // one-off proxy and the explicit direct choice; an empty value removes
+    // every host proxy setting so the group and global default apply again.
+    updated.proxyProfileId = nextProxyProfileId || undefined;
     updated.proxyConfig = undefined;
+    updated.directProxy = undefined;
+  }
+  if (nextDirectProxy === true) {
+    updated.directProxy = true;
+    updated.proxyProfileId = undefined;
+    updated.proxyConfig = undefined;
+  } else if (nextDirectProxy === false) {
+    updated.directProxy = undefined;
   }
   if (startupCommand.provided) {
     if (typeof startupCommand.value !== 'string') return { ok: false, error: 'startupCommand must be a string.' };

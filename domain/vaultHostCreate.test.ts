@@ -643,7 +643,7 @@ test('applyVaultHostUpdate applies and clears advanced connection settings', () 
   assert.equal(cleared.ok, true);
   if (!cleared.ok) return;
   assert.deepEqual(cleared.updatedHost.hostChain, { hostIds: [] });
-  assert.equal(cleared.updatedHost.proxyProfileId, '');
+  assert.equal(cleared.updatedHost.proxyProfileId, undefined);
   assert.equal(cleared.updatedHost.startupCommand, '');
   assert.equal(cleared.updatedHost.startupCommandRunMode, undefined);
   assert.deepEqual(cleared.updatedHost.environmentVariables, []);
@@ -697,6 +697,106 @@ test('applyVaultHostUpdate rejects malformed advanced connection settings', () =
     assert.equal(result.ok, false, JSON.stringify(entry.patch));
     if (!result.ok) assert.match(result.error, entry.error);
   }
+});
+
+const proxyUpdateProfile: ProxyProfile = {
+  id: 'proxy-1', label: 'proxy', config: { type: 'socks5', host: '127.0.0.1', port: 1080 }, createdAt: 1,
+};
+const proxyUpdateHost = (overrides: Partial<Host> = {}): Host => ({
+  id: 'host-1', label: 'host', hostname: 'host.example.com', username: 'root', tags: [], os: 'linux',
+  ...overrides,
+});
+const updateProxy = (host: Host, patch: VaultHostUpdatePatch) => applyVaultHostUpdate(
+  [host], [], host.id, patch, { proxyProfiles: [proxyUpdateProfile] },
+);
+const proxyOptions = { validProxyProfileIds: new Set([proxyUpdateProfile.id]), globalProxyProfileId: '' };
+
+test('applyVaultHostUpdate selecting a proxy profile replaces an explicit direct choice', () => {
+  const result = updateProxy(
+    proxyUpdateHost({ directProxy: true }),
+    { proxyProfileId: proxyUpdateProfile.id },
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.updatedHost.proxyProfileId, proxyUpdateProfile.id);
+  assert.equal(result.updatedHost.directProxy, undefined);
+  assert.equal(result.updatedHost.proxyConfig, undefined);
+  assert.equal(applyGroupDefaults(result.updatedHost, {}, proxyOptions).proxyProfileId, proxyUpdateProfile.id);
+});
+
+test('applyVaultHostUpdate clearing the proxy removes every host proxy setting so group proxies apply', () => {
+  const groupProxyConfig = { type: 'http' as const, host: 'group-proxy.example.com', port: 3128 };
+  for (const current of [
+    proxyUpdateHost({ proxyProfileId: proxyUpdateProfile.id }),
+    proxyUpdateHost({ proxyConfig: { type: 'http', host: 'host-proxy.example.com', port: 8080 } }),
+    proxyUpdateHost({ directProxy: true }),
+  ]) {
+    const result = updateProxy(current, { proxyProfileId: '' });
+    assert.equal(result.ok, true, JSON.stringify(current));
+    if (!result.ok) continue;
+    assert.equal(result.updatedHost.proxyProfileId, undefined);
+    assert.equal(result.updatedHost.proxyConfig, undefined);
+    assert.equal(result.updatedHost.directProxy, undefined);
+    const effective = applyGroupDefaults(result.updatedHost, { proxyConfig: groupProxyConfig }, proxyOptions);
+    assert.deepEqual(effective.proxyConfig, groupProxyConfig);
+  }
+});
+
+test('applyVaultHostUpdate directProxy true forces a direct connection over group and global proxies', () => {
+  const result = updateProxy(
+    proxyUpdateHost({
+      proxyProfileId: proxyUpdateProfile.id,
+      proxyConfig: { type: 'http', host: 'leftover.example.com', port: 8080 },
+    }),
+    { directProxy: true },
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.updatedHost.directProxy, true);
+  assert.equal(result.updatedHost.proxyProfileId, undefined);
+  assert.equal(result.updatedHost.proxyConfig, undefined);
+  const effective = applyGroupDefaults(
+    result.updatedHost,
+    { proxyProfileId: proxyUpdateProfile.id },
+    { validProxyProfileIds: proxyOptions.validProxyProfileIds, globalProxyProfileId: proxyUpdateProfile.id },
+  );
+  assert.equal(effective.proxyProfileId, undefined);
+  assert.equal(effective.proxyConfig, undefined);
+});
+
+test('applyVaultHostUpdate directProxy false removes the direct choice and keeps other host proxy settings', () => {
+  const cleared = updateProxy(proxyUpdateHost({ directProxy: true }), { directProxy: 'false' });
+  assert.equal(cleared.ok, true);
+  if (!cleared.ok) return;
+  assert.equal(cleared.updatedHost.directProxy, undefined);
+  assert.equal(
+    applyGroupDefaults(cleared.updatedHost, { proxyProfileId: proxyUpdateProfile.id }, proxyOptions).proxyProfileId,
+    proxyUpdateProfile.id,
+  );
+
+  const unchanged = updateProxy(proxyUpdateHost({ proxyProfileId: proxyUpdateProfile.id }), { directProxy: false });
+  assert.equal(unchanged.ok, true);
+  if (!unchanged.ok) return;
+  assert.equal(unchanged.updatedHost.proxyProfileId, proxyUpdateProfile.id);
+  assert.equal(unchanged.updatedHost.directProxy, undefined);
+});
+
+test('applyVaultHostUpdate rejects invalid or conflicting directProxy values', () => {
+  const cases: Array<{ patch: VaultHostUpdatePatch; error: RegExp }> = [
+    { patch: { directProxy: 'maybe' }, error: /directProxy must be true or false/i },
+    { patch: { directProxy: 1 as unknown as string }, error: /directProxy must be true or false/i },
+    { patch: { directProxy: true, proxyProfileId: proxyUpdateProfile.id }, error: /directProxy cannot be combined/i },
+  ];
+  for (const entry of cases) {
+    const result = updateProxy(proxyUpdateHost(), entry.patch);
+    assert.equal(result.ok, false, JSON.stringify(entry.patch));
+    if (!result.ok) assert.match(result.error, entry.error);
+  }
+});
+
+test('applyVaultHostUpdate accepts directProxy as the only changed field', () => {
+  const result = updateProxy(proxyUpdateHost(), { directProxy: true });
+  assert.equal(result.ok, true);
 });
 
 test('applyVaultHostUpdate keeps Mosh and ET mutually exclusive and clears them for other protocols', () => {

@@ -1913,6 +1913,19 @@ describe('handleVaultAgentOp vault management gaps', () => {
     assert.equal(JSON.stringify(result).includes('hidden'), false);
   });
 
+  it('accepts directProxy as the only host update field', async () => {
+    const deps = createDeps({ hosts: [{ ...host, proxyProfileId: 'proxy-1' }] });
+
+    const result = await handleVaultAgentOp('host.update', {
+      hostId: 'host-1',
+      directProxy: 'true',
+    }, deps);
+
+    assert.equal(result.ok, true);
+    assert.equal(deps.getHosts()[0]?.directProxy, true);
+    assert.equal(deps.getHosts()[0]?.proxyProfileId, undefined);
+  });
+
   it('creates, updates, and deletes port forwarding rules', async () => {
     const deps = createDeps({ hosts: [host] });
     const created = await handleVaultAgentOp('portforward.rules.create', {

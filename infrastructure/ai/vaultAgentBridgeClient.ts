@@ -113,6 +113,7 @@ const VAULT_HOST_UPDATE_FIELDS = [
   'identityId',
   'jumpHostIds',
   'proxyProfileId',
+  'directProxy',
   'startupCommand',
   'startupCommandRunMode',
   'environmentVariables',
