@@ -1,6 +1,11 @@
 import type { GroupConfig, Host, HostProtocol, Identity, ManagedSource, ProxyProfile } from './models';
 import { sanitizeHost } from './host';
 import { isPluginHostProtocol } from './pluginConnection';
+import {
+  applyVaultHostConnectionSettings,
+  applyVaultHostResetFields,
+  hasVaultHostConnectionSettingPatch,
+} from './vaultHostConnectionSettings';
 import type { HostOsSelection } from './models/connection';
 import {
   findIntroducedVaultJumpGraphIssue,
@@ -50,6 +55,20 @@ export interface VaultHostUpdatePatch extends VaultHostDraft {
   jumpHostIds?: unknown;
   proxyProfileId?: unknown;
   directProxy?: unknown;
+  resetFields?: unknown;
+  authMethod?: unknown;
+  deviceType?: unknown;
+  sshInputCompatibility?: unknown;
+  backspaceBehavior?: unknown;
+  charset?: unknown;
+  keepaliveOverride?: unknown;
+  keepaliveInterval?: unknown;
+  keepaliveCountMax?: unknown;
+  sshTcpConnectTimeoutSeconds?: unknown;
+  sshAuthReadyTimeoutSeconds?: unknown;
+  sftpSudo?: unknown;
+  sftpFileProtocol?: unknown;
+  sftpEncoding?: unknown;
   startupCommand?: unknown;
   startupCommandRunMode?: unknown;
   environmentVariables?: unknown;
@@ -357,6 +376,7 @@ export function applyVaultHostUpdate(
   hosts: Host[];
   customGroups: string[];
   updatedHost: Host;
+  warnings: string[];
 } | { ok: false; error: string } {
   const hostIndex = existingHosts.findIndex((host) => host.id === hostId);
   if (hostIndex < 0) return { ok: false, error: `Host "${hostId}" was not found.` };
@@ -389,11 +409,13 @@ export function applyVaultHostUpdate(
   const provided = [label, hostname, port, username, password, savePassword, keyPath, group, tags, notes, protocol, os,
     identityId, jumpHostIds, proxyProfileId, directProxy, startupCommand, startupCommandRunMode, environmentVariables,
     moshEnabled, moshServerPath, etEnabled, etPort, serialConfig]
-    .some((entry) => entry.provided);
+    .some((entry) => entry.provided) || hasVaultHostConnectionSettingPatch(source);
   if (!provided) return { ok: false, error: 'At least one host field is required.' };
 
   const current = existingHosts[hostIndex];
-  let updated: Host = { ...current };
+  const reset = applyVaultHostResetFields({ ...current }, source);
+  if ('error' in reset) return { ok: false, error: reset.error };
+  let updated: Host = reset.host;
 
   if (label.provided) {
     if (typeof label.value !== 'string' || !label.value.trim()) {
@@ -808,6 +830,9 @@ export function applyVaultHostUpdate(
     }
     updated.notes = notes.value.trim() || undefined;
   }
+  const connectionSettings = applyVaultHostConnectionSettings(updated, source, options.resolveEffectiveHost);
+  if ('error' in connectionSettings) return { ok: false, error: connectionSettings.error };
+  updated = connectionSettings.host;
   if (options.managedSources) {
     const targetManagedSource = options.managedSources
       .filter((sourceInfo) => (
@@ -884,7 +909,7 @@ export function applyVaultHostUpdate(
   const customGroups = updated.group
     ? Array.from(new Set([...existingGroups, updated.group]))
     : [...existingGroups];
-  return { ok: true, hosts, customGroups, updatedHost: updated };
+  return { ok: true, hosts, customGroups, updatedHost: updated, warnings: connectionSettings.warnings };
 }
 
 export function applyVaultHostDelete(

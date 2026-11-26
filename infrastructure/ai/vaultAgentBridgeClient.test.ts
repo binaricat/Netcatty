@@ -1913,6 +1913,32 @@ describe('handleVaultAgentOp vault management gaps', () => {
     assert.equal(JSON.stringify(result).includes('hidden'), false);
   });
 
+  it('updates connection settings, returns warnings and accepts resetFields alone', async () => {
+    const deps = createDeps({ hosts: [{ ...host, charset: 'GBK' }] });
+
+    const updated = await handleVaultAgentOp('host.update', {
+      hostId: 'host-1',
+      authMethod: 'key',
+      deviceType: 'network',
+      sftpFileProtocol: 'scp',
+    }, deps) as { ok: boolean; warnings?: string[] };
+
+    assert.equal(updated.ok, true);
+    assert.equal(deps.getHosts()[0]?.authMethod, 'key');
+    assert.equal(deps.getHosts()[0]?.deviceType, 'network');
+    assert.equal(deps.getHosts()[0]?.sftpFileProtocol, 'scp');
+    assert.match(updated.warnings?.join('\n') ?? '', /No key is selected/);
+
+    const reset = await handleVaultAgentOp('host.update', {
+      hostId: 'host-1',
+      resetFields: '["charset"]',
+    }, deps) as { ok: boolean; warnings?: string[] };
+
+    assert.equal(reset.ok, true);
+    assert.equal(reset.warnings, undefined);
+    assert.equal(deps.getHosts()[0]?.charset, undefined);
+  });
+
   it('accepts directProxy as the only host update field', async () => {
     const deps = createDeps({ hosts: [{ ...host, proxyProfileId: 'proxy-1' }] });
 

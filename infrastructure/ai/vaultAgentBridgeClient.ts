@@ -44,6 +44,7 @@ import {
   buildVaultHostsFromDrafts,
   parseVaultHostDraftsInput,
 } from '../../domain/vaultHostCreate';
+import { VAULT_HOST_CONNECTION_SETTING_FIELDS } from '../../domain/vaultHostConnectionSettings';
 import {
   applyVaultHostImport,
   detectVaultImportFormat,
@@ -122,6 +123,8 @@ const VAULT_HOST_UPDATE_FIELDS = [
   'etEnabled',
   'etPort',
   'serialConfig',
+  'resetFields',
+  ...VAULT_HOST_CONNECTION_SETTING_FIELDS,
 ] as const;
 
 export function sanitizeHostForAgent(host: Host): Record<string, unknown> {
@@ -907,6 +910,7 @@ export async function handleVaultAgentOp(
       }
 
       let updatedHost = currentHost;
+      let updateWarnings: string[] = [];
       let updatedHosts: Host[] | undefined;
       let updatedCustomGroups: string[] | undefined;
       if (hasHostPatch) {
@@ -925,6 +929,7 @@ export async function handleVaultAgentOp(
         );
         if (!updated.ok) return updated;
         updatedHost = updated.updatedHost;
+        updateWarnings = updated.warnings;
         updatedHosts = updated.hosts;
         updatedCustomGroups = updated.customGroups;
       }
@@ -953,6 +958,7 @@ export async function handleVaultAgentOp(
         ok: true,
         hostId,
         host: sanitizeHostForAgent(updatedHost),
+        ...(updateWarnings.length > 0 ? { warnings: updateWarnings } : {}),
       };
     }
     case 'host.delete': {
