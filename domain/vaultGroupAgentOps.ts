@@ -149,7 +149,9 @@ export function patchGroupConfig(
     if (proxyProfileId && !proxyProfiles.some((profile) => profile.id === proxyProfileId)) {
       return { ok: false, error: `Proxy profile "${proxyProfileId}" was not found.` };
     }
-    next.proxyProfileId = proxyProfileId;
+    // Like Group Details: an empty value removes the group proxy so a parent
+    // group proxy (or the global default) applies, instead of blocking it.
+    next.proxyProfileId = proxyProfileId || undefined;
     next.proxyConfig = undefined;
   }
   if (Object.hasOwn(defaults, 'jumpHostIds')) {
