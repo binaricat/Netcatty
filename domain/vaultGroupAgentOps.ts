@@ -276,6 +276,15 @@ export function patchGroupConfig(
     if (!Number.isInteger(etPort) || etPort < 1 || etPort > 65535) return { ok: false, error: 'etPort must be between 1 and 65535.' };
     next.etPort = etPort;
   }
+  // Group Details only offers network device mode for plain SSH groups.
+  const changesNetworkTransport = ['deviceType', 'moshEnabled', 'etEnabled'].some((key) => Object.hasOwn(defaults, key));
+  if (
+    changesNetworkTransport
+    && next.deviceType === 'network'
+    && ((next.protocol !== undefined && next.protocol !== 'ssh') || next.moshEnabled || next.etEnabled)
+  ) {
+    return { ok: false, error: 'deviceType network only applies to SSH groups without Mosh or ET.' };
+  }
   return { ok: true, config: next };
 }
 

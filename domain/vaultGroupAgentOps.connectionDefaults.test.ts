@@ -49,6 +49,21 @@ describe('vault group connection defaults', () => {
     }
   });
 
+  it('rejects network device mode on groups that use Mosh, ET or another protocol', () => {
+    const cases: Array<[GroupConfig[], string]> = [
+      [[], '{"deviceType":"network","moshEnabled":true}'],
+      [[{ path: 'prod', etEnabled: true }], '{"deviceType":"network"}'],
+      [[{ path: 'prod', deviceType: 'network' }], '{"moshEnabled":true}'],
+      [[{ path: 'prod', protocol: 'telnet' }], '{"deviceType":"network"}'],
+    ];
+    for (const [configs, defaults] of cases) {
+      const result = upsertGroup(stateWith(configs), 'prod', defaults, [], proxyProfiles);
+      assert.equal(result.ok, false, defaults);
+      if (!result.ok) assert.match(result.error, /deviceType network only applies to SSH groups/);
+    }
+    assert.equal(upsertGroup(stateWith([{ path: 'prod', moshEnabled: true }]), 'prod', '{"deviceType":"general"}', [], proxyProfiles).ok, true);
+  });
+
   it('removeDefaults deletes group defaults so parent groups apply again', () => {
     const configs: GroupConfig[] = [
       { path: 'prod', charset: 'Big5', startupCommand: 'parent-start' },
