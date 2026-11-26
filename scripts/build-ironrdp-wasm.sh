@@ -3,7 +3,7 @@
 #
 # Clones (or updates) Devolutions/IronRDP at a pinned commit (dual-licensed
 # MIT OR Apache-2.0), applies Netcatty's minimal patches under
-# patches/ironrdp-web/, runs host unit tests, and compiles crates/ironrdp-web
+# scripts/ironrdp-web-patches/, runs host unit tests, and compiles crates/ironrdp-web
 # with wasm-pack into packages/netcatty-ironrdp-wasm/.
 #
 # Usage:
@@ -24,7 +24,7 @@ IRONRDP_REPO="https://github.com/Devolutions/IronRDP.git"
 IRONRDP_COMMIT="293cb4bee90baddfd7b8ea08d2f46e31947a3888"
 IRONRDP_SHORT="${IRONRDP_COMMIT:0:8}"
 
-PATCH_DIR="${REPO_ROOT}/patches/ironrdp-web"
+PATCH_DIR="${REPO_ROOT}/scripts/ironrdp-web-patches"
 OUT_DIR="${REPO_ROOT}/packages/netcatty-ironrdp-wasm"
 BUILD_DIR="${IRONRDP_BUILD_DIR:-${TMPDIR:-/tmp}/netcatty-ironrdp-wasm-build}"
 SRC_DIR="${BUILD_DIR}/IronRDP"
@@ -222,7 +222,7 @@ Self-contained WebAssembly build of [Devolutions/IronRDP](https://github.com/Dev
 
 - **Upstream commit:** \`${IRONRDP_COMMIT}\`
 - **License:** \`MIT OR Apache-2.0\` (see \`LICENSE-MIT\` and \`LICENSE-APACHE\`)
-- **Patches applied** (under \`patches/ironrdp-web/\`):
+- **Patches applied** (under \`scripts/ironrdp-web-patches/\`):
   1. \`0001-session-responsiveness.patch\` — 16ms dirty-rectangle coalescing (\`PaintTicker\`) and cooperative event-loop yielding every 16 frames so rapid screen updates do not starve DOM keyboard/mouse input.
   2. \`0002-load-balance-info-and-shell.patch\` — Exposes \`load_balance_info\`, \`alternate_shell\`, and \`work_dir\` extensions on \`SessionBuilder\` for JumpServer Razor and RDS Connection Broker routing.
 

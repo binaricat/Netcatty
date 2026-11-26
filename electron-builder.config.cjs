@@ -12,7 +12,7 @@ const REMOTE_DESKTOP_DUPLICATE_EXCLUSIONS = [
     '!node_modules/@netcatty/ironrdp-wasm/**/*',
     '!node_modules/ironrdp-wasm/**/*',
     '!packages/netcatty-ironrdp-wasm/**/*',
-    '!patches/ironrdp-web/**/*',
+    '!scripts/ironrdp-web-patches/**/*',
     '!scripts/build-ironrdp-wasm.sh',
     '!public/audio/**/*',
 ];
