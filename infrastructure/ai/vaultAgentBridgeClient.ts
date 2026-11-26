@@ -159,10 +159,14 @@ function summarizeHostForList(host: Host) {
 
 type HostListSummary = ReturnType<typeof summarizeHostForList>;
 
-/** Empty filter matches everything. Matches the group itself or any subgroup, on a path boundary. */
+/**
+ * Empty filter matches everything. Matches the group itself or any subgroup, on a path boundary.
+ * `group` is already normalized; the stored path is normalized the same way because hosts can
+ * carry noncanonical paths (e.g. "prod / web" saved verbatim from Host Details).
+ */
 function hostMatchesGroupFilter(host: HostListSummary, group: string): boolean {
   if (!group) return true;
-  const hostGroup = host.group ?? '';
+  const hostGroup = typeof host.group === 'string' ? normalizeGroupTargetPath(host.group) : '';
   return hostGroup === group || hostGroup.startsWith(`${group}/`);
 }
 

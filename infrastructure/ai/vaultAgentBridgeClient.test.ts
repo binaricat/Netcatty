@@ -540,6 +540,28 @@ describe('handleVaultAgentOp vault hosts', () => {
       assert.deepEqual(result, { ok: true, hosts: [] });
     });
 
+    it('matches hosts whose stored group path is noncanonical', async () => {
+      // Host Details saves a typed group verbatim apart from outer whitespace.
+      const stored: Host[] = [
+        { id: 'n1', label: 'api-1', hostname: '10.1.0.1', username: 'ops', port: 22, group: 'prod / web', tags: [], os: 'linux' },
+        { id: 'n2', label: 'db-2', hostname: '10.1.0.2', username: 'ops', port: 22, group: 'prod//db', tags: [], os: 'linux' },
+        { id: 'n3', label: 'misc', hostname: '10.1.0.3', username: 'ops', port: 22, group: 'production', tags: [], os: 'linux' },
+      ];
+      const list = async (group: string) => {
+        const result = await handleVaultAgentOp('host.list', { group }, createDeps({ hosts: stored }));
+        const typed = result as { hosts: Array<{ id: string }>; note?: string };
+        return { ids: typed.hosts.map((host) => host.id), note: typed.note };
+      };
+      // The exact stored value keeps working (it did before normalization).
+      assert.deepEqual(await list('prod / web'), { ids: ['n1'], note: undefined });
+      assert.deepEqual(await list('prod//db'), { ids: ['n2'], note: undefined });
+      // Canonical spellings find the same hosts instead of a false "exists but has no hosts".
+      assert.deepEqual(await list('prod/web'), { ids: ['n1'], note: undefined });
+      assert.deepEqual(await list('/prod/db/'), { ids: ['n2'], note: undefined });
+      // Parent filters still respect path boundaries.
+      assert.deepEqual(await list('prod'), { ids: ['n1', 'n2'], note: undefined });
+    });
+
     describe('empty group results explain themselves', () => {
       async function list(params: Record<string, unknown>, customGroups: string[] = []) {
         const result = await handleVaultAgentOp('host.list', params, createDeps({ hosts, customGroups }));
