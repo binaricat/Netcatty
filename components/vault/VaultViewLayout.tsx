@@ -570,6 +570,12 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   const [isMoveHostsOpen, setIsMoveHostsOpen] = React.useState(false);
   const [moveTargetGroup, setMoveTargetGroup] = React.useState("");
   const [isSidebarResizing, setIsSidebarResizing] = React.useState(false);
+  const [hasMountedKnownHosts, setHasMountedKnownHosts] = React.useState(
+    currentSection === "knownhosts",
+  );
+  if (currentSection === "knownhosts" && !hasMountedKnownHosts) {
+    setHasMountedKnownHosts(true);
+  }
   const keyListRef = React.useRef(keys);
   keyListRef.current = keys;
   const newHostActionsRef = React.useRef<HTMLDivElement>(null);
@@ -1581,8 +1587,8 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               </LazyLoadBoundary>
             )}
             {/* Mount KnownHostsManager lazily on first visit, then keep hidden with CSS */}
-            {currentSection === "knownhosts" ? (
-              <div style={{ display: "contents" }}>
+            {hasMountedKnownHosts ? (
+              <div style={{ display: currentSection === "knownhosts" ? "contents" : "none" }}>
                 <Suspense fallback={<VaultSectionLoading />}>
                   {knownHostsManagerElement}
                 </Suspense>
