@@ -1,12 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { Suspense, lazy, useMemo, useState } from 'react';
 
 import type { WorkSurfaceHostEditorTarget } from '../state/useWorkSurfaceHostEditor';
 import type { EditorTabChrome } from '../state/editorTabStore';
 import type { LogView } from '../state/logViewState';
 import { useI18n } from '../i18n/I18nProvider';
-import HostDetailsPanel from '../../components/HostDetailsPanel';
-import LocalShellHostDetailsPanel from '../../components/LocalShellHostDetailsPanel';
-import SerialHostDetailsPanel from '../../components/SerialHostDetailsPanel';
+const HostDetailsPanel = lazy(() => import('../../components/HostDetailsPanel'));
+const LocalShellHostDetailsPanel = lazy(() => import('../../components/LocalShellHostDetailsPanel'));
+const SerialHostDetailsPanel = lazy(() => import('../../components/SerialHostDetailsPanel'));
 import { PortalContainerProvider } from '../../components/ui/portal-container';
 import { resolveGroupDefaults } from '../../domain/groupConfig';
 import { STORAGE_KEY_VAULT_HOST_PANEL_WIDTH } from '@/infrastructure/config/storageKeys';
@@ -163,6 +163,7 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
       style={getAppHostEditorLayerStyle(surfaceVisible)}
     >
       <PortalContainerProvider container={portalContainer}>
+        <Suspense fallback={null}>
         {target.mode === 'edit' && target.openedHost.protocol === 'local' ? (
           <LocalShellHostDetailsPanel
             key={editorKey}
@@ -215,6 +216,7 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
             {...hostPanelResizeProps}
           />
         )}
+        </Suspense>
       </PortalContainerProvider>
     </div>
   );

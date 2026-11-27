@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 
-import packageJson from '../../../package.json';
+import { version as appVersion } from '../../../package.json';
 import { EncryptionService } from '../EncryptionService';
 import { mergeSyncPayloads } from '../../../domain/syncMerge';
 import { stripSyncPayloadEncryptedCredentials, healPoisonedSecretsForMerge } from '../../../domain/credentials';
@@ -114,7 +114,7 @@ async function uploadLocalPayloadImpl(this: any,
     this.masterPassword,
     this.state.deviceId,
     this.state.deviceName,
-    packageJson.version,
+    appVersion,
     baseVersion,
   );
   assertSyncSecurityGeneration(this, syncSecurityGeneration);
@@ -564,7 +564,7 @@ export async function syncToProviderImpl(this: any,
             this.masterPassword,
             this.state.deviceId,
             this.state.deviceName,
-            packageJson.version,
+            appVersion,
             checkResult.remoteFile.meta.version, // base on remote version
           );
           assertSyncSecurityGeneration(this, syncSecurityGeneration);

@@ -24,6 +24,7 @@ import {
   isVncProtocol,
 } from "../domain/remoteDesktop";
 import { matchesSearchQuery } from "../domain/searchMatcher";
+import { usePinyinMatcherVersion } from "../application/state/usePinyinMatcherVersion";
 import { getProtocolBadgeClass } from "./protocolVisuals";
 import { buildQuickSwitcherShells, useDiscoveredShells, getShellIconPath, isMonochromeShellIcon } from "../lib/useDiscoveredShells";
 import { usePluginContributions } from "../application/state/usePluginContributions";
@@ -214,7 +215,9 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
     )
   ), [discoveredShells, terminalSettings?.localShell, terminalSettings?.localShellArgs]);
 
+  const pinyinMatcherVersion = usePinyinMatcherVersion();
   const filteredShells = useMemo(() => {
+    void pinyinMatcherVersion;
     const list = !query.trim()
       ? quickSwitcherShells
       : quickSwitcherShells.filter(
@@ -222,7 +225,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
         );
     // Default shell first
     return [...list].sort((a, b) => (a.isDefault === b.isDefault ? 0 : a.isDefault ? -1 : 1));
-  }, [quickSwitcherShells, query]);
+  }, [quickSwitcherShells, query, pinyinMatcherVersion]);
 
   // Get hotkey display strings
   const getHotkeyLabel = useCallback((actionId: string) => {
@@ -302,6 +305,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
     return matched;
   }, [showSftpTab, trimmedQuery]);
   const filteredOrphanSessions = useMemo(() => {
+    void pinyinMatcherVersion;
     if (!trimmedQuery) return orphanSessions;
     return orphanSessions.filter((session) =>
       matchesSearchQuery(
@@ -311,18 +315,22 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
         session.id,
       ),
     );
-  }, [orphanSessions, trimmedQuery]);
+  }, [orphanSessions, trimmedQuery, pinyinMatcherVersion]);
   const filteredWorkspaces = useMemo(() => {
+    void pinyinMatcherVersion;
     if (!trimmedQuery) return workspaces;
     return workspaces.filter((workspace) =>
       matchesSearchQuery(trimmedQuery, workspace.title, workspace.id),
     );
-  }, [trimmedQuery, workspaces]);
+  }, [trimmedQuery, workspaces, pinyinMatcherVersion]);
   const shouldShowLocalTerminalFallback = filteredShells.length === 0 && !!onCreateLocalTerminal && !trimmedQuery;
-  const pluginPaletteItems = useMemo(() => buildPluginPaletteItems(
-    pluginContributions.snapshot.plugins,
-    trimmedQuery,
-  ), [pluginContributions.snapshot.plugins, trimmedQuery]);
+  const pluginPaletteItems = useMemo(() => {
+    void pinyinMatcherVersion;
+    return buildPluginPaletteItems(
+      pluginContributions.snapshot.plugins,
+      trimmedQuery,
+    );
+  }, [pluginContributions.snapshot.plugins, trimmedQuery, pinyinMatcherVersion]);
   const paneMagnificationAction = useMemo(
     () => buildPaneMagnificationPaletteAction(paneMagnificationState, t),
     [paneMagnificationState, t],

@@ -806,7 +806,12 @@ function setupDeferredShow(win, { timeoutMs = 3000, waitForRendererReady = true,
   win.on("closed", () => {
     if (timer) clearTimeout(timer);
     timer = null;
-    if (webContentsId) rendererReadyCallbacksByWebContentsId.delete(webContentsId);
+    if (webContentsId) {
+      rendererReadyCallbacksByWebContentsId.delete(webContentsId);
+      rendererReadySeenByWebContentsId.delete(webContentsId);
+      unhealthyWebContentsIds.delete(webContentsId);
+      rendererReadyWaitersByWebContentsId.delete(webContentsId);
+    }
   });
 
   return { showOnce, markRendererReady };

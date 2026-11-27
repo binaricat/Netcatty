@@ -5,31 +5,66 @@
 
 const net = require("node:net");
 const { createSocks5RequestParser } = require("./socks5Request.cjs");
-require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
-const { Client: SSHClient } = require("ssh2");
-const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
-const { connectThroughChain, buildAlgorithms } = require("./sshBridge.cjs");
-const { resolveSshConnectionTimeouts } = require("./sshBridge/startSession.cjs");
 const { remoteSoftwareRequiresSingleChannel } = require("../../domain/singleChannelSshBanner.shared.cjs");
 const hostKeyVerifier = require("./hostKeyVerifier.cjs");
-const { createProxySocket, runWhenProxyConnectionReady } = require("./proxyUtils.cjs");
 const {
   openBoundedForwardInCallback,
   openBoundedForwardOutCallback,
 } = require("./boundedSshChannelOpen.cjs");
-const { 
-  buildAuthHandler, 
-  createKeyboardInteractiveHandler, 
-  applyAuthToConnOpts,
-  shouldSkipKiPasswordAutoFill,
-  findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
-  preparePrivateKeyForAuth,
-  loadFirstIdentityFileForAuth,
-  getAvailableAgentSocket,
-  prepareSystemSshAgentForAuth,
-  isPassphraseCancelledError,
-} = require("./sshAuthHelper.cjs");
+
+let _ssh2ClientCtor = null;
+function getSshClientCtor() {
+  if (!_ssh2ClientCtor) {
+    require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
+    ({ Client: _ssh2ClientCtor } = require("ssh2"));
+  }
+  return _ssh2ClientCtor;
+}
+if (!process.versions?.electron) {
+  getSshClientCtor();
+}
+let _netcattyAgentCtor = null;
+function getNetcattyAgentCtor() {
+  if (!_netcattyAgentCtor) ({ NetcattyAgent: _netcattyAgentCtor } = require("./netcattyAgent.cjs"));
+  return _netcattyAgentCtor;
+}
+let _sshBridgeMod = null;
+function getSshBridge() {
+  if (!_sshBridgeMod) _sshBridgeMod = require("./sshBridge.cjs");
+  return _sshBridgeMod;
+}
+let _startSessionMod = null;
+function getStartSessionMod() {
+  if (!_startSessionMod) _startSessionMod = require("./sshBridge/startSession.cjs");
+  return _startSessionMod;
+}
+let _proxyUtilsMod = null;
+function getProxyUtils() {
+  if (!_proxyUtilsMod) _proxyUtilsMod = require("./proxyUtils.cjs");
+  return _proxyUtilsMod;
+}
+let _sshAuthHelperMod = null;
+function getSshAuthHelper() {
+  if (!_sshAuthHelperMod) _sshAuthHelperMod = require("./sshAuthHelper.cjs");
+  return _sshAuthHelperMod;
+}
+
+const connectThroughChain = (...args) => getSshBridge().connectThroughChain(...args);
+const buildAlgorithms = (...args) => getSshBridge().buildAlgorithms(...args);
+const resolveSshConnectionTimeouts = (...args) => getStartSessionMod().resolveSshConnectionTimeouts(...args);
+const createProxySocket = (...args) => getProxyUtils().createProxySocket(...args);
+const runWhenProxyConnectionReady = (...args) => getProxyUtils().runWhenProxyConnectionReady(...args);
+const buildAuthHandler = (...args) => getSshAuthHelper().buildAuthHandler(...args);
+const createKeyboardInteractiveHandler = (...args) => getSshAuthHelper().createKeyboardInteractiveHandler(...args);
+const applyAuthToConnOpts = (...args) => getSshAuthHelper().applyAuthToConnOpts(...args);
+const shouldSkipKiPasswordAutoFill = (...args) => getSshAuthHelper().shouldSkipKiPasswordAutoFill(...args);
+const findAllDefaultPrivateKeysFromHelper = (...args) => getSshAuthHelper().findAllDefaultPrivateKeys(...args);
+const preparePrivateKeyForAuth = (...args) => getSshAuthHelper().preparePrivateKeyForAuth(...args);
+const loadFirstIdentityFileForAuth = (...args) => getSshAuthHelper().loadFirstIdentityFileForAuth(...args);
+const getAvailableAgentSocket = (...args) => getSshAuthHelper().getAvailableAgentSocket(...args);
+const prepareSystemSshAgentForAuth = (...args) => getSshAuthHelper().prepareSystemSshAgentForAuth(...args);
+const isPassphraseCancelledError = (...args) => getSshAuthHelper().isPassphraseCancelledError(...args);
 const {
   createTransport,
   borrowTransport,
@@ -1374,6 +1409,7 @@ async function startPortForward(event, payload, { bindChannels = bindPortForward
     }
   }
 
+  const SSHClient = getSshClientCtor();
   const conn = new SSHClient();
   tunnelState.conn = conn;
   tunnelState.chainConnections = chainConnections;
@@ -1496,6 +1532,7 @@ async function startPortForward(event, payload, { bindChannels = bindPortForward
       connectOpts.agent = systemAuthAgent;
     }
     if (hasCertificate && !isFido) {
+      const NetcattyAgent = getNetcattyAgentCtor();
       connectOpts.agent = new NetcattyAgent({
         mode: "certificate",
         webContents: sender,

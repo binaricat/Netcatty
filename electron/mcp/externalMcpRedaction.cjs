@@ -2,7 +2,12 @@
 
 const { randomBytes } = require("node:crypto");
 const { BlockList, isIP } = require("node:net");
-const { RE2JS } = require("re2js");
+
+let _RE2JS = null;
+function getRE2JS() {
+  if (!_RE2JS) ({ RE2JS: _RE2JS } = require("re2js"));
+  return _RE2JS;
+}
 
 const CONFIG_ERROR = "Invalid External MCP redaction configuration";
 const VALUE_ERROR = "External MCP redaction could not safely process this value";
@@ -53,9 +58,12 @@ function normalizeRedactionConfig(input) {
     }
     config.cidrs.forEach(parseCidr);
     // RE2 rejects backreferences/lookaround and has bounded execution time.
-    config.patterns.forEach((pattern) => {
-      if (RE2JS.compile(pattern).matcher("").find()) throw new Error(CONFIG_ERROR);
-    });
+    if (config.patterns.length > 0) {
+      const RE2JS = getRE2JS();
+      config.patterns.forEach((pattern) => {
+        if (RE2JS.compile(pattern).matcher("").find()) throw new Error(CONFIG_ERROR);
+      });
+    }
     return { ...config, cidrs: [...config.cidrs], patterns: [...config.patterns] };
   } catch {
     throw new Error(CONFIG_ERROR);
@@ -118,7 +126,9 @@ function createRedactionSession(input) {
   let exhausted = false;
   const customRanges = new BlockList();
   config.cidrs.forEach((cidr) => addSubnet(customRanges, cidr));
-  const patterns = config.patterns.map((pattern) => RE2JS.compile(pattern));
+  const patterns = config.patterns.length > 0
+    ? config.patterns.map((pattern) => getRE2JS().compile(pattern))
+    : [];
 
   function issue(value, namespace) {
     // The first classification names a value; later contexts reuse its token.

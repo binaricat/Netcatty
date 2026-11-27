@@ -30,15 +30,43 @@ for (const spec of globalAgentSpecs) {
   }
 }
 const sidebarByRpcMethod = {};
+const sidebarToolNameToCapability = {};
+const sidebarRpcMethodToCapability = {};
+const freshApprovalSet = new Set();
+const grantableSet = new Set();
 for (const spec of sidebarSpecs) {
   if (spec.rpcMethod && spec.toolName && !sidebarByRpcMethod[spec.rpcMethod]) {
     sidebarByRpcMethod[spec.rpcMethod] = spec.toolName;
+  }
+  if (spec.toolName && spec.capabilityId) {
+    sidebarToolNameToCapability[spec.toolName] = spec.capabilityId;
+  }
+  if (spec.rpcMethod && spec.capabilityId) {
+    sidebarRpcMethodToCapability[spec.rpcMethod] = spec.capabilityId;
+  }
+  if (spec.policy?.requiresFreshApproval && spec.capabilityId) {
+    freshApprovalSet.add(spec.capabilityId);
+  }
+  if (
+    spec.policy?.write
+    && !spec.policy?.bypassesApproval
+    && !spec.policy?.requiresFreshApproval
+    && spec.capabilityId
+  ) {
+    grantableSet.add(spec.capabilityId);
   }
 }
 const indexOutputPath = path.join(generatedDir, "toolNameIndex.json");
 fs.writeFileSync(
   indexOutputPath,
-  `${JSON.stringify({ globalByCapabilityId, sidebarByRpcMethod }, null, 2)}\n`,
+  `${JSON.stringify({
+    globalByCapabilityId,
+    sidebarByRpcMethod,
+    sidebarToolNameToCapability,
+    sidebarRpcMethodToCapability,
+    freshApprovalOnlyCapabilities: [...freshApprovalSet].sort(),
+    grantableCapabilityIds: [...grantableSet].sort(),
+  }, null, 2)}\n`,
   "utf8",
 );
 

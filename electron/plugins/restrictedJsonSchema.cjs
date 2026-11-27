@@ -1,6 +1,17 @@
 "use strict";
 
-const Ajv2020 = require("ajv/dist/2020").default;
+let _ajv = null;
+function getAjv() {
+  if (!_ajv) {
+    const Ajv2020 = require("ajv/dist/2020").default;
+    _ajv = new Ajv2020({
+      allErrors: true,
+      strict: true,
+      validateFormats: false,
+    });
+  }
+  return _ajv;
+}
 
 const MAX_SCHEMA_DEPTH = 8;
 const MAX_SCHEMA_NODES = 256;
@@ -24,12 +35,6 @@ const ALLOWED_KEYWORDS = new Set([
   "type",
   "writeOnly",
 ]);
-
-const ajv = new Ajv2020({
-  allErrors: true,
-  strict: true,
-  validateFormats: false,
-});
 
 function isPlainRecord(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -144,6 +149,7 @@ function assertRestrictedJsonSchema(root, options = {}) {
 
 function compileRestrictedJsonSchema(schema, options = {}) {
   assertRestrictedJsonSchema(schema, options);
+  const ajv = getAjv();
   let validate;
   try { validate = ajv.compile(schema); }
   catch (error) { throw new TypeError(`Restricted setting schema is invalid: ${error?.message ?? error}`); }

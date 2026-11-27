@@ -12,14 +12,20 @@
 // Apply the Buffer fast paths to zmodem.js receive/send hot paths, plus the
 // Send-session robustness fixes for `rz` uploads (see zmodemFastPath.cjs).
 // NETCATTY_ZMODEM_FAST_PATH=0 disables only the performance paths.
-const {
-  applyZmodemFastPath,
-  applyZmodemSendSessionFixes,
-  applyZmodemSendFastPath,
-} = require("./zmodemFastPath.cjs");
-const Zmodem = applyZmodemSendFastPath(
-  applyZmodemSendSessionFixes(applyZmodemFastPath(require("zmodem.js"))),
-);
+let _zmodem = null;
+function getZmodem() {
+  if (!_zmodem) {
+    const {
+      applyZmodemFastPath,
+      applyZmodemSendSessionFixes,
+      applyZmodemSendFastPath,
+    } = require("./zmodemFastPath.cjs");
+    _zmodem = applyZmodemSendFastPath(
+      applyZmodemSendSessionFixes(applyZmodemFastPath(require("zmodem.js"))),
+    );
+  }
+  return _zmodem;
+}
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -617,6 +623,7 @@ function createZmodemSentry(opts) {
   }
 
 
+  const Zmodem = getZmodem();
   const sentry = new Zmodem.Sentry({
     to_terminal(octets) {
       // Normal data – pass raw bytes to the caller for charset-aware decoding.
