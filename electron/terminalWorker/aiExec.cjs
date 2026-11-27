@@ -8,7 +8,12 @@ const {
   execViaChannel,
   execViaRawPty,
 } = require("../bridges/ai/ptyExec.cjs");
-const { getFreshIdlePrompt, getVisibleIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
+const {
+  getFreshIdlePrompt,
+  getVisibleIdlePrompt,
+  formatSyntheticEcho,
+  trackSessionIdlePrompt,
+} = require("../bridges/ai/shellUtils.cjs");
 const { classifyShellReadiness } = require("../bridges/ai/shellReadinessState.cjs");
 const {
   ensureSessionShellKind,
@@ -634,6 +639,26 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
       trackedShell: typeof session._promptTrackTail === "string",
       freshIdlePrompt: getFreshIdlePrompt(session) || "",
       visibleIdlePrompt: getVisibleIdlePrompt(session) || "",
+      readiness: classifyShellReadiness(session),
+    };
+  });
+  ipcMain.handle("netcatty:ai:seedIdlePrompt", (_event, payload = {}) => {
+    const session = sessions.get(payload?.sessionId);
+    if (!session) return { ok: true, found: false };
+    const context = typeof payload?.context === "string" ? payload.context : "";
+    if (context) {
+      // The renderer's visible buffer can survive a worker-side tracker reset or
+      // a paint sequence that never reached prompt tracking. Seeding is
+      // read-only: it updates the idleness cache without writing to the PTY.
+      trackSessionIdlePrompt(session, `\r\n${context}`);
+    }
+    const prompt = getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) || "";
+    return {
+      ok: true,
+      found: true,
+      ready: Boolean(prompt),
+      prompt,
+      readiness: classifyShellReadiness(session),
     };
   });
   ipcMain.handle("netcatty:ai:jobStop", createWorkerAiJobStopHandler({

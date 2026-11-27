@@ -44,9 +44,28 @@ test("worker shell readiness route reports prompt state read-only", () => {
     trackedShell: true,
     freshIdlePrompt: 'root@host:~# ',
     visibleIdlePrompt: 'root@host:~# ',
+    readiness: 'unknown',
   });
   assert.deepEqual(session.stream.writes, [], "readiness probe must never write to the PTY");
   assert.deepEqual(handler(createFakeEvent(), { sessionId: 'gone' }), { ok: true, found: false });
+});
+
+test("worker can rehydrate idle readiness from the visible terminal context", () => {
+  const session = { protocol: 'ssh', stream: new FakePty(), shellKind: 'posix', _promptTrackTail: '', lastIdlePrompt: '' };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([['ssh-1', session]]) });
+  const result = ipcMain.handlers.get('netcatty:ai:seedIdlePrompt')(createFakeEvent(), {
+    sessionId: 'ssh-1',
+    context: "Last login\r\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#",
+  });
+  assert.deepEqual(result, {
+    ok: true,
+    found: true,
+    ready: true,
+    prompt: '[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#',
+    readiness: 'unknown',
+  });
+  assert.deepEqual(session.stream.writes, [], "seeding readiness must never write to the PTY");
 });
 
 class FakePty extends EventEmitter {

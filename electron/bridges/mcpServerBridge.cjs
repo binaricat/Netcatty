@@ -1704,11 +1704,48 @@ async function queryWorkerShellReadiness(sessionId, status) {
     return {
       trackedShell: result.trackedShell === true,
       ready: Boolean(result.freshIdlePrompt || result.visibleIdlePrompt),
+      readiness: result.readiness === "busy" || result.readiness === "unknown"
+        ? result.readiness
+        : null,
     };
   } catch {
     return null;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+async function rehydrateWorkerPromptFromVisibleContext(sessionId, chatSessionId) {
+  if (!terminalWorkerManager?.request || !invokeVaultAgentFn) return false;
+  const readiness = await queryWorkerShellReadiness(sessionId, "connected");
+  if (!readiness) return false;
+  if (readiness.ready) return true;
+  if (readiness.readiness !== "unknown") return false;
+
+  const visible = await handleReadContext({
+    sessionId,
+    chatSessionId,
+    range: "tail",
+    maxLines: 120,
+  });
+  if (
+    visible?.ok !== true
+    || visible.alternateScreen === true
+    || typeof visible.content !== "string"
+    || !visible.content.trim()
+  ) {
+    return false;
+  }
+
+  try {
+    const seeded = await terminalWorkerManager.request(
+      "netcatty:ai:seedIdlePrompt",
+      { sessionId, context: visible.content },
+      {},
+    );
+    return seeded?.ok === true && seeded.ready === true;
+  } catch {
+    return false;
   }
 }
 
@@ -2077,6 +2114,9 @@ async function handleWorkerTerminalExec(params = {}, beforeExecute, options = {}
   }
 
   try {
+    if (!isNetworkDeviceLikeMeta(meta)) {
+      await rehydrateWorkerPromptFromVisibleContext(sessionId, chatSessionId);
+    }
     return await terminalWorkerManager.request("netcatty:ai:exec", {
       sessionId,
       command,
@@ -2136,6 +2176,9 @@ async function handleWorkerJobStart(params = {}, beforeExecute) {
   pendingForSession.add(pendingStart);
 
   try {
+    if (!isNetworkDeviceLikeMeta(meta)) {
+      await rehydrateWorkerPromptFromVisibleContext(sessionId, chatSessionId);
+    }
     const result = await terminalWorkerManager.request("netcatty:ai:jobStart", {
       sessionId,
       command,

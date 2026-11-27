@@ -132,6 +132,123 @@ test("MCP/Catty terminal_execute proxies to worker when terminal sessions live i
   ]);
 });
 
+test("terminal_execute rehydrates worker readiness from visible context before sending", async () => {
+  const requests = [];
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      getSessionOwnerWebContentsId: () => null,
+      request(channel, payload, options) {
+        requests.push({ channel, payload, options });
+        if (channel === "netcatty:ai:shellReadiness") {
+          return Promise.resolve({
+            ok: true,
+            found: true,
+            trackedShell: true,
+            freshIdlePrompt: "",
+            visibleIdlePrompt: "",
+            readiness: "unknown",
+          });
+        }
+        if (channel === "netcatty:ai:seedIdlePrompt") {
+          return Promise.resolve({
+            ok: true,
+            found: true,
+            ready: true,
+            prompt: "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#",
+          });
+        }
+        return Promise.resolve({ ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+      },
+    },
+  });
+  const visibleContext = "Last login\r\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#";
+  bridge.setVaultAgentInvoker(async (op, params) => {
+    assert.equal(op, "terminal.readContext");
+    assert.equal(params.sessionId, "ssh-1");
+    return { ok: true, content: visibleContext, alternateScreen: false };
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    {
+      sessionId: "ssh-1",
+      hostname: "jumpssh.riverbegin.cn",
+      protocol: "ssh",
+      connected: true,
+    },
+  ], "chat-1");
+
+  const result = await bridge.dispatchBuiltinRpc("netcatty/exec", {
+    sessionId: "ssh-1",
+    command: "pwd",
+    chatSessionId: "chat-1",
+  });
+
+  assert.deepEqual(result, { ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+  assert.deepEqual(
+    requests.map(({ channel }) => channel),
+    ["netcatty:ai:shellReadiness", "netcatty:ai:seedIdlePrompt", "netcatty:ai:exec"],
+  );
+  assert.equal(requests[1].payload.context, visibleContext);
+});
+
+test("terminal_execute does not rehydrate readiness when the worker reports busy", async () => {
+  const requests = [];
+  let contextReads = 0;
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      getSessionOwnerWebContentsId: () => null,
+      request(channel, payload, options) {
+        requests.push({ channel, payload, options });
+        if (channel === "netcatty:ai:shellReadiness") {
+          return Promise.resolve({
+            ok: true,
+            found: true,
+            trackedShell: true,
+            freshIdlePrompt: "",
+            visibleIdlePrompt: "",
+            readiness: "busy",
+          });
+        }
+        return Promise.resolve({ ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+      },
+    },
+  });
+  bridge.setVaultAgentInvoker(async () => {
+    contextReads += 1;
+    return { ok: true, content: "[root@target ~]# ", alternateScreen: false };
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    {
+      sessionId: "ssh-1",
+      hostname: "jumpssh.riverbegin.cn",
+      protocol: "ssh",
+      connected: true,
+    },
+  ], "chat-1");
+
+  const result = await bridge.dispatchBuiltinRpc("netcatty/exec", {
+    sessionId: "ssh-1",
+    command: "pwd",
+    chatSessionId: "chat-1",
+  });
+
+  assert.deepEqual(result, { ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+  assert.equal(contextReads, 0);
+  assert.deepEqual(
+    requests.map(({ channel }) => channel),
+    ["netcatty:ai:shellReadiness", "netcatty:ai:exec"],
+  );
+});
+
 test("approved worker command is rejected when its session scope disappeared while waiting", async () => {
   let approvalId = null;
   let workerRequestCount = 0;
