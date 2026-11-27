@@ -9,39 +9,46 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { TerminalLayerWorkspaceSection } from "./TerminalLayerWorkspaceSection.tsx";
 
-test("terminal pane chrome follows retained surface bounds through restore with a continuous 1px inset outline", () => {
+test("terminal pane chrome uses an inner rounded 1px border while retaining overflow clipping", () => {
   const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
-  const paneSource = source.slice(source.indexOf('data-section="terminal-split-pane"'), source.indexOf("<Terminal\n"));
+  const paneSource = source.slice(source.indexOf('data-section="terminal-split-pane"'), source.indexOf('TerminalPane.displayName'));
+  const hostSource = paneSource.slice(0, paneSource.indexOf("<LazyLoadBoundary"));
+  const strokeSource = paneSource.slice(paneSource.indexOf("{magnifiedSurfaceBounds && ("));
 
-  assert.match(paneSource, /^\s*magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl",$/m);
-  assert.match(paneSource, /outline: magnifiedSurfaceBounds\s+\? `1px solid \$\{sessionAppearanceTheme\.colors\.cursor\}`\s+: undefined/);
-  assert.match(paneSource, /outlineOffset: magnifiedSurfaceBounds \? -1 : undefined/);
-  assert.doesNotMatch(paneSource, /\bborder(?:Color|Width|Style)?\b/);
+  assert.match(hostSource, /^\s*magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl",$/m);
+  assert.match(hostSource, /style=\{style\}/);
+  assert.doesNotMatch(hostSource, /\b(?:outline|outlineOffset|border|borderColor|borderWidth|borderStyle)\b/);
+  assert.match(strokeSource, /aria-hidden="true"/);
+  assert.match(strokeSource, /data-section="pane-magnification-stroke"/);
+  assert.match(strokeSource, /className="pointer-events-none absolute inset-0 z-50"/);
+  assert.match(strokeSource, /boxSizing: 'border-box'/);
+  assert.match(strokeSource, /border: `1px solid \$\{sessionAppearanceTheme\.colors\.cursor\}`/);
+  assert.match(strokeSource, /borderRadius: 'inherit'/);
 });
 
-test("restoring terminal chrome keeps its 1px inset outline until surface bounds clear at any DPR", () => {
+test("restoring terminal chrome retains its inner 1px border until surface bounds clear at any DPR", () => {
   const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
-  const paneSource = source.slice(source.indexOf('data-section="terminal-split-pane"'), source.indexOf("<Terminal\n"));
-  const styleSource = paneSource.match(/style=\{\{([\s\S]*?)\}\}/);
+  const strokeSource = source.slice(source.indexOf("{magnifiedSurfaceBounds && ("), source.indexOf('TerminalPane.displayName'));
+  const condition = strokeSource.match(/^\{(\w+) && \(/);
+  const styleSource = strokeSource.match(/style=\{\{([\s\S]*?)\}\}/);
+  assert.ok(condition);
   assert.ok(styleSource);
-  const resolveStyle = new Function(
-    "style", "isMagnified", "magnifiedSurfaceBounds", "sessionAppearanceTheme",
-    "magnifiedDevicePixelRatio",
-    `return ({${styleSource[1]}});`,
+  const resolveStroke = new Function(
+    "isMagnified", "magnifiedSurfaceBounds", "sessionAppearanceTheme", "magnifiedDevicePixelRatio",
+    `return ${condition[1]} ? ({${styleSource[1]}}) : null;`,
   );
   const bounds = { left: 0, top: 80, width: 1200, height: 800 };
   const theme = { colors: { cursor: "#0088ff" } };
 
   for (const dpr of [1, 1.25, 1.5, 2, 3]) {
-    const magnified = resolveStyle({}, true, bounds, theme, dpr);
-    const restoring = resolveStyle({}, false, bounds, theme, dpr);
+    const magnified = resolveStroke(true, bounds, theme, dpr);
+    const restoring = resolveStroke(false, bounds, theme, dpr);
     assert.deepEqual(restoring, magnified);
-    assert.equal(restoring.outline, `1px solid ${theme.colors.cursor}`);
-    assert.equal(restoring.outlineOffset, -1);
+    assert.equal(restoring.border, `1px solid ${theme.colors.cursor}`);
+    assert.equal(restoring.boxSizing, 'border-box');
+    assert.equal(restoring.borderRadius, 'inherit');
     for (const isMagnified of [false, true]) {
-      const cleared = resolveStyle({}, isMagnified, null, theme, dpr);
-      assert.equal(cleared.outline, undefined);
-      assert.equal(cleared.outlineOffset, undefined);
+      assert.equal(resolveStroke(isMagnified, null, theme, dpr), null);
     }
   }
 });
