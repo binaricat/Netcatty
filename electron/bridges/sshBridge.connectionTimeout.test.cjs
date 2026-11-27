@@ -116,6 +116,10 @@ async function withFakeDefaultKey(run) {
   const sshDir = path.join(home, ".ssh");
   fs.mkdirSync(sshDir);
   fs.writeFileSync(
+    path.join(sshDir, "id_ed25519"),
+    "-----BEGIN OPENSSH PRIVATE KEY-----\nfake-ed25519-auto-auth\n-----END OPENSSH PRIVATE KEY-----\n",
+  );
+  fs.writeFileSync(
     path.join(sshDir, "id_rsa"),
     "-----BEGIN RSA PRIVATE KEY-----\nMIIBfake-auto-auth\n-----END RSA PRIVATE KEY-----\n",
   );
@@ -133,7 +137,7 @@ async function withFakeDefaultKey(run) {
   }
 }
 
-test("SSH start automatic mode tries local keys before its saved password", async (t) => {
+test("SSH start automatic mode tries its saved password before default local keys (#4478)", async (t) => {
   await withFakeDefaultKey(async () => {
     const { bridge, MockSSHClient } = loadBridgeWithMockedSsh2(t);
     const start = registerStartHandler(bridge, new Map());
@@ -155,11 +159,43 @@ test("SSH start automatic mode tries local keys before its saved password", asyn
     );
 
     const labels = collectAuthMethods(MockSSHClient.instances[0].connectOpts.authHandler);
-    assert.ok(labels.includes("publickey"), `expected publickey; got ${labels.join(",")}`);
-    assert.ok(labels.indexOf("publickey") < labels.indexOf("password"), labels.join(","));
-    assert.ok(labels.indexOf("publickey") < labels.indexOf("keyboard-interactive"), labels.join(","));
+    const passwordIndex = labels.indexOf("password");
+    const firstKeyIndex = labels.indexOf("publickey");
+    assert.ok(passwordIndex >= 0, `expected password; got ${labels.join(",")}`);
+    assert.ok(firstKeyIndex >= 0, `expected publickey; got ${labels.join(",")}`);
+    assert.ok(
+      labels.every((label, index) => label !== "publickey" || index > passwordIndex),
+      `password should precede all default keys; got ${labels.join(",")}`,
+    );
+    assert.ok(firstKeyIndex < labels.indexOf("keyboard-interactive"), labels.join(","));
     // Default hosts keep password before keyboard-interactive.
-    assert.ok(labels.indexOf("password") < labels.indexOf("keyboard-interactive"), labels.join(","));
+    assert.ok(passwordIndex < labels.indexOf("keyboard-interactive"), labels.join(","));
+  });
+});
+
+test("SSH start automatic mode without a saved password still tries default local keys first", async (t) => {
+  await withFakeDefaultKey(async () => {
+    const { bridge, MockSSHClient } = loadBridgeWithMockedSsh2(t);
+    const start = registerStartHandler(bridge, new Map());
+
+    await assert.rejects(
+      () => start(
+        { sender: makeSender() },
+        {
+          sessionId: "ssh-auto-auth-no-password",
+          hostname: "192.0.2.9",
+          username: "alice",
+          port: 22,
+          authMethod: "auto",
+          knownHosts: [],
+        },
+      ),
+      /Connection timeout/,
+    );
+
+    const labels = collectAuthMethods(MockSSHClient.instances[0].connectOpts.authHandler);
+    assert.equal(labels.includes("password"), false, labels.join(","));
+    assert.deepEqual(labels, ["none", "publickey", "publickey", "keyboard-interactive"]);
   });
 });
 

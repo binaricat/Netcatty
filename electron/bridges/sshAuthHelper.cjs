@@ -1658,9 +1658,11 @@ function buildAuthHandler(options) {
       asObjects: true,
     });
   } else if (isAutomatic) {
-    // Automatic normally mirrors the familiar OpenSSH-style order. With MFA
-    // enabled and no saved password, prompt before probing discovered keys so
-    // repeated key attempts cannot exhaust a server's authentication limit.
+    // Automatic normally mirrors the familiar OpenSSH-style order, except a
+    // saved password is tried before discovered default ~/.ssh keys so key
+    // probing cannot exhaust MaxAuthTries first (#4478). With MFA enabled and
+    // no saved password, prompt before probing discovered keys for the same
+    // reason.
     if (requiresMfa && !hasExplicitPassword) {
       authMethods.push({ type: "keyboard-interactive", id: "keyboard-interactive" });
     }
@@ -1675,6 +1677,12 @@ function buildAuthHandler(options) {
         id: "publickey-user"
       });
     }
+    appendPasswordAuthMethods(authMethods, {
+      hasPassword: !!password,
+      skipPasswordMethod,
+      preferKeyboardInteractive: requiresMfa && hasExplicitPassword,
+      asObjects: true,
+    });
     for (const keyInfo of fallbackKeys) {
       authMethods.push({
         type: "publickey",
@@ -1682,12 +1690,6 @@ function buildAuthHandler(options) {
         id: `publickey-default-${keyInfo.keyName}`
       });
     }
-    appendPasswordAuthMethods(authMethods, {
-      hasPassword: !!password,
-      skipPasswordMethod,
-      preferKeyboardInteractive: requiresMfa && hasExplicitPassword,
-      asObjects: true,
-    });
   } else if (isKeyOnly) {
     // Key-only: user key first, then password (if any), then agent/default keys as fallback
 

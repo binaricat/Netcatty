@@ -101,7 +101,7 @@ test("buildAuthHandler password-only still fires onAuthAttempt for jump/SFTP pro
   );
 });
 
-test("buildAuthHandler automatic mode tries agent and default keys before password", () => {
+test("buildAuthHandler automatic mode tries agent before password and password before default keys (#4478)", () => {
   const auth = buildAuthHandler({
     authMethod: "auto",
     password: "saved-secret",
@@ -118,11 +118,96 @@ test("buildAuthHandler automatic mode tries agent and default keys before passwo
   assert.ok(keyIndex >= 0, `expected publickey; got ${labels.join(",")}`);
   assert.ok(passwordIndex >= 0, `expected password; got ${labels.join(",")}`);
   assert.ok(agentIndex < passwordIndex, `agent should precede password; got ${labels.join(",")}`);
-  assert.ok(keyIndex < passwordIndex, `default key should precede password; got ${labels.join(",")}`);
+  assert.ok(passwordIndex < keyIndex, `password should precede default keys; got ${labels.join(",")}`);
   assert.ok(
-    labels.every((label, index) => label !== "publickey" || index < passwordIndex),
-    `all default keys should precede password; got ${labels.join(",")}`,
+    labels.every((label, index) => label !== "publickey" || index > passwordIndex),
+    `password should precede all default keys; got ${labels.join(",")}`,
   );
+});
+
+test("buildAuthHandler automatic mode with saved password and no agent tries password before all default keys (#4478)", () => {
+  const manyDefaultKeys = [
+    ...DEFAULT_KEYS,
+    { keyName: "id_ecdsa", keyPath: "/tmp/id_ecdsa", privateKey: "-----BEGIN EC PRIVATE KEY-----\nec\n-----END EC PRIVATE KEY-----\n" },
+    { keyName: "id_work_1", keyPath: "/tmp/id_work_1", privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nw1\n-----END OPENSSH PRIVATE KEY-----\n" },
+    { keyName: "id_work_2", keyPath: "/tmp/id_work_2", privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nw2\n-----END OPENSSH PRIVATE KEY-----\n" },
+    { keyName: "id_work_3", keyPath: "/tmp/id_work_3", privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nw3\n-----END OPENSSH PRIVATE KEY-----\n" },
+  ];
+  const attempts = [];
+  const auth = buildAuthHandler({
+    authMethod: "auto",
+    password: "saved-secret",
+    username: "root",
+    defaultKeys: manyDefaultKeys,
+    unlockedEncryptedKeys: [{
+      keyName: "id_encrypted",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nenc\n-----END OPENSSH PRIVATE KEY-----\n",
+      passphrase: "key-pass",
+    }],
+    allowAgentFallback: false,
+    onAuthAttempt: (label) => attempts.push(label),
+  });
+
+  const labels = collectAuthMethods(auth.authHandler, 24);
+  const passwordIndex = labels.indexOf("password");
+  assert.equal(labels.includes("agent"), false, labels.join(","));
+  assert.ok(passwordIndex >= 0, `expected password; got ${labels.join(",")}`);
+  assert.equal(
+    labels.filter((label) => label === "publickey").length,
+    manyDefaultKeys.length + 1,
+    `expected all default and unlocked keys after password; got ${labels.join(",")}`,
+  );
+  assert.ok(
+    labels.every((label, index) => label !== "publickey" || index > passwordIndex),
+    `password should appear before every default/unlocked publickey; got ${labels.join(",")}`,
+  );
+  const passwordAttemptIndex = attempts.indexOf("password");
+  const firstDefaultKeyAttemptIndex = attempts.findIndex((label) => label.startsWith("key id_"));
+  assert.ok(passwordAttemptIndex >= 0 && firstDefaultKeyAttemptIndex > passwordAttemptIndex, attempts.join(" | "));
+});
+
+test("buildAuthHandler automatic mode keeps user key before password and MFA KI before password and default keys", () => {
+  const attempts = [];
+  const auth = buildAuthHandler({
+    authMethod: "auto",
+    privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nuser\n-----END OPENSSH PRIVATE KEY-----\n",
+    password: "saved-secret",
+    requiresMfa: true,
+    username: "root",
+    defaultKeys: DEFAULT_KEYS,
+    sshAgentSocketOverride: "/tmp/ssh-agent.sock",
+    onAuthAttempt: (label) => attempts.push(label),
+  });
+
+  const labels = collectAuthMethods(auth.authHandler);
+  assert.deepEqual(labels, [
+    "none",
+    "agent",
+    "publickey",
+    "keyboard-interactive",
+    "password",
+    "publickey",
+    "publickey",
+  ]);
+  assert.ok(
+    attempts.indexOf("configured key") < attempts.indexOf("keyboard-interactive")
+      && attempts.indexOf("keyboard-interactive") < attempts.indexOf("password")
+      && attempts.indexOf("password") < attempts.indexOf("key id_ed25519"),
+    attempts.join(" | "),
+  );
+});
+
+test("buildAuthHandler automatic mode without a saved password keeps default keys first", () => {
+  const auth = buildAuthHandler({
+    authMethod: "auto",
+    username: "root",
+    defaultKeys: DEFAULT_KEYS,
+    allowAgentFallback: false,
+  });
+
+  const labels = collectAuthMethods(auth.authHandler);
+  assert.equal(labels.includes("password"), false, labels.join(","));
+  assert.deepEqual(labels, ["none", "publickey", "publickey", "keyboard-interactive"]);
 });
 
 test("buildAuthHandler automatic mode skips an unavailable validated agent", () => {
