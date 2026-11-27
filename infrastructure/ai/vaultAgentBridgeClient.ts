@@ -1821,7 +1821,5 @@ export function setupVaultAgentBridge(): () => void {
     return () => {};
   }
 
-  return bridge.onVaultAgentRequest((payload) => {
-    void dispatchVaultAgentBridgeRequest(payload);
-  });
+  return bridge.onVaultAgentRequest((payload) => dispatchVaultAgentBridgeRequest(payload));
 }

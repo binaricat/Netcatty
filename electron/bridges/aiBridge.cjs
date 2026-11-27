@@ -1065,10 +1065,18 @@ function cleanup() {
     registeredContext.sdkActiveStreams.clear();
   }
   try {
-    registeredContext?.closeCodexAppServerRuntimeIfLoaded?.();
+    if (typeof registeredContext?.closeCodexAppServerRuntimeIfLoaded === "function") {
+      registeredContext.closeCodexAppServerRuntimeIfLoaded();
+    } else {
+      registeredContext?.codexAppServerRuntime?.close?.();
+    }
   } catch {}
   try {
-    registeredContext?.closeCodebuddySessionsIfLoaded?.();
+    if (typeof registeredContext?.closeCodebuddySessionsIfLoaded === "function") {
+      registeredContext.closeCodebuddySessionsIfLoaded();
+    } else {
+      registeredContext?.codebuddySessionManager?.closeAll?.();
+    }
   } catch {}
 
   for (const [id, session] of codexLoginSessions) {

@@ -21,6 +21,9 @@ function getSshClientCtor() {
   }
   return _ssh2ClientCtor;
 }
+if (!process.versions?.electron) {
+  getSshClientCtor();
+}
 let _netcattyAgentCtor = null;
 function getNetcattyAgentCtor() {
   if (!_netcattyAgentCtor) ({ NetcattyAgent: _netcattyAgentCtor } = require("./netcattyAgent.cjs"));

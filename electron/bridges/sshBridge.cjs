@@ -18,6 +18,9 @@ function getSsh2() {
   }
   return _ssh2;
 }
+if (!process.versions?.electron) {
+  getSsh2();
+}
 let _netcattyAgentCtor = null;
 function getNetcattyAgentCtor() {
   if (!_netcattyAgentCtor) ({ NetcattyAgent: _netcattyAgentCtor } = require("./netcattyAgent.cjs"));

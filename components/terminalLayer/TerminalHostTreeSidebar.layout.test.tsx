@@ -345,28 +345,30 @@ test('AppHostTreeLayer does not re-render closed TerminalHostTreeSidebar when sw
       env.drainFrames();
     });
 
-    const sidebar = document.querySelector('[data-section="terminal-host-tree-sidebar"]') as HTMLElement;
-    assert.ok(sidebar);
-    const initialBg = sidebar.style.backgroundColor;
+    assert.equal(document.querySelector('[data-section="terminal-host-tree-sidebar"]'), null);
 
-    // Switching s1 -> s2 while host tree is closed keeps sidebar preview theme frozen
-    // and avoids activeHostId churn (memo bails out).
+    // Switching s1 -> s2 while host tree is closed keeps sidebar unmounted
+    // and avoids activeHostId/theme churn.
     await act(async () => {
       activeTabStore.setActiveTabId('s2');
     });
     await act(async () => {
       env.drainFrames();
     });
-    assert.equal(sidebar.style.backgroundColor, initialBg);
+    assert.equal(document.querySelector('[data-section="terminal-host-tree-sidebar"]'), null);
 
-    // Opening the host tree immediately applies the live host theme (theme-b).
+    // Opening the host tree lazily mounts the sidebar directly with the live host theme (theme-b).
     await act(async () => {
       terminalHostTreeStore.setIsOpen(true);
+      await import('./TerminalHostTreeSidebar');
     });
     await act(async () => {
       env.drainFrames();
     });
-    assert.notEqual(sidebar.style.backgroundColor, initialBg);
+    const sidebar = document.querySelector('[data-section="terminal-host-tree-sidebar"]') as HTMLElement;
+    assert.ok(sidebar);
+    assert.notEqual(sidebar.style.backgroundColor, 'rgb(16, 16, 16)');
+    assert.equal(sidebar.style.backgroundColor, 'rgb(32, 32, 32)');
   } finally {
     await act(async () => {
       root.unmount();
