@@ -788,7 +788,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         viewportY?: number;
       };
       const totalLines = Math.max(0, activeBuffer.length);
-      const cursorTail = readCursorLogicalTailForReadiness(term);
+      const includeReadinessContext = request.includeReadinessContext === true;
+      const cursorTail = includeReadinessContext
+        ? readCursorLogicalTailForReadiness(term)
+        : null;
       const viewportStartLine = alternateScreen
         ? 0
         : Math.max(0, activeBuffer.viewportY ?? Math.max(0, totalLines - term.rows));
@@ -827,9 +830,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         hasMoreAfter: lineWindow.endLine >= 0 && lineWindow.endLine < totalLines - 1,
         source: 'live',
         alternateScreen,
-        ...(cursorTail.cursorLine !== undefined ? { cursorLine: cursorTail.cursorLine } : {}),
-        cursorAtLineEnd: cursorTail.cursorAtLineEnd,
-        readinessContext: alternateScreen ? '' : cursorTail.text,
+        ...(cursorTail
+          ? {
+            ...(cursorTail.cursorLine !== undefined ? { cursorLine: cursorTail.cursorLine } : {}),
+            cursorAtLineEnd: cursorTail.cursorAtLineEnd,
+            readinessContext: alternateScreen ? '' : cursorTail.text,
+          }
+          : {}),
       };
     }
 

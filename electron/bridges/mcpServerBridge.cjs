@@ -1797,9 +1797,6 @@ function extractCursorBoundedContextForSeed(visible) {
     }
   }
   const boundedLines = lines.slice(0, relativeCursor + 1);
-  if (typeof visible.cursorLineText === "string") {
-    boundedLines[relativeCursor] = visible.cursorLineText;
-  }
   return boundedLines.join("\n");
 }
 
@@ -1875,7 +1872,7 @@ async function rehydrateWorkerPromptFromVisibleContext({
     scopedSessionIds,
     range: "tail",
     maxLines: 120,
-  }));
+  }, { includeReadinessContext: true }));
   const afterReadAbort = checkPreflightAbort();
   if (afterReadAbort) return afterReadAbort;
   if (visible?.ok !== true || visible.alternateScreen === true) {
@@ -2614,7 +2611,7 @@ async function cancelWorkerBackgroundJobsForTerminalSession(sessionId) {
 }
 
 // Read via the existing renderer bridge and the sidebar's bounded reader.
-async function handleReadContext(params = {}) {
+async function handleReadContext(params = {}, options = {}) {
   const scopedIds = resolveScopedSessionIds(params.chatSessionId, params.scopedSessionIds);
   const sessionId = typeof params.sessionId === "string" && params.sessionId.trim()
     ? params.sessionId.trim()
@@ -2637,11 +2634,13 @@ async function handleReadContext(params = {}) {
   if (ownerId != null && (!owner || owner.isDestroyed?.())) {
     return { ok: false, error: "Terminal window is unavailable." };
   }
+  const includeReadinessContext = options?.includeReadinessContext === true;
   const result = await invokeVaultAgentFn("terminal.readContext", {
     sessionId,
     range: params.range,
     startLine: params.startLine,
     maxLines: params.maxLines,
+    ...(includeReadinessContext ? { includeReadinessContext: true } : {}),
   }, { webContents: owner });
   // Scope can change while the renderer drains pending terminal output.
   const currentScopeError = validateSessionScope(sessionId, params.chatSessionId, params.scopedSessionIds);

@@ -58,6 +58,32 @@ export interface CursorLogicalTailResult {
   hasContentBelowCursor: boolean;
 }
 
+function readWrappedSegmentText(
+  buffer: Pick<IBuffer, "getLine">,
+  row: number,
+  cols: number,
+): string {
+  const segment = buffer.getLine(row);
+  if (!segment) return "";
+  const lineLength = typeof segment.length === "number"
+    ? Math.min(cols, Math.max(0, segment.length))
+    : cols;
+  const text = segment.translateToString(false, 0, lineLength);
+  if (lineLength <= 0 || typeof segment.getCell !== "function") return text;
+  // When a double-width glyph does not fit at the last column of a wrapped row,
+  // xterm leaves a single structural null cell (code 0, width !== 0) at
+  // `lineLength - 1` and places the wide glyph at column 0 of `row + 1`.
+  // Strip only that structural padding cell so real spaces (code 32) and the
+  // trailing half of a wide glyph (width 0) are preserved intact.
+  const nextFirstCell = buffer.getLine(row + 1)?.getCell?.(0);
+  if (!nextFirstCell || nextFirstCell.getWidth?.() !== 2) return text;
+  const lastCell = segment.getCell(lineLength - 1);
+  if (lastCell && lastCell.getCode() === 0 && lastCell.getWidth?.() !== 0) {
+    return text.slice(0, -1);
+  }
+  return text;
+}
+
 /**
  * Reconstruct logical lines ending at the active xterm cursor for read-only
  * shell readiness seeding. Joins soft-wrapped physical rows (`isWrapped`) with
@@ -136,7 +162,7 @@ export function readCursorLogicalTailForReadiness(
       if (r === cursorLine) {
         combined += segment.translateToString(false, 0, cursorColumn);
       } else if (r < row) {
-        combined += segment.translateToString(false, 0, cols);
+        combined += readWrappedSegmentText(buffer, r, cols);
       } else {
         combined += segment.translateToString(true, 0, cols);
       }

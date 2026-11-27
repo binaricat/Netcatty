@@ -10,6 +10,8 @@ export interface TerminalContextReadRequest {
   range?: TerminalContextReadRange;
   startLine?: number;
   maxLines?: number;
+  /** Internal opt-in used only by readiness preflight; never exposed to model tools. */
+  includeReadinessContext?: boolean;
 }
 
 export interface TerminalContextLineWindowInput {
@@ -42,7 +44,6 @@ export interface TerminalContextReadResult {
   source: TerminalContextReadSource;
   alternateScreen?: boolean;
   cursorLine?: number;
-  cursorLineText?: string;
   cursorAtLineEnd?: boolean;
   readinessContext?: string;
 }

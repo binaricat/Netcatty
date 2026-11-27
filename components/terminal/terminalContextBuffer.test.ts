@@ -81,8 +81,10 @@ test("screen export reads only the alternate screen while fullscreen apps are ac
     "vim\ntext\n");
 });
 
+type MockCell = { code: number; width: number };
+
 function createCursorTerm(
-  rows: Array<{ text: string; isWrapped?: boolean }>,
+  rows: Array<{ text: string; isWrapped?: boolean; length?: number; cells?: MockCell[] }>,
   { cols = 80, baseY = 0, cursorY = 0, cursorX = 0 }: { cols?: number; baseY?: number; cursorY?: number; cursorX?: number },
 ) {
   return {
@@ -97,7 +99,20 @@ function createCursorTerm(
           const row = rows[index];
           if (!row) return undefined;
           return {
+            length: row.length ?? row.cells?.length ?? cols,
             isWrapped: row.isWrapped === true,
+            ...(row.cells
+              ? {
+                getCell(col: number) {
+                  const cell = row.cells?.[col];
+                  if (!cell) return undefined;
+                  return {
+                    getCode: () => cell.code,
+                    getWidth: () => cell.width,
+                  };
+                },
+              }
+              : {}),
             translateToString(trimRight?: boolean, startColumn = 0, endColumn?: number) {
               const sliced = row.text.slice(startColumn, endColumn);
               return trimRight ? sliced.trimEnd() : sliced;
@@ -182,4 +197,99 @@ test("readCursorLogicalTailForReadiness fails closed on mid-line edits, text bel
     { cols: 80, baseY: 0, cursorY: 0, cursorX: 13 },
   );
   assert.equal(readCursorLogicalTailForReadiness(wrappedBelow as never).text, "");
+});
+
+function cellsForAscii(text: string, trailingCell?: MockCell): MockCell[] {
+  const cells = Array.from(text, (ch) => ({ code: ch.charCodeAt(0), width: 1 }));
+  if (trailingCell) cells.push(trailingCell);
+  return cells;
+}
+
+test("readCursorLogicalTailForReadiness strips wide-character wrap padding without dropping real spaces or wide glyphs", () => {
+  const wideCharA = "\u4e2d";
+  const wideCharB = "\u6587";
+
+  // Structural null padding cell (code 0, width 1) before a double-width glyph on the next wrapped row.
+  const paddedWideWrap = createCursorTerm(
+    [
+      {
+        text: "user@host:~abc ",
+        isWrapped: false,
+        length: 15,
+        cells: cellsForAscii("user@host:~abc", { code: 0, width: 1 }),
+      },
+      {
+        text: `${wideCharA}$ `,
+        isWrapped: true,
+        length: 15,
+        cells: [{ code: 0x4e2d, width: 2 }, { code: 0, width: 0 }, { code: 36, width: 1 }, { code: 32, width: 1 }],
+      },
+    ],
+    { cols: 15, baseY: 0, cursorY: 1, cursorX: 4 },
+  );
+  assert.equal(readCursorLogicalTailForReadiness(paddedWideWrap as never).text, `user@host:~abc${wideCharA}$ `);
+
+  // Real typed trailing space (code 32, width 1) before a double-width glyph must be preserved.
+  const realSpaceBeforeWide = createCursorTerm(
+    [
+      {
+        text: "user@host:~ab  ",
+        isWrapped: false,
+        length: 15,
+        cells: cellsForAscii("user@host:~ab ", { code: 32, width: 1 }),
+      },
+      {
+        text: `${wideCharA}$ `,
+        isWrapped: true,
+        length: 15,
+        cells: [{ code: 0x4e2d, width: 2 }, { code: 0, width: 0 }, { code: 36, width: 1 }, { code: 32, width: 1 }],
+      },
+    ],
+    { cols: 15, baseY: 0, cursorY: 1, cursorX: 4 },
+  );
+  assert.equal(readCursorLogicalTailForReadiness(realSpaceBeforeWide as never).text, `user@host:~ab  ${wideCharA}$ `);
+
+  // Trailing width-0 continuation cell of a wide glyph at the end of the row must NOT be sliced off.
+  const wideGlyphAtRowEnd = createCursorTerm(
+    [
+      {
+        text: `user@host:~a${wideCharA}`,
+        isWrapped: false,
+        length: 14,
+        cells: [
+          ...cellsForAscii("user@host:~a"),
+          { code: 0x4e2d, width: 2 },
+          { code: 0, width: 0 },
+        ],
+      },
+      {
+        text: `${wideCharB}$ `,
+        isWrapped: true,
+        length: 14,
+        cells: [{ code: 0x6587, width: 2 }, { code: 0, width: 0 }, { code: 36, width: 1 }, { code: 32, width: 1 }],
+      },
+    ],
+    { cols: 14, baseY: 0, cursorY: 1, cursorX: 4 },
+  );
+  assert.equal(readCursorLogicalTailForReadiness(wideGlyphAtRowEnd as never).text, `user@host:~a${wideCharA}${wideCharB}$ `);
+
+  // Null cell ahead of a normal-width continuation is NOT wide-char wrap padding and stays intact.
+  const nullBeforeNarrow = createCursorTerm(
+    [
+      {
+        text: "user@host:~abc ",
+        isWrapped: false,
+        length: 15,
+        cells: cellsForAscii("user@host:~abc", { code: 0, width: 1 }),
+      },
+      {
+        text: "Z$ ",
+        isWrapped: true,
+        length: 15,
+        cells: cellsForAscii("Z$ "),
+      },
+    ],
+    { cols: 15, baseY: 0, cursorY: 1, cursorX: 3 },
+  );
+  assert.equal(readCursorLogicalTailForReadiness(nullBeforeNarrow as never).text, "user@host:~abc Z$ ");
 });

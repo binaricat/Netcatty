@@ -378,6 +378,7 @@ test("readiness rehydration runs ordered drain barrier and bounds live buffer to
   });
   bridge.setVaultAgentInvoker(async (op, params) => {
     events.push(`renderer:${op}:${params.sessionId}`);
+    assert.equal(params.includeReadinessContext, true);
     // Simulate a 24-row viewport where the single-line prompt sits on row 1
     // above 22 blank physical viewport rows.
     const blankRows = Array.from({ length: 22 }, () => "").join("\n");
@@ -387,8 +388,8 @@ test("readiness rehydration runs ordered drain barrier and bounds live buffer to
       startLine: 0,
       endLine: 23,
       cursorLine: 1,
-      cursorLineText: "[root@target ~]# ",
       cursorAtLineEnd: true,
+      readinessContext: "Last login\n[root@target ~]# ",
       alternateScreen: false,
     };
   });

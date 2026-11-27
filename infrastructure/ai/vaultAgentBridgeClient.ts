@@ -1739,6 +1739,7 @@ async function handleTerminalContextRead(params: Record<string, unknown>): Promi
     range: normalizeTerminalContextRange(params.range),
     startLine: typeof params.startLine === 'number' ? params.startLine : undefined,
     maxLines: typeof params.maxLines === 'number' ? params.maxLines : undefined,
+    ...(params.includeReadinessContext === true ? { includeReadinessContext: true } : {}),
   }) };
 }
 
