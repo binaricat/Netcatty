@@ -783,8 +783,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const alternateScreen = isTerminalAlternateScreenActive(term);
       const activeBuffer = term.buffer.active as typeof term.buffer.active & {
         viewportY?: number;
+        baseY?: number;
+        cursorY?: number;
       };
       const totalLines = Math.max(0, activeBuffer.length);
+      const cursorLine = totalLines > 0
+        && typeof activeBuffer.baseY === 'number'
+        && typeof activeBuffer.cursorY === 'number'
+        ? Math.min(totalLines - 1, Math.max(0, activeBuffer.baseY + activeBuffer.cursorY))
+        : undefined;
       const viewportStartLine = alternateScreen
         ? 0
         : Math.max(0, activeBuffer.viewportY ?? Math.max(0, totalLines - term.rows));
@@ -823,6 +830,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         hasMoreAfter: lineWindow.endLine >= 0 && lineWindow.endLine < totalLines - 1,
         source: 'live',
         alternateScreen,
+        ...(cursorLine !== undefined ? { cursorLine } : {}),
       };
     }
 

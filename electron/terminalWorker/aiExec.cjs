@@ -631,6 +631,18 @@ function createWorkerAiJobStopHandler({ backgroundJobs = new Map() }) {
   };
 }
 
+function getSessionOutputDeliveryState(session) {
+  const flowState = session?.flowState;
+  const bufferedBytes = Number.isFinite(flowState?.bufferedBytes)
+    ? Math.max(0, flowState.bufferedBytes)
+    : 0;
+  const unackedBytes = Number.isFinite(flowState?.unackedBytes)
+    ? Math.max(0, flowState.unackedBytes)
+    : 0;
+  const outputPaused = Boolean(flowState?.outputPaused || flowState?.rendererPaused);
+  return { bufferedBytes, unackedBytes, outputPaused };
+}
+
 function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
   const activePtyExecs = new Map();
   const backgroundJobs = new Map();
@@ -659,6 +671,7 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
     const session = sessions.get(sessionId);
     if (!session) return { ok: true, found: false };
     const taskInFlight = activeSessionJobs.has(sessionId) || (activeExecCounts.get(sessionId) || 0) > 0;
+    const { bufferedBytes, unackedBytes, outputPaused } = getSessionOutputDeliveryState(session);
     return {
       ok: true,
       found: true,
@@ -667,6 +680,9 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
       visibleIdlePrompt: getVisibleIdlePrompt(session) || "",
       readiness: classifyShellReadiness(session, { taskInFlight }),
       generation: getSessionReadinessGeneration(session),
+      bufferedBytes,
+      unackedBytes,
+      outputPaused,
     };
   });
   ipcMain.handle("netcatty:ai:seedIdlePrompt", (_event, payload = {}) => {
@@ -677,8 +693,16 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
     const currentPrompt = getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) || "";
     const currentReadiness = classifyShellReadiness(session, { taskInFlight });
     const currentGeneration = getSessionReadinessGeneration(session);
+    const { bufferedBytes, unackedBytes, outputPaused } = getSessionOutputDeliveryState(session);
+    const outputDrained = payload?.outputDrained === true;
     const expectedGeneration = payload?.expectedGeneration;
-    if (!Number.isFinite(expectedGeneration) || expectedGeneration !== currentGeneration) {
+    if (
+      !Number.isFinite(expectedGeneration)
+      || expectedGeneration !== currentGeneration
+      || outputPaused
+      || bufferedBytes > 0
+      || (!outputDrained && unackedBytes > 0)
+    ) {
       return {
         ok: true,
         found: true,

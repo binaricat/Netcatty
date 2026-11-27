@@ -332,6 +332,238 @@ test("worker exec and jobStart honor stop received while readiness rehydration i
   }
 });
 
+test("readiness rehydration runs ordered drain barrier and bounds live buffer to cursorLine", async () => {
+  const events = [];
+  const requests = [];
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    drainTerminalOutput: async (sessionId) => {
+      events.push(`drain:${sessionId}`);
+      return { success: true };
+    },
+    terminalWorkerManager: {
+      getSessionOwnerWebContentsId: () => null,
+      drainOutputSession: () => true,
+      request(channel, payload, options) {
+        events.push(`worker:${channel}`);
+        requests.push({ channel, payload, options });
+        if (channel === "netcatty:ai:shellReadiness") {
+          return Promise.resolve({
+            ok: true,
+            found: true,
+            trackedShell: true,
+            freshIdlePrompt: "",
+            visibleIdlePrompt: "",
+            readiness: "unknown",
+            generation: 19,
+            bufferedBytes: 12,
+            unackedBytes: 40,
+            outputPaused: false,
+          });
+        }
+        if (channel === "netcatty:ai:seedIdlePrompt") {
+          return Promise.resolve({
+            ok: true,
+            found: true,
+            ready: true,
+            prompt: "[root@target ~]#",
+            generation: 20,
+          });
+        }
+        return Promise.resolve({ ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+      },
+    },
+  });
+  bridge.setVaultAgentInvoker(async (op, params) => {
+    events.push(`renderer:${op}:${params.sessionId}`);
+    // Simulate a 24-row viewport where the single-line prompt sits on row 1
+    // above 22 blank physical viewport rows.
+    const blankRows = Array.from({ length: 22 }, () => "").join("\n");
+    return {
+      ok: true,
+      content: `Last login\n[root@target ~]#\n${blankRows}`,
+      startLine: 0,
+      endLine: 23,
+      cursorLine: 1,
+      alternateScreen: false,
+    };
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    { sessionId: "ssh-1", hostname: "jump.example.com", protocol: "ssh", connected: true },
+  ], "chat-drain");
+
+  const result = await bridge.dispatchBuiltinRpc("netcatty/exec", {
+    sessionId: "ssh-1",
+    command: "pwd",
+    chatSessionId: "chat-drain",
+  });
+
+  assert.deepEqual(result, { ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+  assert.deepEqual(events, [
+    "worker:netcatty:ai:shellReadiness",
+    "drain:ssh-1",
+    "renderer:terminal.readContext:ssh-1",
+    "worker:netcatty:ai:seedIdlePrompt",
+    "worker:netcatty:ai:exec",
+  ]);
+  assert.equal(requests[1].payload.context, "Last login\n[root@target ~]#");
+  assert.equal(requests[1].payload.expectedGeneration, 19);
+  assert.equal(requests[1].payload.outputDrained, true);
+});
+
+test("readiness rehydration fails closed when output drain fails or primary screen has text below cursor", async () => {
+  // Case 1: drain barrier fails -> never reads renderer context or seeds.
+  {
+    const requests = [];
+    let reads = 0;
+    const bridge = loadFreshBridge();
+    bridge.init({
+      sessions: new Map(),
+      electronModule: null,
+      drainTerminalOutput: async () => ({ success: false, error: "timeout" }),
+      terminalWorkerManager: {
+        getSessionOwnerWebContentsId: () => null,
+        drainOutputSession: () => true,
+        request(channel, payload) {
+          requests.push({ channel, payload });
+          if (channel === "netcatty:ai:shellReadiness") {
+            return Promise.resolve({
+              ok: true,
+              found: true,
+              trackedShell: true,
+              freshIdlePrompt: "",
+              visibleIdlePrompt: "",
+              readiness: "unknown",
+              generation: 4,
+              bufferedBytes: 5,
+              unackedBytes: 0,
+              outputPaused: false,
+            });
+          }
+          return Promise.resolve({ ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+        },
+      },
+    });
+    bridge.setVaultAgentInvoker(async () => {
+      reads += 1;
+      return { ok: true, content: "[root@target ~]#", alternateScreen: false };
+    });
+    bridge.setPermissionMode("auto");
+    bridge.setCommandBlocklist([]);
+    bridge.updateSessionMetadata([{ sessionId: "ssh-1", protocol: "ssh", connected: true }], "chat-1");
+
+    await bridge.dispatchBuiltinRpc("netcatty/exec", {
+      sessionId: "ssh-1",
+      command: "pwd",
+      chatSessionId: "chat-1",
+    });
+    assert.equal(reads, 0);
+    assert.deepEqual(requests.map((r) => r.channel), ["netcatty:ai:shellReadiness", "netcatty:ai:exec"]);
+  }
+
+  // Case 2: non-empty content exists below cursorLine (e.g. primary-screen menu/TUI) -> never seeds.
+  {
+    const requests = [];
+    const bridge = loadFreshBridge();
+    bridge.init({
+      sessions: new Map(),
+      electronModule: null,
+      drainTerminalOutput: async () => ({ success: true }),
+      terminalWorkerManager: {
+        getSessionOwnerWebContentsId: () => null,
+        drainOutputSession: () => true,
+        request(channel, payload) {
+          requests.push({ channel, payload });
+          if (channel === "netcatty:ai:shellReadiness") {
+            return Promise.resolve({
+              ok: true,
+              found: true,
+              trackedShell: true,
+              freshIdlePrompt: "",
+              visibleIdlePrompt: "",
+              readiness: "unknown",
+              generation: 5,
+              bufferedBytes: 0,
+              unackedBytes: 0,
+              outputPaused: false,
+            });
+          }
+          return Promise.resolve({ ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+        },
+      },
+    });
+    bridge.setVaultAgentInvoker(async () => ({
+      ok: true,
+      content: "[root@target ~]#\nMenu item below cursor\n",
+      startLine: 0,
+      endLine: 2,
+      cursorLine: 0,
+      alternateScreen: false,
+    }));
+    bridge.setPermissionMode("auto");
+    bridge.setCommandBlocklist([]);
+    bridge.updateSessionMetadata([{ sessionId: "ssh-1", protocol: "ssh", connected: true }], "chat-2");
+
+    await bridge.dispatchBuiltinRpc("netcatty/exec", {
+      sessionId: "ssh-1",
+      command: "pwd",
+      chatSessionId: "chat-2",
+    });
+    assert.deepEqual(requests.map((r) => r.channel), ["netcatty:ai:shellReadiness", "netcatty:ai:exec"]);
+  }
+
+  // Case 3: no drain barrier available while worker still has buffered/unacked bytes -> never reads or seeds.
+  {
+    const requests = [];
+    let reads = 0;
+    const bridge = loadFreshBridge();
+    bridge.init({
+      sessions: new Map(),
+      electronModule: null,
+      terminalWorkerManager: {
+        getSessionOwnerWebContentsId: () => null,
+        request(channel, payload) {
+          requests.push({ channel, payload });
+          if (channel === "netcatty:ai:shellReadiness") {
+            return Promise.resolve({
+              ok: true,
+              found: true,
+              trackedShell: true,
+              freshIdlePrompt: "",
+              visibleIdlePrompt: "",
+              readiness: "unknown",
+              generation: 6,
+              bufferedBytes: 0,
+              unackedBytes: 8,
+              outputPaused: false,
+            });
+          }
+          return Promise.resolve({ ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+        },
+      },
+    });
+    bridge.setVaultAgentInvoker(async () => {
+      reads += 1;
+      return { ok: true, content: "[root@target ~]#", alternateScreen: false };
+    });
+    bridge.setPermissionMode("auto");
+    bridge.setCommandBlocklist([]);
+    bridge.updateSessionMetadata([{ sessionId: "ssh-1", protocol: "ssh", connected: true }], "chat-3");
+
+    await bridge.dispatchBuiltinRpc("netcatty/exec", {
+      sessionId: "ssh-1",
+      command: "pwd",
+      chatSessionId: "chat-3",
+    });
+    assert.equal(reads, 0);
+    assert.deepEqual(requests.map((r) => r.channel), ["netcatty:ai:shellReadiness", "netcatty:ai:exec"]);
+  }
+});
+
 test("terminal_execute does not rehydrate readiness when the worker reports busy", async () => {
   const requests = [];
   let contextReads = 0;

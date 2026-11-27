@@ -3096,6 +3096,7 @@ module.exports = {
   resizeSession,
   clearSessionPtyBuffer,
   setSessionFlowPaused,
+  requestTerminalOutputDrain,
   ackSessionFlow,
   closeSession,
   interruptSession,

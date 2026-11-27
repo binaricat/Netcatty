@@ -504,10 +504,14 @@ const {
 } = backgroundJobApi;
 
 let disposeWorkerSessionClosed = null;
+let drainTerminalOutputFn = null;
 
 function init(deps) {
   sessions = deps.sessions;
   terminalWorkerManager = deps.terminalWorkerManager || null;
+  drainTerminalOutputFn = typeof deps.drainTerminalOutput === "function"
+    ? deps.drainTerminalOutput
+    : null;
   fileTransferBridge = deps.transferBridge || null;
   electronModule = deps.electronModule || null;
   cliDiscoveryFilePathOverride = deps.cliDiscoveryFilePath || null;
@@ -1739,12 +1743,48 @@ async function queryWorkerShellReadiness(sessionId, status) {
         ? result.readiness
         : null,
       generation: Number.isFinite(result.generation) ? result.generation : null,
+      bufferedBytes: Number.isFinite(result.bufferedBytes) ? Math.max(0, result.bufferedBytes) : 0,
+      unackedBytes: Number.isFinite(result.unackedBytes) ? Math.max(0, result.unackedBytes) : 0,
+      outputPaused: result.outputPaused === true,
     };
   } catch {
     return null;
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+function extractCursorBoundedContextForSeed(visible) {
+  if (typeof visible?.content !== "string") return "";
+  const content = visible.content;
+  if (!content.trim()) return "";
+  const cursorLine = visible.cursorLine;
+  const startLine = visible.startLine;
+  const endLine = visible.endLine;
+  if (
+    !Number.isInteger(cursorLine)
+    || !Number.isInteger(startLine)
+    || !Number.isInteger(endLine)
+  ) {
+    return content;
+  }
+  if (cursorLine < startLine || cursorLine > endLine) {
+    return "";
+  }
+  const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const relativeCursor = cursorLine - startLine;
+  if (relativeCursor < 0 || relativeCursor >= lines.length) {
+    return "";
+  }
+  // Only drop unused physical viewport rows below the cursor when they are
+  // blank. Non-empty text below the cursor indicates a primary-screen TUI or
+  // menu rather than an idle shell prompt at the cursor.
+  for (let i = relativeCursor + 1; i < lines.length; i += 1) {
+    if (lines[i].trim().length > 0) {
+      return "";
+    }
+  }
+  return lines.slice(0, relativeCursor + 1).join("\n");
 }
 
 async function rehydrateWorkerPromptFromVisibleContext({
@@ -1787,7 +1827,29 @@ async function rehydrateWorkerPromptFromVisibleContext({
     readiness.trackedShell !== true
     || readiness.readiness !== "unknown"
     || !Number.isFinite(readiness.generation)
+    || readiness.outputPaused
   ) {
+    return { ok: true, seeded: false };
+  }
+
+  // Ensure the renderer has consumed all worker output tracked up through
+  // `readiness.generation` before capturing the visible buffer; otherwise a
+  // newly-started command (e.g. `cat`) whose echo is still buffered or in
+  // flight to the renderer could leave the old prompt on screen.
+  const drainFn = drainTerminalOutputFn
+    || (typeof terminalWorkerManager?.drainOutputSession === "function"
+      ? require("./terminalBridge.cjs").requestTerminalOutputDrain
+      : null);
+  let outputDrained = false;
+  if (drainFn) {
+    const drainResult = await awaitCancellable(drainFn(sessionId, terminalWorkerManager));
+    const afterDrainAbort = checkPreflightAbort();
+    if (afterDrainAbort) return afterDrainAbort;
+    if (drainResult?.success !== true) {
+      return { ok: true, seeded: false };
+    }
+    outputDrained = true;
+  } else if (readiness.bufferedBytes > 0 || readiness.unackedBytes > 0) {
     return { ok: true, seeded: false };
   }
 
@@ -1800,12 +1862,11 @@ async function rehydrateWorkerPromptFromVisibleContext({
   }));
   const afterReadAbort = checkPreflightAbort();
   if (afterReadAbort) return afterReadAbort;
-  if (
-    visible?.ok !== true
-    || visible.alternateScreen === true
-    || typeof visible.content !== "string"
-    || !visible.content.trim()
-  ) {
+  if (visible?.ok !== true || visible.alternateScreen === true) {
+    return { ok: true, seeded: false };
+  }
+  const seedContext = extractCursorBoundedContextForSeed(visible);
+  if (!seedContext.trim()) {
     return { ok: true, seeded: false };
   }
 
@@ -1813,8 +1874,9 @@ async function rehydrateWorkerPromptFromVisibleContext({
     "netcatty:ai:seedIdlePrompt",
     {
       sessionId,
-      context: visible.content,
+      context: seedContext,
       expectedGeneration: readiness.generation,
+      outputDrained,
     },
     {},
   ));

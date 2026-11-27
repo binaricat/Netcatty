@@ -316,6 +316,14 @@ function main() {
   runtime = createTerminalWorkerRuntime({
     parentPort,
     terminalDataPipeline,
+    beforeOutputDrain(sessionId) {
+      const session = sessions.get(sessionId);
+      if (!session) return;
+      if (session.flowState?.outputPaused || session.flowState?.rendererPaused) return;
+      if ((session.flowState?.bufferedBytes || 0) > 0) {
+        session.flushPendingData?.();
+      }
+    },
     reportSuppressedError(origin, err, reason) {
       reportWorkerError(origin, err, reason);
     },

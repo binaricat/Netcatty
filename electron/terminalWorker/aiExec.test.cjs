@@ -50,6 +50,9 @@ test("worker shell readiness route reports prompt state read-only", () => {
     visibleIdlePrompt: 'root@host:~# ',
     readiness: 'unknown',
     generation: getSessionReadinessGeneration(session),
+    bufferedBytes: 0,
+    unackedBytes: 0,
+    outputPaused: false,
   });
   assert.deepEqual(session.stream.writes, [], "readiness probe must never write to the PTY");
   assert.deepEqual(handler(createFakeEvent(), { sessionId: 'gone' }), { ok: true, found: false });
@@ -119,6 +122,68 @@ test("worker rejects stale readiness snapshots after PTY output or user input", 
   });
   assert.equal(missingGen.stale, true);
   assert.equal(missingGen.ready, false);
+});
+
+test("worker rejects seeding while tracked output is buffered, paused, or unacked without drain", () => {
+  const session = {
+    protocol: 'ssh',
+    stream: new FakePty(),
+    shellKind: 'posix',
+    _promptTrackTail: 'cat\r\n',
+    lastIdlePrompt: '',
+    flowState: { bufferedBytes: 5, unackedBytes: 0, outputPaused: false, rendererPaused: false },
+  };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([['ssh-flow', session]]) });
+  const probeHandler = ipcMain.handlers.get('netcatty:ai:shellReadiness');
+  const seedHandler = ipcMain.handlers.get('netcatty:ai:seedIdlePrompt');
+
+  // Buffered output not yet emitted to renderer -> rejected even with matching generation.
+  const probe1 = probeHandler(createFakeEvent(), { sessionId: 'ssh-flow' });
+  assert.equal(probe1.bufferedBytes, 5);
+  const bufferedReject = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-flow',
+    context: '[root@target ~]# ',
+    expectedGeneration: probe1.generation,
+    outputDrained: true,
+  });
+  assert.equal(bufferedReject.stale, true);
+  assert.equal(bufferedReject.ready, false);
+  assert.equal(session._promptTrackTail, 'cat\r\n');
+
+  // Emitted but unacked without an ordered drain barrier -> rejected.
+  session.flowState.bufferedBytes = 0;
+  session.flowState.unackedBytes = 5;
+  const unackedReject = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-flow',
+    context: '[root@target ~]# ',
+    expectedGeneration: probe1.generation,
+    outputDrained: false,
+  });
+  assert.equal(unackedReject.stale, true);
+  assert.equal(unackedReject.ready, false);
+
+  // Renderer paused -> rejected even with outputDrained:true.
+  session.flowState.rendererPaused = true;
+  const pausedReject = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-flow',
+    context: '[root@target ~]# ',
+    expectedGeneration: probe1.generation,
+    outputDrained: true,
+  });
+  assert.equal(pausedReject.stale, true);
+  assert.equal(pausedReject.ready, false);
+
+  // Once unpaused, bufferedBytes===0, and ordered drain completed -> accepted.
+  session.flowState.rendererPaused = false;
+  const drainedAccept = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-flow',
+    context: '[root@target ~]# ',
+    expectedGeneration: probe1.generation,
+    outputDrained: true,
+  });
+  assert.equal(drainedAccept.ready, true);
+  assert.equal(drainedAccept.prompt, '[root@target ~]# ');
 });
 
 test("worker seedIdlePrompt ignores busy sessions, untracked shells, non-prompts, and spoofed OSC 133", () => {
