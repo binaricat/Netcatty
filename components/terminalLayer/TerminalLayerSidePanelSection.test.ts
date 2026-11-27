@@ -38,15 +38,19 @@ test('per-pane close button keeps shrink-0 so a narrow pane cannot squeeze it aw
   );
 });
 
-test('magnified side panels use a continuous 1px inset outline in the side panel accent', () => {
+test('magnified side panels use an inner rounded 1px border in the side panel accent', () => {
   const source = readFileSync(new URL('./TerminalLayerSidePanelSection.tsx', import.meta.url), 'utf8');
   const chromeStart = source.indexOf('className="absolute inset-3');
   const chromeSource = source.slice(chromeStart, source.indexOf('\n        >', chromeStart));
+  const strokeStart = source.indexOf('data-section="pane-magnification-stroke"', chromeStart);
+  const strokeSource = source.slice(strokeStart, source.indexOf('/>', strokeStart));
 
   assert.match(chromeSource, /overflow-hidden rounded-md bg-background shadow-2xl/);
-  assert.match(chromeSource, /outline: `1px solid \$\{sidePanelTheme\.accent\}`/);
-  assert.match(chromeSource, /outlineOffset: -1/);
-  assert.doesNotMatch(chromeSource, /\bborder(?:Color|Width|Style)?\b/);
+  assert.doesNotMatch(chromeSource, /\b(?:outline|outlineOffset|border|borderColor|borderWidth|borderStyle)\b/);
+  assert.match(strokeSource, /className="pointer-events-none absolute inset-0 z-50"/);
+  assert.match(strokeSource, /boxSizing: 'border-box'/);
+  assert.match(strokeSource, /border: `1px solid \$\{sidePanelTheme\.accent\}`/);
+  assert.match(strokeSource, /borderRadius: 'inherit'/);
 });
 
 test('AI side panel shell can be force-hidden for layout isolation', () => {
