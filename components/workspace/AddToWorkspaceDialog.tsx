@@ -6,6 +6,7 @@
  */
 import { Check, Search, Terminal } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePinyinMatcherVersion } from '../../application/state/usePinyinMatcherVersion';
 import { matchesWorkspaceHostPickerQuery } from '../../domain/searchMatcher';
 import { Host } from '../../types';
 import { DistroAvatar } from '../DistroAvatar';
@@ -112,11 +113,13 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
     return 'local terminal localhost'.includes(term);
   }, [query]);
 
+  const pinyinMatcherVersion = usePinyinMatcherVersion();
   const filteredHosts = useMemo(() => {
+    void pinyinMatcherVersion;
     const term = query.trim();
     if (!term) return selectableHosts;
     return selectableHosts.filter((host) => matchesWorkspaceHostPickerQuery(term, host));
-  }, [selectableHosts, query]);
+  }, [selectableHosts, query, pinyinMatcherVersion]);
 
   const { items, visualRows, itemIndexToVisualIndex } = useMemo(() => {
     const list: Item[] = [];
