@@ -4,7 +4,7 @@ import {
   SYNC_STORAGE_KEYS,
   isProviderReadyForSync,
 } from '../../../domain/sync';
-import packageJson from '../../../package.json';
+import { version as appVersion } from '../../../package.json';
 import { EncryptionService } from '../EncryptionService';
 import { decryptProviderSecrets } from '../../persistence/secureFieldAdapter';
 import { mergeAiSessionLists, mergeSyncPayloads } from '../../../domain/syncMerge';
@@ -913,7 +913,7 @@ export async function syncAllProvidersImpl(this: any,
           this.masterPassword,
           this.state.deviceId,
           this.state.deviceName,
-          packageJson.version,
+          appVersion,
           baseVersion
         );
         assertSyncSecurityGeneration(this, syncSecurityGeneration);

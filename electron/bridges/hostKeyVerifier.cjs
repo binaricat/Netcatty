@@ -1,6 +1,5 @@
 const crypto = require("node:crypto");
 const { randomUUID } = require("node:crypto");
-const { utils: sshUtils } = require("ssh2");
 const { extractCertificatePublicKey } = require("../../domain/sshPublicKey.shared.cjs");
 
 const REQUEST_TTL_MS = 2 * 60 * 1000;
@@ -158,6 +157,7 @@ const describeHostKey = (rawKey) => {
   }
 
   try {
+    const { utils: sshUtils } = require("ssh2");
     const parsed = sshUtils.parseKey(key);
     const parsedKey = Array.isArray(parsed) ? parsed[0] : parsed;
     // Keep the presented certificate identity, even if a parser returns its

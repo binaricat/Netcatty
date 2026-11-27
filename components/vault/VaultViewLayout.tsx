@@ -19,8 +19,12 @@ import {
 import { STORAGE_KEY_VAULT_HOST_PANEL_WIDTH } from "@/infrastructure/config/storageKeys.ts";
 import { VaultHostListSection } from "./VaultHostListSection";
 import { VAULT_HOST_GRID_MIN_CARD_WIDTH } from "./vaultHostGridLayout";
-import { LocalShellHostDetailsPanel } from "../LocalShellHostDetailsPanel";
-import { VaultImportProgressPanel } from "./ImportVaultDialog";
+const LocalShellHostDetailsPanel = React.lazy(() =>
+  import("../LocalShellHostDetailsPanel").then((mod) => ({ default: mod.LocalShellHostDetailsPanel })),
+);
+const VaultImportProgressPanel = React.lazy(() =>
+  import("./ImportVaultDialog").then((mod) => ({ default: mod.VaultImportProgressPanel })),
+);
 import {
   VaultHeaderSearch,
   VaultPageHeader,
@@ -566,6 +570,12 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   const [isMoveHostsOpen, setIsMoveHostsOpen] = React.useState(false);
   const [moveTargetGroup, setMoveTargetGroup] = React.useState("");
   const [isSidebarResizing, setIsSidebarResizing] = React.useState(false);
+  const [hasMountedKnownHosts, setHasMountedKnownHosts] = React.useState(
+    currentSection === "knownhosts",
+  );
+  if (currentSection === "knownhosts" && !hasMountedKnownHosts) {
+    setHasMountedKnownHosts(true);
+  }
   const keyListRef = React.useRef(keys);
   keyListRef.current = keys;
   const newHostActionsRef = React.useRef<HTMLDivElement>(null);
@@ -1576,14 +1586,14 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 </Suspense>
               </LazyLoadBoundary>
             )}
-            {/* Always render KnownHostsManager but hide with CSS to prevent unmounting */}
-            <div
-              style={{
-                display: currentSection === "knownhosts" ? "contents" : "none",
-              }}
-            >
-              {knownHostsManagerElement}
-            </div>
+            {/* Mount KnownHostsManager lazily on first visit, then keep hidden with CSS */}
+            {hasMountedKnownHosts ? (
+              <div style={{ display: currentSection === "knownhosts" ? "contents" : "none" }}>
+                <Suspense fallback={<VaultSectionLoading />}>
+                  {knownHostsManagerElement}
+                </Suspense>
+              </div>
+            ) : null}
             {/* Connection Logs */}
             {currentSection === "logs" && (
               <LazyLoadBoundary
@@ -1605,134 +1615,142 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           {currentSection === "hosts" &&
             isGroupPanelOpen &&
             editingGroupPath && (
-              <GroupDetailsPanel
-                key={editingGroupPath}
-                groupPath={editingGroupPath}
-                config={groupConfigs.find((c) => c.path === editingGroupPath)}
-                availableKeys={keys}
-                identities={identities}
-                proxyProfiles={proxyProfiles}
-                allHosts={hosts}
-                groups={allGroupPaths}
-                terminalThemeId={terminalThemeId}
-                groupConfigs={groupConfigs}
-                terminalFontSize={terminalFontSize}
-                onSave={handleSaveGroupConfig}
-                onCancel={() => {
-                  setIsGroupPanelOpen(false);
-                  setEditingGroupPath(null);
-                }}
-                layout="inline"
-                {...vaultHostPanelResizeProps}
-              />
+              <Suspense fallback={null}>
+                <GroupDetailsPanel
+                  key={editingGroupPath}
+                  groupPath={editingGroupPath}
+                  config={groupConfigs.find((c) => c.path === editingGroupPath)}
+                  availableKeys={keys}
+                  identities={identities}
+                  proxyProfiles={proxyProfiles}
+                  allHosts={hosts}
+                  groups={allGroupPaths}
+                  terminalThemeId={terminalThemeId}
+                  groupConfigs={groupConfigs}
+                  terminalFontSize={terminalFontSize}
+                  onSave={handleSaveGroupConfig}
+                  onCancel={() => {
+                    setIsGroupPanelOpen(false);
+                    setEditingGroupPath(null);
+                  }}
+                  layout="inline"
+                  {...vaultHostPanelResizeProps}
+                />
+              </Suspense>
             )}
 
           {/* Host Details Panel */}
           {currentSection === "hosts" &&
             isHostPanelOpen &&
             editingHost?.protocol !== "serial" && (
-              <HostDetailsPanel
-                key={editingHost?.id ?? `new-${newHostProtocol || "ssh"}`}
-                initialData={editingHost}
-                initialProtocol={editingHost ? undefined : newHostProtocol}
-                availableKeys={keys}
-                identities={identities}
-                onCreateIdentity={(identity) =>
-                  onUpdateIdentities([...identities, identity])
-                }
-                proxyProfiles={proxyProfiles}
-                groups={allGroupPaths}
-                managedSources={managedSources}
-                allTags={allTags}
-                allHosts={hosts}
-                defaultGroup={
-                  editingHost
-                    ? undefined
-                    : newHostGroupPath || selectedGroupPath
-                }
-                terminalThemeId={terminalThemeId}
-                terminalFontSize={terminalFontSize}
-                groupDefaults={editingHostGroupDefaults}
-                groupConfigs={groupConfigs}
-                snippets={snippets}
-                onSnippetsChange={onUpdateSnippets}
-                onHostsChange={onUpdateHosts}
-                onImportKey={onImportOrReuseKey}
-                knownHosts={knownHosts}
-                onAddKnownHost={onAddKnownHost}
-                terminalSettings={terminalSettings}
-                onSave={(host) => {
-                  const latestHost = hosts.find(
-                    (entry: { id: string }) => entry.id === host.id,
-                  );
-                  const nextHost = preserveConcurrentHostLineTimestampUpdate({
-                    draft: host,
-                    openedHost: editingHost,
-                    latestHost,
-                  });
-                  onUpdateHosts((prevHosts) => upsertHostById(prevHosts, nextHost));
-                  setIsHostPanelOpen(false);
-                  setEditingHost(null);
-                  setNewHostGroupPath(null);
-                }}
-                onCancel={() => {
-                  setIsHostPanelOpen(false);
-                  setEditingHost(null);
-                  setNewHostGroupPath(null);
-                }}
-                onCreateGroup={(groupPath) => {
-                  onUpdateCustomGroups(
-                    Array.from(new Set([...customGroups, groupPath])),
-                  );
-                }}
-                layout="inline"
-                {...vaultHostPanelResizeProps}
-              />
+              <Suspense fallback={null}>
+                <HostDetailsPanel
+                  key={editingHost?.id ?? `new-${newHostProtocol || "ssh"}`}
+                  initialData={editingHost}
+                  initialProtocol={editingHost ? undefined : newHostProtocol}
+                  availableKeys={keys}
+                  identities={identities}
+                  onCreateIdentity={(identity) =>
+                    onUpdateIdentities([...identities, identity])
+                  }
+                  proxyProfiles={proxyProfiles}
+                  groups={allGroupPaths}
+                  managedSources={managedSources}
+                  allTags={allTags}
+                  allHosts={hosts}
+                  defaultGroup={
+                    editingHost
+                      ? undefined
+                      : newHostGroupPath || selectedGroupPath
+                  }
+                  terminalThemeId={terminalThemeId}
+                  terminalFontSize={terminalFontSize}
+                  groupDefaults={editingHostGroupDefaults}
+                  groupConfigs={groupConfigs}
+                  snippets={snippets}
+                  onSnippetsChange={onUpdateSnippets}
+                  onHostsChange={onUpdateHosts}
+                  onImportKey={onImportOrReuseKey}
+                  knownHosts={knownHosts}
+                  onAddKnownHost={onAddKnownHost}
+                  terminalSettings={terminalSettings}
+                  onSave={(host) => {
+                    const latestHost = hosts.find(
+                      (entry: { id: string }) => entry.id === host.id,
+                    );
+                    const nextHost = preserveConcurrentHostLineTimestampUpdate({
+                      draft: host,
+                      openedHost: editingHost,
+                      latestHost,
+                    });
+                    onUpdateHosts((prevHosts) => upsertHostById(prevHosts, nextHost));
+                    setIsHostPanelOpen(false);
+                    setEditingHost(null);
+                    setNewHostGroupPath(null);
+                  }}
+                  onCancel={() => {
+                    setIsHostPanelOpen(false);
+                    setEditingHost(null);
+                    setNewHostGroupPath(null);
+                  }}
+                  onCreateGroup={(groupPath) => {
+                    onUpdateCustomGroups(
+                      Array.from(new Set([...customGroups, groupPath])),
+                    );
+                  }}
+                  layout="inline"
+                  {...vaultHostPanelResizeProps}
+                />
+              </Suspense>
             )}
 
           {/* Serial Host Details Panel - for editing serial port hosts */}
           {currentSection === "hosts" &&
             isHostPanelOpen &&
             editingHost?.protocol === "serial" && (
-              <SerialHostDetailsPanel
-                initialData={editingHost}
-                allTags={allTags}
-                groups={allGroupPaths}
-                groupDefaults={editingHostGroupDefaults}
-                onSave={(host) => {
-                  onUpdateHosts(upsertHostById(hosts, host));
-                  setIsHostPanelOpen(false);
-                  setEditingHost(null);
-                  setNewHostGroupPath(null);
-                }}
-                onCancel={() => {
-                  setIsHostPanelOpen(false);
-                  setEditingHost(null);
-                  setNewHostGroupPath(null);
-                }}
-                layout="inline"
-                {...vaultHostPanelResizeProps}
-              />
+              <Suspense fallback={null}>
+                <SerialHostDetailsPanel
+                  initialData={editingHost}
+                  allTags={allTags}
+                  groups={allGroupPaths}
+                  groupDefaults={editingHostGroupDefaults}
+                  onSave={(host) => {
+                    onUpdateHosts(upsertHostById(hosts, host));
+                    setIsHostPanelOpen(false);
+                    setEditingHost(null);
+                    setNewHostGroupPath(null);
+                  }}
+                  onCancel={() => {
+                    setIsHostPanelOpen(false);
+                    setEditingHost(null);
+                    setNewHostGroupPath(null);
+                  }}
+                  layout="inline"
+                  {...vaultHostPanelResizeProps}
+                />
+              </Suspense>
             )}
 
           {/* Local Shell Host Details Panel - for editing/saving local shell (CMD) hosts */}
           {currentSection === "hosts" &&
             isLocalShellHostPanelOpen && (
-              <LocalShellHostDetailsPanel
-                key={editingLocalShellHost?.id ?? "local-shell-new"}
-                initialData={editingLocalShellHost}
-                groups={allGroupPaths}
-                defaultGroup={
-                  editingLocalShellHost
-                    ? undefined
-                    : newHostGroupPath || selectedGroupPath
-                }
-                onSave={(host) => handleSaveLocalShellHost(host)}
-                onSaveAndConnect={(host) => handleSaveLocalShellHost(host, true)}
-                onCancel={handleCancelLocalShellHost}
-                layout="inline"
-                {...vaultHostPanelResizeProps}
-              />
+              <Suspense fallback={null}>
+                <LocalShellHostDetailsPanel
+                  key={editingLocalShellHost?.id ?? "local-shell-new"}
+                  initialData={editingLocalShellHost}
+                  groups={allGroupPaths}
+                  defaultGroup={
+                    editingLocalShellHost
+                      ? undefined
+                      : newHostGroupPath || selectedGroupPath
+                  }
+                  onSave={(host) => handleSaveLocalShellHost(host)}
+                  onSaveAndConnect={(host) => handleSaveLocalShellHost(host, true)}
+                  onCancel={handleCancelLocalShellHost}
+                  layout="inline"
+                  {...vaultHostPanelResizeProps}
+                />
+              </Suspense>
             )}
         </div>
       </div>
@@ -2002,39 +2020,47 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
         </DialogContent>
       </Dialog>
 
-      <ImportVaultDialog
-        open={isImportOpen}
-        onOpenChange={setIsImportOpen}
-        onFileSelected={handleImportFileSelected}
-        onPluginPreviewCommit={handlePluginPreviewCommit}
-        getPluginPreviewAnalysis={getPluginPreviewAnalysis}
-        groups={allGroupPaths}
-      />
+      {isImportOpen && (
+        <Suspense fallback={null}>
+          <ImportVaultDialog
+            open={isImportOpen}
+            onOpenChange={setIsImportOpen}
+            onFileSelected={handleImportFileSelected}
+            onPluginPreviewCommit={handlePluginPreviewCommit}
+            getPluginPreviewAnalysis={getPluginPreviewAnalysis}
+            groups={allGroupPaths}
+          />
+        </Suspense>
+      )}
       {importProgress && (
-        <VaultImportProgressPanel
-          progress={importProgress}
-          onCancel={cancelImport}
-          onClose={resetImportProgress}
-          t={t}
-        />
+        <Suspense fallback={null}>
+          <VaultImportProgressPanel
+            progress={importProgress}
+            onCancel={cancelImport}
+            onClose={resetImportProgress}
+            t={t}
+          />
+        </Suspense>
       )}
 
       {/* Quick Connect Wizard */}
       {isQuickConnectOpen && quickConnectTarget && (
-        <QuickConnectWizard
-          open={isQuickConnectOpen}
-          target={quickConnectTarget}
-          keys={keys}
-          identities={identities}
-          onConnect={handleQuickConnect}
-          onSaveHost={handleQuickConnectSaveHost}
-          onClose={() => {
-            setIsQuickConnectOpen(false);
-            setQuickConnectTarget(null);
-            setQuickConnectWarnings([]);
-          }}
-          warnings={quickConnectWarnings}
-        />
+        <Suspense fallback={null}>
+          <QuickConnectWizard
+            open={isQuickConnectOpen}
+            target={quickConnectTarget}
+            keys={keys}
+            identities={identities}
+            onConnect={handleQuickConnect}
+            onSaveHost={handleQuickConnectSaveHost}
+            onClose={() => {
+              setIsQuickConnectOpen(false);
+              setQuickConnectTarget(null);
+              setQuickConnectWarnings([]);
+            }}
+            warnings={quickConnectWarnings}
+          />
+        </Suspense>
       )}
 
       {/* Protocol Select Dialog */}
@@ -2054,18 +2080,22 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
       )}
 
       {/* Serial Connect Modal */}
-      <SerialConnectModal
-        open={isSerialModalOpen}
-        onClose={() => setIsSerialModalOpen(false)}
-        onConnect={(config, options) => {
-          if (onConnectSerial) {
-            onConnectSerial(config, options);
-          }
-        }}
-        onSaveHost={(host) => {
-          onUpdateHosts([...hosts, host]);
-        }}
-      />
+      {isSerialModalOpen && (
+        <Suspense fallback={null}>
+          <SerialConnectModal
+            open={isSerialModalOpen}
+            onClose={() => setIsSerialModalOpen(false)}
+            onConnect={(config, options) => {
+              if (onConnectSerial) {
+                onConnectSerial(config, options);
+              }
+            }}
+            onSaveHost={(host) => {
+              onUpdateHosts([...hosts, host]);
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

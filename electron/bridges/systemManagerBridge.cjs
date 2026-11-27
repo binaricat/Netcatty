@@ -1,13 +1,6 @@
 "use strict";
 
-const { createExecOnSessionApi } = require("./systemManager/execOnSession.cjs");
-const { createTmuxOpsApi } = require("./systemManager/tmuxOps.cjs");
-const { createDockerOpsApi } = require("./systemManager/dockerOps.cjs");
-const { createKubectlOpsApi } = require("./systemManager/kubectlOps.cjs");
 const { parseRuntimeProbe } = require("../../domain/systemManager/containerRuntime.shared.cjs");
-const { createGpuOpsApi } = require("./systemManager/gpuOps.cjs");
-const { createPortOpsApi } = require("./systemManager/portOps.cjs");
-const { createServiceOpsApi } = require("./systemManager/serviceOps.cjs");
 const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
 
 function nerdctlUsableClause(markCommand) {
@@ -202,30 +195,39 @@ function createSystemManagerBridge(deps) {
     process,
   } = deps;
 
-  const execApi = createExecOnSessionApi({
+  let _execApi = null;
+  const getExecApi = () => (_execApi ??= require("./systemManager/execOnSession.cjs").createExecOnSessionApi({
     sessions: { get: (id) => getSessions()?.get(id) },
     execOnEtSession,
     ensureMoshStatsConnection,
-  });
+  }));
+  const execOnSession = (...args) => getExecApi().execOnSession(...args);
+  const execOnLocalMachine = (...args) => getExecApi().execOnLocalMachine(...args);
+  const isLocalSession = (...args) => getExecApi().isLocalSession(...args);
+  const getSession = (...args) => getExecApi().getSession(...args);
 
-  const { execOnSession, execOnLocalMachine, isLocalSession, getSession } = execApi;
-
-  const tmuxOps = createTmuxOpsApi({ execOnSession });
-  const dockerOps = createDockerOpsApi({ execOnSession, getSession });
-  const kubectlOps = createKubectlOpsApi({ execOnSession, isLocalSession, process });
-  const gpuOps = createGpuOpsApi({
+  let _tmuxOps = null;
+  const getTmuxOps = () => (_tmuxOps ??= require("./systemManager/tmuxOps.cjs").createTmuxOpsApi({ execOnSession }));
+  let _dockerOps = null;
+  const getDockerOps = () => (_dockerOps ??= require("./systemManager/dockerOps.cjs").createDockerOpsApi({ execOnSession, getSession }));
+  let _kubectlOps = null;
+  const getKubectlOps = () => (_kubectlOps ??= require("./systemManager/kubectlOps.cjs").createKubectlOpsApi({ execOnSession, isLocalSession, process }));
+  let _gpuOps = null;
+  const getGpuOps = () => (_gpuOps ??= require("./systemManager/gpuOps.cjs").createGpuOpsApi({
     execOnSession,
     execOnLocalMachine,
     isLocalSession,
     process,
-  });
-  const portOps = createPortOpsApi({
+  }));
+  let _portOps = null;
+  const getPortOps = () => (_portOps ??= require("./systemManager/portOps.cjs").createPortOpsApi({
     execOnSession,
     execOnLocalMachine,
     isLocalSession,
     process,
-  });
-  const serviceOps = createServiceOpsApi({ execOnSession, getSession });
+  }));
+  let _serviceOps = null;
+  const getServiceOps = () => (_serviceOps ??= require("./systemManager/serviceOps.cjs").createServiceOpsApi({ execOnSession, getSession }));
 
   async function probeCapabilities(event, payload) {
     const sessionId = payload?.sessionId;
@@ -430,27 +432,27 @@ function createSystemManagerBridge(deps) {
   async function listTmuxSessions(event, payload) {
     const sessionId = typeof payload === "string" ? payload : payload?.sessionId;
     if (!sessionId) return { success: false, error: "Missing sessionId" };
-    return tmuxOps.listSessions(event, sessionId);
+    return getTmuxOps().listSessions(event, sessionId);
   }
 
   async function createTmuxSession(event, payload) {
-    return tmuxOps.createSession(event, payload);
+    return getTmuxOps().createSession(event, payload);
   }
 
   async function listTmuxWindows(event, payload) {
-    return tmuxOps.listWindows(event, payload);
+    return getTmuxOps().listWindows(event, payload);
   }
 
   async function listTmuxPanes(event, payload) {
-    return tmuxOps.listPanes(event, payload);
+    return getTmuxOps().listPanes(event, payload);
   }
 
   async function listTmuxClients(event, payload) {
-    return tmuxOps.listClients(event, payload);
+    return getTmuxOps().listClients(event, payload);
   }
 
   async function tmuxAction(event, payload) {
-    const result = await tmuxOps.tmuxAction(event, payload);
+    const result = await getTmuxOps().tmuxAction(event, payload);
     if (result.success === false && result.error) {
       return { success: false, error: result.error || result.stderr };
     }
@@ -463,29 +465,29 @@ function createSystemManagerBridge(deps) {
   async function listDockerContainers(event, payload) {
     const sessionId = payload?.sessionId;
     if (!sessionId) return { success: false, error: "Missing sessionId" };
-    return dockerOps.listContainers(event, sessionId, payload?.runtime);
+    return getDockerOps().listContainers(event, sessionId, payload?.runtime);
   }
 
   async function listDockerImages(event, payload) {
     const sessionId = payload?.sessionId;
     if (!sessionId) return { success: false, error: "Missing sessionId" };
-    return dockerOps.listImages(event, sessionId, payload?.runtime);
+    return getDockerOps().listImages(event, sessionId, payload?.runtime);
   }
 
   async function dockerStats(event, payload) {
-    return dockerOps.getStats(event, payload);
+    return getDockerOps().getStats(event, payload);
   }
 
   async function dockerInspect(event, payload) {
-    return dockerOps.inspectContainer(event, payload);
+    return getDockerOps().inspectContainer(event, payload);
   }
 
   async function dockerImageInspect(event, payload) {
-    return dockerOps.inspectImage(event, payload);
+    return getDockerOps().inspectImage(event, payload);
   }
 
   async function dockerAction(event, payload) {
-    const result = await dockerOps.containerAction(event, payload);
+    const result = await getDockerOps().containerAction(event, payload);
     if (result.success === false) {
       if (result.errorCode === "nerdctlUnreachable") {
         return { success: false, errorCode: result.errorCode };
@@ -496,11 +498,11 @@ function createSystemManagerBridge(deps) {
   }
 
   async function kubectl(event, payload) {
-    return kubectlOps.run(event, payload);
+    return getKubectlOps().run(event, payload);
   }
 
   async function dockerImageAction(event, payload) {
-    const result = await dockerOps.imageAction(event, payload);
+    const result = await getDockerOps().imageAction(event, payload);
     if (result.success === false) {
       if (result.errorCode === "nerdctlUnreachable") {
         return { success: false, errorCode: result.errorCode };
@@ -513,23 +515,23 @@ function createSystemManagerBridge(deps) {
   async function listAccelerators(event, payload) {
     const sessionId = payload?.sessionId;
     if (!sessionId) return { success: false, error: "Missing sessionId" };
-    return gpuOps.listAccelerators(event, sessionId);
+    return getGpuOps().listAccelerators(event, sessionId);
   }
 
   async function listListeningPorts(event, payload) {
     const sessionId = payload?.sessionId;
     if (!sessionId) return { success: false, error: "Missing sessionId" };
-    return portOps.listListeningPorts(event, sessionId);
+    return getPortOps().listListeningPorts(event, sessionId);
   }
 
   async function listSystemServices(event, payload) {
     const sessionId = payload?.sessionId;
     if (!sessionId) return { success: false, error: "Missing sessionId" };
-    return serviceOps.listServices(event, sessionId);
+    return getServiceOps().listServices(event, sessionId);
   }
 
   async function systemServiceAction(event, payload) {
-    return serviceOps.serviceAction(event, payload);
+    return getServiceOps().serviceAction(event, payload);
   }
 
   function registerHandlers(ipcMain, options = {}) {

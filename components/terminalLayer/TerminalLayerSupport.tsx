@@ -81,11 +81,9 @@ const LazyRemoteDesktopPane = lazy(() =>
   import('../remoteDesktop/RemoteDesktopPane').then((module) => ({ default: module.RemoteDesktopPane })),
 );
 
-if (typeof requestIdleCallback === 'function') {
-  requestIdleCallback(() => {
-    void import('../AIChatSidePanel');
-  });
-}
+// AIChatSidePanel (along with vendor-ai, globalAgentRuntime, and capability
+// tool specs) is loaded on demand via LazyAIChatSidePanel when the user opens
+// the AI side panel, avoiding ~15-20 MiB of V8 heap on terminal-only sessions.
 
 const AIChatSidePanelFallback = memo(function AIChatSidePanelFallback() {
   return (

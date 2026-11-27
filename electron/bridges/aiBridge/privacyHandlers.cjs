@@ -1,12 +1,19 @@
 "use strict";
 
-const privacyService = require("../../shared/aiPrivacyService.cjs");
+let _defaultPrivacyService = null;
+function getDefaultPrivacyService() {
+  if (!_defaultPrivacyService) {
+    _defaultPrivacyService = require("../../shared/aiPrivacyService.cjs");
+  }
+  return _defaultPrivacyService;
+}
 
-function registerPrivacyHandlers({ ipcMain, validateSender, aiPrivacyService = privacyService }) {
+function registerPrivacyHandlers({ ipcMain, validateSender, aiPrivacyService }) {
+  const resolveService = () => aiPrivacyService || getDefaultPrivacyService();
   ipcMain.handle("netcatty:ai:privacy:status", (event) => {
     if (!validateSender(event)) return { ok: false, error: "Unauthorized" };
     try {
-      return { ok: true, enabled: aiPrivacyService.isEnabled() };
+      return { ok: true, enabled: resolveService().isEnabled() };
     } catch (error) {
       return { ok: false, error: error.message };
     }
@@ -19,7 +26,7 @@ function registerPrivacyHandlers({ ipcMain, validateSender, aiPrivacyService = p
       }
       return {
         ok: true,
-        value: aiPrivacyService[request.operation](request.chatSessionId, request.value),
+        value: resolveService()[request.operation](request.chatSessionId, request.value),
       };
     } catch (error) {
       return { ok: false, error: error.message };
@@ -27,7 +34,7 @@ function registerPrivacyHandlers({ ipcMain, validateSender, aiPrivacyService = p
   });
   ipcMain.handle("netcatty:ai:privacy:clear", (event, chatSessionId) => {
     if (!validateSender(event)) return { ok: false, error: "Unauthorized" };
-    aiPrivacyService.clearSession(chatSessionId);
+    resolveService().clearSession(chatSessionId);
     return { ok: true };
   });
 }

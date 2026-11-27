@@ -1,8 +1,9 @@
 "use strict";
 
 const crypto = require("node:crypto");
-const { normalizeRedactionConfig } = require("../mcp/externalMcpRedaction.cjs");
-const aiPrivacyService = require("../shared/aiPrivacyService.cjs");
+const normalizeRedactionConfig = (...args) =>
+  require("../mcp/externalMcpRedaction.cjs").normalizeRedactionConfig(...args);
+const getAiPrivacyService = () => require("../shared/aiPrivacyService.cjs");
 
 const {
   getExternalMcpDiscoveryFilePath,
@@ -14,20 +15,22 @@ const {
   writeExternalDiscovery,
   removeExternalDiscovery,
 } = require("../cli/externalMcpDiscovery.cjs");
-const { createExternalMcpCodexSetup } = require("./externalMcp/codexSetup.cjs");
-const { createExternalMcpClaudeSetup } = require("./externalMcp/claudeSetup.cjs");
-const { createExternalMcpGrokSetup } = require("./externalMcp/grokSetup.cjs");
-const {
-  readBundledNetcattySkillContent,
-} = require("./externalMcp/netcattySkillInstaller.cjs");
-const {
-  buildUniversalSetupPrompt,
-} = require("./externalMcp/universalSetupPrompt.cjs");
+const createExternalMcpCodexSetup = (...args) =>
+  require("./externalMcp/codexSetup.cjs").createExternalMcpCodexSetup(...args);
+const createExternalMcpClaudeSetup = (...args) =>
+  require("./externalMcp/claudeSetup.cjs").createExternalMcpClaudeSetup(...args);
+const createExternalMcpGrokSetup = (...args) =>
+  require("./externalMcp/grokSetup.cjs").createExternalMcpGrokSetup(...args);
+const readBundledNetcattySkillContent = (...args) =>
+  require("./externalMcp/netcattySkillInstaller.cjs").readBundledNetcattySkillContent(...args);
+const buildUniversalSetupPrompt = (...args) =>
+  require("./externalMcp/universalSetupPrompt.cjs").buildUniversalSetupPrompt(...args);
 const {
   DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES,
   normalizeSessionIdleTimeoutMinutes,
 } = require("./mcpServerBridge/sessionIdleManager.cjs");
-const { createExternalMcpHttpServer } = require("./externalMcp/httpServer.cjs");
+const createExternalMcpHttpServer = (...args) =>
+  require("./externalMcp/httpServer.cjs").createExternalMcpHttpServer(...args);
 const {
   DEFAULT_EXTERNAL_MCP_HTTP_HOST,
   DEFAULT_EXTERNAL_MCP_HTTP_PORT,
@@ -83,7 +86,7 @@ function createExternalMcpController(options = {}) {
 
   let discoveryFilePath = null;
   let enabled = false;
-  let redaction = normalizeRedactionConfig();
+  let redaction = { enabled: false, redactPrivateIps: false, cidrs: [], patterns: [] };
   let state = "disabled";
   let error = null;
   let mode = EXTERNAL_MCP_MODE_TEMPORARY;
@@ -196,7 +199,7 @@ function createExternalMcpController(options = {}) {
             chatSessionId: deps.chatSessionId,
           }, {
             externalSocket: context?.externalClient || null,
-            beforeExecute: aiPrivacyService.createPolicyGuard(),
+            beforeExecute: getAiPrivacyService().createPolicyGuard(),
           });
         },
       });
@@ -554,7 +557,7 @@ function createExternalMcpController(options = {}) {
       try {
         nextRedaction = normalizeRedactionConfig(config.redaction);
       } catch {
-        if (config.redaction === null) aiPrivacyService.invalidateConfiguration();
+        if (config.redaction === null) getAiPrivacyService().invalidateConfiguration();
         return { ...buildStatus(), ok: false, error: "Invalid privacy rules. Check CIDRs and regular expressions." };
       }
       if (JSON.stringify(nextRedaction) !== JSON.stringify(redaction)) {
@@ -567,7 +570,7 @@ function createExternalMcpController(options = {}) {
           return { ...buildStatus(), ok: false, error: "Privacy settings could not be saved. Retry before reconnecting clients." };
         }
       }
-      aiPrivacyService.configure(nextRedaction);
+      getAiPrivacyService().configure(nextRedaction);
     }
     const nextMode = config.mode == null ? mode : normalizeMode(config.mode);
     const nextIdleTimeoutMinutes = config.idleTimeoutMinutes == null

@@ -2,12 +2,8 @@ import { useEffect, useRef } from 'react';
 import { applyGroupDefaults, resolveGroupDefaults } from '../../domain/groupConfig';
 import type { GroupConfig, Host, Identity, KnownHost, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, SSHKey, TerminalSession, TerminalSettings, VaultNote } from '../../domain/models';
 import { materializeHostProxyProfile } from '../../domain/proxyProfiles';
-import {
-  handleVaultAgentOp,
-  registerVaultAgentHandler,
-  setupVaultAgentBridge,
-  type VaultAgentApiDeps,
-} from '../../infrastructure/ai/vaultAgentBridgeClient';
+import type { VaultAgentApiDeps } from '../../infrastructure/ai/vaultAgentBridgeClient';
+import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import {
   clearRememberedKeyPassphrases,
   readRememberedKeyPassphrases,
@@ -155,143 +151,169 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
   }, [input.notes]);
 
   useEffect(() => {
-    registerVaultAgentHandler(async (op, params) => {
-      const current = inputRef.current;
-      const applyUpdateNotes = current.updateNotes
-        ?? getNotesActions()?.updateNotes
-        ?? ((notes: VaultNote[]) => {
-          console.warn('[useVaultAgentBridge] updateNotes unavailable');
-          void notes;
-          return false;
-        });
-      return handleVaultAgentOp(op, params, {
-        getHosts: () => vaultSnapshotRef.current.hosts,
-        getNotes: () => resolveVaultAgentNotes(
-          current.notes,
-          vaultSnapshotRef.current.notes,
-        ),
-        getCustomGroups: () => vaultSnapshotRef.current.customGroups,
-        getGroupConfigs: () => vaultSnapshotRef.current.groupConfigs,
-        getPortForwardingRules: () => vaultSnapshotRef.current.portForwardingRules,
-        getManagedSources: () => vaultSnapshotRef.current.managedSources,
-        snippets: vaultSnapshotRef.current.snippets,
-        keys: vaultSnapshotRef.current.keys,
-        identities: current.identities,
-        knownHosts: current.knownHosts,
-        proxyProfiles: current.proxyProfiles,
-        terminalSettings: current.terminalSettings,
-        resolveEffectiveHost: (host) => resolveVaultAgentEffectiveHost(
-          host,
-          vaultSnapshotRef.current.groupConfigs,
-          current.proxyProfiles,
-        ),
-        updateHostNotes: (hostId, notes) => {
-          const nextHosts = vaultSnapshotRef.current.hosts.map((host) => (
-            host.id === hostId ? { ...host, notes } : host
-          ));
-          vaultSnapshotRef.current.hosts = nextHosts;
-          current.updateHosts(nextHosts);
-        },
-        updateCustomGroups: (groups) => {
-          vaultSnapshotRef.current.customGroups = groups;
-          current.updateCustomGroups(groups);
-        },
-        updateGroupConfigs: (configs) => {
-          vaultSnapshotRef.current.groupConfigs = configs;
-          current.updateGroupConfigs(configs);
-        },
-        updatePortForwardingRules: (rules) => {
-          vaultSnapshotRef.current.portForwardingRules = rules;
-          current.updatePortForwardingRules(rules);
-        },
-        updateManagedSources: (sources) => {
-          vaultSnapshotRef.current.managedSources = sources;
-          current.updateManagedSources(sources);
-        },
-        updateHosts: (hosts) => {
-          vaultSnapshotRef.current.hosts = hosts;
-          current.updateHosts(hosts);
-        },
-        commitVaultGroupMutation: async (mutate) => {
-          const result = await current.commitVaultGroupMutation(mutate);
-          if (result.ok) {
-            vaultSnapshotRef.current.customGroups = result.state.groups;
-            vaultSnapshotRef.current.groupConfigs = result.state.configs;
-            vaultSnapshotRef.current.hosts = result.state.hosts;
-            vaultSnapshotRef.current.managedSources = result.state.managedSources;
-            vaultSnapshotRef.current.snippets = result.state.snippets;
+    const bridge = netcattyBridge.get();
+    if (!bridge?.onVaultAgentRequest || !bridge.respondVaultAgent) {
+      return;
+    }
+    let disposed = false;
+    let clientPromise: Promise<typeof import('../../infrastructure/ai/vaultAgentBridgeClient')> | null = null;
+    const ensureClient = () => {
+      if (!clientPromise) {
+        clientPromise = import('../../infrastructure/ai/vaultAgentBridgeClient').then((client) => {
+          if (!disposed) {
+            client.registerVaultAgentHandler(async (op, params) => {
+              const current = inputRef.current;
+              const applyUpdateNotes = current.updateNotes
+                ?? getNotesActions()?.updateNotes
+                ?? ((notes: VaultNote[]) => {
+                  console.warn('[useVaultAgentBridge] updateNotes unavailable');
+                  void notes;
+                  return false;
+                });
+              return client.handleVaultAgentOp(op, params, {
+                getHosts: () => vaultSnapshotRef.current.hosts,
+                getNotes: () => resolveVaultAgentNotes(
+                  current.notes,
+                  vaultSnapshotRef.current.notes,
+                ),
+                getCustomGroups: () => vaultSnapshotRef.current.customGroups,
+                getGroupConfigs: () => vaultSnapshotRef.current.groupConfigs,
+                getPortForwardingRules: () => vaultSnapshotRef.current.portForwardingRules,
+                getManagedSources: () => vaultSnapshotRef.current.managedSources,
+                snippets: vaultSnapshotRef.current.snippets,
+                keys: vaultSnapshotRef.current.keys,
+                identities: current.identities,
+                knownHosts: current.knownHosts,
+                proxyProfiles: current.proxyProfiles,
+                terminalSettings: current.terminalSettings,
+                resolveEffectiveHost: (host) => resolveVaultAgentEffectiveHost(
+                  host,
+                  vaultSnapshotRef.current.groupConfigs,
+                  current.proxyProfiles,
+                ),
+                updateHostNotes: (hostId, notes) => {
+                  const nextHosts = vaultSnapshotRef.current.hosts.map((host) => (
+                    host.id === hostId ? { ...host, notes } : host
+                  ));
+                  vaultSnapshotRef.current.hosts = nextHosts;
+                  current.updateHosts(nextHosts);
+                },
+                updateCustomGroups: (groups) => {
+                  vaultSnapshotRef.current.customGroups = groups;
+                  current.updateCustomGroups(groups);
+                },
+                updateGroupConfigs: (configs) => {
+                  vaultSnapshotRef.current.groupConfigs = configs;
+                  current.updateGroupConfigs(configs);
+                },
+                updatePortForwardingRules: (rules) => {
+                  vaultSnapshotRef.current.portForwardingRules = rules;
+                  current.updatePortForwardingRules(rules);
+                },
+                updateManagedSources: (sources) => {
+                  vaultSnapshotRef.current.managedSources = sources;
+                  current.updateManagedSources(sources);
+                },
+                updateHosts: (hosts) => {
+                  vaultSnapshotRef.current.hosts = hosts;
+                  current.updateHosts(hosts);
+                },
+                commitVaultGroupMutation: async (mutate) => {
+                  const result = await current.commitVaultGroupMutation(mutate);
+                  if (result.ok) {
+                    vaultSnapshotRef.current.customGroups = result.state.groups;
+                    vaultSnapshotRef.current.groupConfigs = result.state.configs;
+                    vaultSnapshotRef.current.hosts = result.state.hosts;
+                    vaultSnapshotRef.current.managedSources = result.state.managedSources;
+                    vaultSnapshotRef.current.snippets = result.state.snippets;
+                  }
+                  return result;
+                },
+                saveKeyPassphrase: (keyPath, passphrase) => rememberKeyPassphrase({
+                  keyPath,
+                  passphrase,
+                  keys: vaultSnapshotRef.current.keys,
+                  getKeys: () => vaultSnapshotRef.current.keys,
+                  updateKeys: current.updateKeys,
+                  setCurrentKeys: (keys) => {
+                    vaultSnapshotRef.current.keys = keys;
+                  },
+                }),
+                saveImportedKeyPassphrase: (keyPath, passphrase) => rememberImportedKeyPassphrase({
+                  keyPath,
+                  passphrase,
+                  keys: vaultSnapshotRef.current.keys,
+                  getKeys: () => vaultSnapshotRef.current.keys,
+                  updateKeys: current.updateKeys,
+                  setCurrentKeys: (keys) => {
+                    vaultSnapshotRef.current.keys = keys;
+                  },
+                }),
+                resolveKeyPassphraseAliases: resolveDefaultKeyPassphraseAliases,
+                readKeyPassphrases: (keyPath) => readRememberedKeyPassphrases(
+                  keyPath,
+                  vaultSnapshotRef.current.keys,
+                ),
+                removeKeyPassphrases: (keyPaths) => clearRememberedKeyPassphrases({
+                  keyPaths,
+                  getKeys: () => vaultSnapshotRef.current.keys,
+                  setCurrentKeys: (keys) => {
+                    vaultSnapshotRef.current.keys = keys;
+                  },
+                  updateKeys: current.updateKeys,
+                }),
+                updateNotes: (notes) => {
+                  const previousNotes = vaultSnapshotRef.current.notes;
+                  const saved = applyAgentNotesUpdate(notes, previousNotes, applyUpdateNotes);
+                  vaultSnapshotRef.current.notes = saved === false ? previousNotes : notes;
+                  return saved;
+                },
+                updateSnippets: (snippetUpdate) => {
+                  vaultSnapshotRef.current.snippets = typeof snippetUpdate === 'function'
+                    ? snippetUpdate(vaultSnapshotRef.current.snippets)
+                    : snippetUpdate;
+                  current.updateSnippets(snippetUpdate);
+                },
+                startTunnel: current.startTunnel,
+                stopTunnel: current.stopTunnel,
+                stopRuleTunnels: current.stopRuleTunnels,
+                openHost: current.openHost
+                  ? (host, isExternalMcpCall, options) => current.openHost!(host, isExternalMcpCall, options)
+                  : undefined,
+                findExistingSessionForHost: current.findExistingSessionForHost,
+                reconnectSession: current.reconnectSession,
+                inspectSessionRecovery: current.inspectSessionRecovery,
+                closeSession: current.closeSession
+                  ? (sessionId) => current.closeSession!(sessionId)
+                  : undefined,
+                getScriptSessionMeta: (sessionId) => {
+                  const session = current.getScriptSessionMeta?.(sessionId);
+                  if (!session) return undefined;
+                  return {
+                    connected: session.status === 'connected',
+                    name: session.customName || session.hostLabel,
+                    hostname: session.hostname,
+                    username: session.username,
+                  };
+                },
+              });
+            });
           }
-          return result;
-        },
-        saveKeyPassphrase: (keyPath, passphrase) => rememberKeyPassphrase({
-          keyPath,
-          passphrase,
-          keys: vaultSnapshotRef.current.keys,
-          getKeys: () => vaultSnapshotRef.current.keys,
-          updateKeys: current.updateKeys,
-          setCurrentKeys: (keys) => {
-            vaultSnapshotRef.current.keys = keys;
-          },
-        }),
-        saveImportedKeyPassphrase: (keyPath, passphrase) => rememberImportedKeyPassphrase({
-          keyPath,
-          passphrase,
-          keys: vaultSnapshotRef.current.keys,
-          getKeys: () => vaultSnapshotRef.current.keys,
-          updateKeys: current.updateKeys,
-          setCurrentKeys: (keys) => {
-            vaultSnapshotRef.current.keys = keys;
-          },
-        }),
-        resolveKeyPassphraseAliases: resolveDefaultKeyPassphraseAliases,
-        readKeyPassphrases: (keyPath) => readRememberedKeyPassphrases(
-          keyPath,
-          vaultSnapshotRef.current.keys,
-        ),
-        removeKeyPassphrases: (keyPaths) => clearRememberedKeyPassphrases({
-          keyPaths,
-          getKeys: () => vaultSnapshotRef.current.keys,
-          setCurrentKeys: (keys) => {
-            vaultSnapshotRef.current.keys = keys;
-          },
-          updateKeys: current.updateKeys,
-        }),
-        updateNotes: (notes) => {
-          const previousNotes = vaultSnapshotRef.current.notes;
-          const saved = applyAgentNotesUpdate(notes, previousNotes, applyUpdateNotes);
-          vaultSnapshotRef.current.notes = saved === false ? previousNotes : notes;
-          return saved;
-        },
-        updateSnippets: (snippetUpdate) => {
-          vaultSnapshotRef.current.snippets = typeof snippetUpdate === 'function'
-            ? snippetUpdate(vaultSnapshotRef.current.snippets)
-            : snippetUpdate;
-          current.updateSnippets(snippetUpdate);
-        },
-        startTunnel: current.startTunnel,
-        stopTunnel: current.stopTunnel,
-        stopRuleTunnels: current.stopRuleTunnels,
-        openHost: current.openHost
-          ? (host, isExternalMcpCall, options) => current.openHost!(host, isExternalMcpCall, options)
-          : undefined,
-        findExistingSessionForHost: current.findExistingSessionForHost,
-        reconnectSession: current.reconnectSession,
-        inspectSessionRecovery: current.inspectSessionRecovery,
-        closeSession: current.closeSession
-          ? (sessionId) => current.closeSession!(sessionId)
-          : undefined,
-        getScriptSessionMeta: (sessionId) => {
-          const session = current.getScriptSessionMeta?.(sessionId);
-          if (!session) return undefined;
-          return {
-            connected: session.status === 'connected',
-            name: session.customName || session.hostLabel,
-            hostname: session.hostname,
-            username: session.username,
-          };
-        },
-      });
+          return client;
+        });
+      }
+      return clientPromise;
+    };
+
+    const unsubscribe = bridge.onVaultAgentRequest((payload) => {
+      void ensureClient().then((client) => client.dispatchVaultAgentBridgeRequest(payload));
     });
-    return setupVaultAgentBridge();
+    return () => {
+      disposed = true;
+      unsubscribe();
+      if (clientPromise) {
+        void clientPromise.then((client) => client.registerVaultAgentHandler(null));
+      }
+    };
   }, []);
 }

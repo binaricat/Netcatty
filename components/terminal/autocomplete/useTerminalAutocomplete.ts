@@ -20,7 +20,6 @@ import type { Snippet } from "../../../domain/models";
 import { recordCommand, subscribeCommandHistoryCleared } from "../../../application/state/commandHistoryStore";
 import { seedLocalShellHistoryFromHistfiles } from "./localShellHistorySeed";
 import { shellEscape } from "./completionEngine";
-import { preloadCommonSpecs } from "./figSpecLoader";
 import {
   listDirectoryEntries,
   normalizePathTokenForLookup,
@@ -390,12 +389,9 @@ export function useTerminalAutocomplete(
    */
   const typedBufferReliableRef = useRef<boolean>(true);
 
-  // Warm the cache for this session's target OS, including when it changes.
-  useEffect(() => {
-    if (settings.enabled) {
-      preloadCommonSpecs(hostOs);
-    }
-  }, [settings.enabled, hostOs]);
+  // Fig command specs are loaded on demand in completionEngine.ts via loadSpec()
+  // when a command is typed, avoiding ~25 MiB of permanent main-process ESM
+  // cache and renderer specCache overhead from eagerly importing 67 specs.
 
   // Local Terminal: seed autocomplete history from ~/.zsh_history (etc.) once
   // per stable hostId so prefix suggestions match Ghostty-style histfile recall

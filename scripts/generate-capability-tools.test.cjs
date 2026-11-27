@@ -43,11 +43,39 @@ test("committed toolNameIndex.json matches sidebar and global capability tool sp
     }
   }
   const sidebarByRpcMethod = {};
+  const sidebarToolNameToCapability = {};
+  const sidebarRpcMethodToCapability = {};
+  const freshApprovalSet = new Set();
+  const grantableSet = new Set();
   for (const spec of listCattyToolSpecs()) {
     if (spec.rpcMethod && spec.toolName && !sidebarByRpcMethod[spec.rpcMethod]) {
       sidebarByRpcMethod[spec.rpcMethod] = spec.toolName;
     }
+    if (spec.toolName && spec.capabilityId) {
+      sidebarToolNameToCapability[spec.toolName] = spec.capabilityId;
+    }
+    if (spec.rpcMethod && spec.capabilityId) {
+      sidebarRpcMethodToCapability[spec.rpcMethod] = spec.capabilityId;
+    }
+    if (spec.policy?.requiresFreshApproval && spec.capabilityId) {
+      freshApprovalSet.add(spec.capabilityId);
+    }
+    if (
+      spec.policy?.write
+      && !spec.policy?.bypassesApproval
+      && !spec.policy?.requiresFreshApproval
+      && spec.capabilityId
+    ) {
+      grantableSet.add(spec.capabilityId);
+    }
   }
-  assert.deepEqual(committed, { globalByCapabilityId, sidebarByRpcMethod });
+  assert.deepEqual(committed, {
+    globalByCapabilityId,
+    sidebarByRpcMethod,
+    sidebarToolNameToCapability,
+    sidebarRpcMethodToCapability,
+    freshApprovalOnlyCapabilities: [...freshApprovalSet].sort(),
+    grantableCapabilityIds: [...grantableSet].sort(),
+  });
 });
 

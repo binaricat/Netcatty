@@ -6,7 +6,6 @@ const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
-const { WebSocketServer } = require("ws");
 const {
   computeCertSha256Fingerprint,
   extractPeerCertInfo,
@@ -1382,6 +1381,7 @@ function createRemoteDesktopService(options = {}) {
         res.writeHead(426, { "Content-Type": "text/plain" });
         res.end("Upgrade Required");
       });
+      const { WebSocketServer } = require("ws");
       const wsServer = new WebSocketServer({
         noServer: true,
         perMessageDeflate: false,

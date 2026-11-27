@@ -1,6 +1,7 @@
 import { Search, X } from "lucide-react";
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
+import { usePinyinMatcherVersion } from "../../application/state/usePinyinMatcherVersion";
 import { filterSettingsSearchCatalog, type SettingsSearchHit } from "../../domain/settingsSearch";
 import { cn } from "../../lib/utils";
 import { Input } from "../ui/input";
@@ -26,11 +27,12 @@ export function SettingsSearchControl({
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [restoreOpenFocus, setRestoreOpenFocus] = useState(false);
+  const pinyinMatcherVersion = usePinyinMatcherVersion();
 
-  const hits = useMemo(
-    () => filterSettingsSearchCatalog(query, t, { includePlugins, limit: 12 }),
-    [query, t, includePlugins],
-  );
+  const hits = useMemo(() => {
+    void pinyinMatcherVersion;
+    return filterSettingsSearchCatalog(query, t, { includePlugins, limit: 12 });
+  }, [query, t, includePlugins, pinyinMatcherVersion]);
 
   const collapseSearch = useCallback((restoreFocus = false) => {
     setExpanded(false);
