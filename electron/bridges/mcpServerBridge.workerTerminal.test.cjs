@@ -603,6 +603,7 @@ test("readiness rehydration fails closed when output drain fails or primary scre
       endLine: 0,
       cursorLine: 0,
       cursorAtLineEnd: false,
+      readinessContext: "",
       alternateScreen: false,
     }));
     bridge.setPermissionMode("auto");
@@ -613,6 +614,55 @@ test("readiness rehydration fails closed when output drain fails or primary scre
       sessionId: "ssh-1",
       command: "pwd",
       chatSessionId: "chat-4",
+    });
+    assert.deepEqual(requests.map((r) => r.channel), ["netcatty:ai:shellReadiness", "netcatty:ai:exec"]);
+  }
+
+  // Case 5: hibernated snapshot lacks live isWrapped metadata -> never seeds.
+  {
+    const requests = [];
+    const bridge = loadFreshBridge();
+    bridge.init({
+      sessions: new Map(),
+      electronModule: null,
+      drainTerminalOutput: async () => ({ success: true }),
+      terminalWorkerManager: {
+        getSessionOwnerWebContentsId: () => null,
+        drainOutputSession: () => true,
+        request(channel, payload) {
+          requests.push({ channel, payload });
+          if (channel === "netcatty:ai:shellReadiness") {
+            return Promise.resolve({
+              ok: true,
+              found: true,
+              trackedShell: true,
+              freshIdlePrompt: "",
+              visibleIdlePrompt: "",
+              readiness: "unknown",
+              generation: 8,
+              bufferedBytes: 0,
+              unackedBytes: 0,
+              outputPaused: false,
+            });
+          }
+          return Promise.resolve({ ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+        },
+      },
+    });
+    bridge.setVaultAgentInvoker(async () => ({
+      ok: true,
+      content: "user@host:~$ echo wrapped\nuser@host:~$ ",
+      source: "snapshot",
+      alternateScreen: false,
+    }));
+    bridge.setPermissionMode("auto");
+    bridge.setCommandBlocklist([]);
+    bridge.updateSessionMetadata([{ sessionId: "ssh-1", protocol: "ssh", connected: true }], "chat-5");
+
+    await bridge.dispatchBuiltinRpc("netcatty/exec", {
+      sessionId: "ssh-1",
+      command: "pwd",
+      chatSessionId: "chat-5",
     });
     assert.deepEqual(requests.map((r) => r.channel), ["netcatty:ai:shellReadiness", "netcatty:ai:exec"]);
   }

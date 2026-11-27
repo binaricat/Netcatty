@@ -227,7 +227,10 @@ import {
 } from "./terminal/sftpCwd";
 import { useTerminalEffects } from "./terminal/useTerminalEffects";
 import { useTerminalHibernateEffect } from "./terminal/useTerminalHibernateEffect";
-import { readActiveTerminalBufferTextRange } from "./terminal/terminalContextBuffer";
+import {
+  readActiveTerminalBufferTextRange,
+  readCursorLogicalTailForReadiness,
+} from "./terminal/terminalContextBuffer";
 import {
   applyAuthoritativeHibernateSnapshot,
   appendHibernatePendingBuffer,
@@ -783,29 +786,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const alternateScreen = isTerminalAlternateScreenActive(term);
       const activeBuffer = term.buffer.active as typeof term.buffer.active & {
         viewportY?: number;
-        baseY?: number;
-        cursorY?: number;
-        cursorX?: number;
       };
       const totalLines = Math.max(0, activeBuffer.length);
-      const cursorLine = totalLines > 0
-        && typeof activeBuffer.baseY === 'number'
-        && typeof activeBuffer.cursorY === 'number'
-        ? Math.min(totalLines - 1, Math.max(0, activeBuffer.baseY + activeBuffer.cursorY))
-        : undefined;
-      let cursorLineText: string | undefined;
-      let cursorAtLineEnd: boolean | undefined;
-      if (cursorLine !== undefined && typeof activeBuffer.cursorX === 'number') {
-        const line = activeBuffer.getLine(cursorLine);
-        if (line) {
-          const cursorColumn = Math.min(term.cols, Math.max(0, Math.floor(activeBuffer.cursorX)));
-          const afterCursor = line.translateToString(true, cursorColumn, term.cols);
-          cursorAtLineEnd = afterCursor.length === 0;
-          if (cursorAtLineEnd) {
-            cursorLineText = line.translateToString(false, 0, cursorColumn);
-          }
-        }
-      }
+      const cursorTail = readCursorLogicalTailForReadiness(term);
       const viewportStartLine = alternateScreen
         ? 0
         : Math.max(0, activeBuffer.viewportY ?? Math.max(0, totalLines - term.rows));
@@ -844,9 +827,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         hasMoreAfter: lineWindow.endLine >= 0 && lineWindow.endLine < totalLines - 1,
         source: 'live',
         alternateScreen,
-        ...(cursorLine !== undefined ? { cursorLine } : {}),
-        ...(cursorLineText !== undefined ? { cursorLineText } : {}),
-        ...(cursorAtLineEnd !== undefined ? { cursorAtLineEnd } : {}),
+        ...(cursorTail.cursorLine !== undefined ? { cursorLine: cursorTail.cursorLine } : {}),
+        cursorAtLineEnd: cursorTail.cursorAtLineEnd,
+        readinessContext: alternateScreen ? '' : cursorTail.text,
       };
     }
 

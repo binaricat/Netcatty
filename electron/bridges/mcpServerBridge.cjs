@@ -1755,6 +1755,15 @@ async function queryWorkerShellReadiness(sessionId, status) {
 }
 
 function extractCursorBoundedContextForSeed(visible) {
+  // Hibernated snapshots lack xterm's live `isWrapped` line-wrap metadata, so
+  // physical rows cannot safely distinguish soft-wrapped commands from prompts.
+  if (visible?.source === "snapshot") return "";
+  // Prefer the renderer's logical-line-reconstructed cursor tail when provided;
+  // an empty string is an explicit fail-closed refusal (e.g. wrapped head
+  // evicted, mid-line cursor, or non-empty rows below cursor).
+  if (typeof visible?.readinessContext === "string") {
+    return visible.readinessContext;
+  }
   if (typeof visible?.content !== "string") return "";
   const content = visible.content;
   if (!content.trim()) return "";
