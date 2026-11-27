@@ -13,10 +13,11 @@ function drivePath(value) {
 }
 
 function readWindowsProcessTree(pid, callback, {
-  loadNative = () => require('@vscode/windows-process-tree'), execFileFn = execFile,
+  loadNative = () => require('@vscode/windows-process-tree'), execFileFn = execFile, readFallback,
 } = {}) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return callback(null);
   const fallback = () => {
+    if (readFallback) return readFallback(pid, callback);
     const powershell = path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32',
       'WindowsPowerShell', 'v1.0', 'powershell.exe');
     const command = `$ErrorActionPreference = 'Stop'; `

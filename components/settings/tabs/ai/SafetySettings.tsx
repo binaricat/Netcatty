@@ -4,6 +4,7 @@ import type { AIPermissionMode } from "../../../../infrastructure/ai/types";
 import {
   DEFAULT_COMMAND_BLOCKLIST,
   MAX_COMMAND_TIMEOUT_SECONDS,
+  MAX_MAX_ITERATIONS,
   MAX_RESPONSE_IDLE_TIMEOUT_SECONDS,
 } from "../../../../infrastructure/ai/types";
 import {
@@ -178,7 +179,7 @@ export const SafetySettings: React.FC<{
               if (!isNaN(val) && val > 0) setMaxIterations(val);
             }}
             min={1}
-            max={100}
+            max={MAX_MAX_ITERATIONS}
             className="w-20 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
         </SettingRow>

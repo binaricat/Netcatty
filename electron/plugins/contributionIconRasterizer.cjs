@@ -70,7 +70,7 @@ function createIsolatedContributionIconRasterizer(options) {
       webPreferences: {
         partition,
         sandbox: true,
-          spellcheck: false,
+        spellcheck: false,
         contextIsolation: true,
         nodeIntegration: false,
         webSecurity: true,
@@ -190,6 +190,7 @@ function createPooledContributionIconRasterizer(options) {
       },
     });
     activeWindow = win;
+    win.webContents?.once?.("render-process-gone", () => destroyCurrent(currentGen));
     const ready = (async () => {
       win.removeMenu?.();
       win.webContents?.session?.webRequest?.onBeforeRequest?.(
@@ -235,7 +236,7 @@ function createPooledContributionIconRasterizer(options) {
       }
       return Buffer.from(result.slice(prefix.length), "base64");
     } catch (error) {
-      destroyCurrent(gen);
+      if (gen !== undefined) destroyCurrent(gen);
       throw error;
     } finally {
       inFlight = Math.max(0, inFlight - 1);

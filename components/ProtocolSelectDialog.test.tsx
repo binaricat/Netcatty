@@ -91,3 +91,34 @@ test("plugin protocol hosts default to the plugin provider when optional built-i
   }
   assert.ok(!telnetButton.includes("border-primary"));
 });
+
+test("protocol select dialog lists companion RDP and VNC protocols with remember-default toggle", () => {
+  const markup = renderToStaticMarkup(
+    <I18nProvider locale="en">
+      <ProtocolSelectDialog
+        host={host({
+          moshEnabled: false,
+          etEnabled: false,
+          telnetEnabled: false,
+          rdpConfig: { enabled: true, port: 13389, tunnelViaHostSsh: true, defaultConnect: true },
+          vncConfig: { enabled: true, port: 5902, tunnelViaHostSsh: false },
+          connectProtocolBehavior: "ask",
+        })}
+        onSelect={() => undefined}
+        onCancel={() => undefined}
+      />
+    </I18nProvider>,
+  );
+
+  assert.match(markup, /data-protocol="ssh"/);
+  assert.match(markup, /data-protocol="rdp"/);
+  assert.match(markup, /data-protocol="vnc"/);
+  assert.match(markup, /via SSH/);
+  assert.match(markup, /13389/);
+  assert.match(markup, /5902/);
+  assert.match(markup, /Remember as default/);
+  // RDP is flagged defaultConnect, so it is pre-selected in the dialog
+  const rdpStart = markup.lastIndexOf("<button", markup.indexOf('data-protocol="rdp"'));
+  const rdpEnd = markup.indexOf("</button>", markup.indexOf('data-protocol="rdp"'));
+  assert.match(markup.slice(rdpStart, rdpEnd), /aria-pressed="true"/);
+});

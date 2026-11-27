@@ -197,28 +197,82 @@ test("listAgentToolSpecs splits sidebar harness tools from shared RPC tools", ()
   assert.ok(globalIds.every((id) => sidebarIds.includes(id) || id.startsWith("harness.") === false));
 });
 
-test("listCattyToolSpecs includes renderer harness tools and the shared terminal read entry", () => {
+test("listCattyToolSpecs includes renderer harness tools and the shared screen read entries", () => {
   const specs = listCattyToolSpecs();
   assert.ok(specs.length >= 40);
   const harness = specs.filter((spec) => spec.capabilityId.startsWith("harness."));
-  assert.equal(harness.length, 6);
+  assert.equal(harness.length, 8);
+  const expectedRpcById = {
+    "harness.terminal.read_context": "netcatty/readContext",
+    "harness.remote_desktop.read_screen": "netcatty/readRemoteScreen",
+  };
   for (const spec of harness) {
-    const screenRead = spec.capabilityId === "harness.terminal.read_context";
-    assert.equal(spec.localExecution, !screenRead);
-    assert.equal(spec.rpcMethod, screenRead ? "netcatty/readContext" : null);
+    const expectedRpc = expectedRpcById[spec.capabilityId] || null;
+    assert.equal(spec.localExecution, expectedRpc === null);
+    assert.equal(spec.rpcMethod, expectedRpc);
   }
   const harnessIds = harness.map((spec) => spec.capabilityId);
   assert.ok(harnessIds.includes("harness.tool_output.read"));
   assert.ok(harnessIds.includes("harness.workspace.get_info"));
   assert.ok(harnessIds.includes("harness.terminal.read_context"));
+  assert.ok(harnessIds.includes("harness.remote_desktop.read_screen"));
+  assert.ok(harnessIds.includes("harness.remote_desktop.act"));
+
+  const readScreenSpec = harness.find((spec) => spec.capabilityId === "harness.remote_desktop.read_screen");
+  assert.ok(readScreenSpec?.inputShape?.grid);
+  const actSpec = harness.find((spec) => spec.capabilityId === "harness.remote_desktop.act");
+  assert.equal(actSpec?.toolName, "remote_desktop_act");
+  assert.equal(actSpec?.policy?.write, true);
+  assert.equal(actSpec?.policy?.bypassesApproval, false);
 });
 
-test("only terminal reading is exposed from harness on MCP", () => {
+test("only terminal and remote desktop screen reading are exposed from harness on MCP", () => {
   const mcpCapabilityIds = listMcpTools().map((tool) => tool.capabilityId);
   assert.ok(mcpCapabilityIds.includes("harness.terminal.read_context"));
+  assert.ok(mcpCapabilityIds.includes("harness.remote_desktop.read_screen"));
+  const allowedHarnessMcp = new Set([
+    "harness.terminal.read_context",
+    "harness.remote_desktop.read_screen",
+  ]);
   for (const capabilityId of mcpCapabilityIds) {
-    assert.ok(!capabilityId.startsWith("harness.") || capabilityId === "harness.terminal.read_context");
+    assert.ok(!capabilityId.startsWith("harness.") || allowedHarnessMcp.has(capabilityId));
   }
+});
+
+test("remote_desktop_read_screen MCP handler returns native image content block alongside metadata", async () => {
+  let handler = null;
+  const fakeServer = {
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      if (name === "remote_desktop_read_screen") handler = mcpToolHandler(schemaOrHandler, maybeHandler);
+    },
+  };
+  registerMcpTools(fakeServer, {
+    rpcCall: async (_method, params) => ({
+      ok: true,
+      captureId: "rdcap-1",
+      sessionId: params.sessionId || "rdp-1",
+      width: 1280,
+      height: 720,
+      mediaType: "image/jpeg",
+      base64Data: "QUJDRA==",
+    }),
+    scopeParams: { chatSessionId: "chat-1" },
+    guardWriteOperation: () => null,
+    catalogDescription: (_name, fallback) => fallback,
+  });
+
+  assert.ok(handler, "remote_desktop_read_screen handler registered");
+  const result = await handler({ sessionId: "rdp-1", quality: "standard" });
+  assert.equal(result.isError, undefined);
+  assert.equal(result.content.length, 2);
+  assert.equal(result.content[0].type, "text");
+  assert.doesNotMatch(result.content[0].text, /QUJDRA==/);
+  assert.match(result.content[0].text, /"captureId": "rdcap-1"/);
+  assert.deepEqual(result.content[1], {
+    type: "image",
+    data: "QUJDRA==",
+    mimeType: "image/jpeg",
+  });
 });
 
 test("listMcpTools descriptions stay aligned with catalog capability ids", () => {
@@ -500,4 +554,41 @@ test("terminal_execute_bulk is MCP-only: no sidebar or global agent exposure", (
   assert.ok(listMcpTools().some((tool) => tool.mcpTool === "terminal_execute_bulk"));
   assert.equal(listCattyToolSpecs().some((spec) => spec.capabilityId === "terminal.executeBulk"), false);
   assert.equal(listAgentToolSpecs(AGENT_KINDS.GLOBAL).some((spec) => spec.capabilityId === "terminal.executeBulk"), false);
+});
+
+test("observer mode still lets MCP stop tools through, and blocks other writes before RPC", async () => {
+  const handlers = new Map();
+  const fakeServer = {
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      handlers.set(name, mcpToolHandler(schemaOrHandler, maybeHandler));
+    },
+  };
+  const rpcCalls = [];
+  registerMcpTools(fakeServer, {
+    rpcCall: async (method, params) => {
+      rpcCalls.push(method);
+      return { ok: true, jobs: [], params };
+    },
+    scopeParams: { chatSessionId: "chat-1" },
+    // Same refusal the MCP server returns in observer mode.
+    guardWriteOperation: () => 'Operation denied: permission mode is "observer" (read-only).',
+    catalogDescription: (_name, fallback) => fallback,
+  });
+
+  // Declared bypassesObserverBlock: reaches the bridge, which applies the same policy.
+  const stopped = await handlers.get("terminal_stop_bulk")({ bulkId: "bulk-1" });
+  assert.equal(stopped.isError, undefined);
+  assert.deepEqual(rpcCalls, ["netcatty/jobStopBulk"]);
+
+  // Other writes are refused before any RPC.
+  for (const name of ["terminal_start_bulk", "terminal_execute_bulk", "sftp_mkdir"]) {
+    const refused = await handlers.get(name)({ command: "uptime", sessionIds: '["a","b"]', sessionId: "a", path: "/tmp/x" });
+    assert.equal(refused.isError, true, name);
+    assert.match(refused.content[0].text, /observer/, name);
+  }
+  assert.deepEqual(rpcCalls, ["netcatty/jobStopBulk"], "no write RPC was sent");
+
+  // Reads are never guarded.
+  await handlers.get("terminal_poll_bulk")({ bulkId: "bulk-1" });
+  assert.deepEqual(rpcCalls, ["netcatty/jobStopBulk", "netcatty/jobPollBulk"]);
 });

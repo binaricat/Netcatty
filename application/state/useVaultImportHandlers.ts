@@ -145,7 +145,9 @@ export function useVaultImportHandlers({
                   ? "SecureCRT"
                   : format === "finalshell"
                     ? "FinalShell"
-                    : "ssh_config";
+                    : format === "rdp"
+                      ? "RDP"
+                      : "ssh_config";
         const updateProgress = (next: Partial<VaultImportProgress>) => {
           setImportProgress((current) => ({
             status: "running",

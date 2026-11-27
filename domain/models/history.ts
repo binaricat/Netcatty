@@ -1,5 +1,5 @@
 // Known Hosts - discovered from system SSH known_hosts file
-import type { HostIconColorId, HostIconColorMode, HostIconId, HostIconMode } from './connection';
+import type { HostIconColorId, HostIconColorMode, HostIconId, HostIconMode, HostProtocol } from './connection';
 
 export interface KnownHost {
   id: string;
@@ -45,7 +45,7 @@ export interface ConnectionLog {
   hostLabel: string; // Display label (e.g., 'Local Terminal' or host label)
   hostname: string; // Target hostname or 'localhost'
   username: string; // SSH username or system username
-  protocol: 'ssh' | 'telnet' | 'local' | 'mosh' | 'et' | 'serial';
+  protocol: HostProtocol;
   hostOs?: 'linux' | 'windows' | 'macos'; // Snapshot of the connected host OS for log icons
   hostDistro?: string; // Snapshot of the connected host distro/vendor icon id
   hostIconMode?: HostIconMode; // Snapshot of the host icon mode for log icons
@@ -61,6 +61,11 @@ export interface ConnectionLog {
   terminalData?: string; // Captured terminal output data for replay
   themeId?: string; // Terminal theme ID for this log view
   fontSize?: number; // Terminal font size for this log view
+  recordingId?: string; // UUID referencing <userData>/recordings/<id>.webm (never inline bytes)
+  recordingMimeType?: string; // e.g. 'video/webm;codecs=vp9,opus'
+  recordingDurationMs?: number; // Finalized recording duration in milliseconds
+  recordingBytes?: number; // Finalized recording file size in bytes
+  recordingHasAudio?: boolean; // Whether an audio track was merged into the recording
 }
 
 // Session Logs Settings - for auto-saving terminal logs to local filesystem

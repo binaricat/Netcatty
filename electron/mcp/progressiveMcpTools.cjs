@@ -28,6 +28,9 @@ const CORE_MCP_TOOL_NAMES = Object.freeze([
 const DEFERRED_MCP_TOOLSETS = Object.freeze({
   terminal_bulk: Object.freeze([
     "terminal_execute_bulk",
+    "terminal_start_bulk",
+    "terminal_poll_bulk",
+    "terminal_stop_bulk",
   ]),
   sessions: Object.freeze([
     "session_reconnect",
@@ -36,6 +39,9 @@ const DEFERRED_MCP_TOOLSETS = Object.freeze({
   attachments: Object.freeze([
     "list_attachments",
     "read_attachment",
+  ]),
+  remote_desktop: Object.freeze([
+    "remote_desktop_read_screen",
   ]),
   sftp_advanced: Object.freeze([
     "sftp_stat",
@@ -151,7 +157,7 @@ function registerProgressiveMcpTools(server, deps, toolDefs = listMcpTools()) {
 
   server.tool(
     MCP_TOOL_LOADER_NAME,
-    "Load more Netcatty tools by category. Choose terminal_bulk (run one command on many sessions at once), sessions, attachments, sftp_advanced, vault_hosts, vault_notes, snippets, scripts, portforward, or all. Newly loaded tools appear immediately without restarting the MCP server.",
+    "Load more Netcatty tools by category. Choose terminal_bulk, sessions, attachments, remote_desktop, sftp_advanced, vault_hosts, vault_notes, snippets, scripts, portforward, or all. Newly loaded tools appear immediately without restarting the MCP server.",
     {
       toolset: z.enum(LOADABLE_MCP_TOOLSET_NAMES).describe("Netcatty tool category to load"),
     },

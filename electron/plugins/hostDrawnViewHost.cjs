@@ -111,8 +111,9 @@ class HostDrawnViewHost {
     const pending = this.resources.image(plugin, resource).then((result) => {
       if (this.isLocked() || this.instances.get(id) !== instance) throw new Error("Plugin view closed");
       this.contributions.assertViewActivationCurrent(instance.activation, { context: instance.context });
-      instance.resourceBytes = (instance.resourceBytes ?? 0) + result.url.length;
-      if (instance.resourceBytes > 24 * 1024 * 1024) throw new Error("Plugin image budget exceeded");
+      const nextBytes = (instance.resourceBytes ?? 0) + result.url.length;
+      if (nextBytes > 24 * 1024 * 1024) throw new Error("Plugin image budget exceeded");
+      instance.resourceBytes = nextBytes;
       return result;
     }).catch((error) => {
       if (instance.resources?.get(resource) === pending) instance.resources.delete(resource);

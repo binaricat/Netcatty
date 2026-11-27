@@ -53,8 +53,11 @@ import {
   STORAGE_KEY_SNIPPET_PACKAGES,
   STORAGE_KEY_SNIPPETS,
   STORAGE_KEY_TERM_SETTINGS,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS,
 } from "../../infrastructure/config/storageKeys";
 import { localStorageAdapter, LOCAL_STORAGE_ADAPTER_CHANGED_EVENT } from "../../infrastructure/persistence/localStorageAdapter";
+import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
 import {
   mergeGlobalHistoryOnAppend,
   removeGlobalHistoryEntry,
@@ -628,6 +631,27 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
       if (!nextIds.has(log.id)) {
         connectionLogPendingRef.current.set(log.id, { generation, log: null });
       }
+    }
+    const remainingRecordingIds = new Set<string>();
+    for (const log of next) {
+      if (log.recordingId) remainingRecordingIds.add(log.recordingId);
+    }
+    const removedRecordingIds: string[] = [];
+    for (const log of prev) {
+      if (
+        !nextIds.has(log.id)
+        && log.recordingId
+        && !remainingRecordingIds.has(log.recordingId)
+      ) {
+        removedRecordingIds.push(log.recordingId);
+      }
+    }
+    if (removedRecordingIds.length > 0) {
+      void netcattyBridge
+        .get()
+        ?.remoteDesktopRecordings
+        ?.deleteMany?.({ recordingIds: removedRecordingIds })
+        ?.catch(() => {});
     }
     connectionLogsRef.current = next;
     setConnectionLogs(next);
@@ -1559,6 +1583,35 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
   useLayoutEffect(() => {
     publishConnectionLogsSnapshot({ connectionLogs });
   }, [connectionLogs]);
+
+  // One-time startup GC to sweep orphaned / expired / over-quota remote desktop recordings
+  // while preserving all bookmarked/saved connection log recordings.
+  const hasRunRecordingStartupGcRef = useRef(false);
+  useEffect(() => {
+    if (!syncConnectionLogTerminalData || hasRunRecordingStartupGcRef.current) return;
+    hasRunRecordingStartupGcRef.current = true;
+    const bridge = netcattyBridge.get();
+    if (!bridge?.remoteDesktopRecordings?.runGc) return;
+    const logs = connectionLogsRef.current;
+    const referencedIds = logs
+      .map((log) => log.recordingId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+    const protectedIds = logs
+      .filter((log) => log.saved && typeof log.recordingId === "string" && log.recordingId.length > 0)
+      .map((log) => log.recordingId as string);
+    const storedMaxMb = localStorageAdapter.readNumber(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB);
+    const maxMb = storedMaxMb != null && storedMaxMb >= 64 ? storedMaxMb : 1024;
+    const storedRetention = localStorageAdapter.readNumber(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS);
+    const retentionDays = storedRetention != null && storedRetention >= 0 ? storedRetention : 30;
+    void bridge.remoteDesktopRecordings
+      .runGc({
+        maxBytes: maxMb * 1024 * 1024,
+        retentionDays,
+        referencedIds,
+        protectedIds,
+      })
+      .catch(() => {});
+  }, [syncConnectionLogTerminalData]);
 
   useLayoutEffect(() => {
     registerConnectionLogsActions({

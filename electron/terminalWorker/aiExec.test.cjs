@@ -850,3 +850,63 @@ test("worker collapseCarriageReturns preserves CR/CRLF/trailing-CR semantics and
   assert.equal(polled.output, `start\n${frames[frameCount - 1]}`);
   assert.ok(elapsedMs < 500, `expected linear worker jobPoll CR collapse on 256KB+ output, took ${elapsedMs}ms`);
 });
+
+test("worker job-start precheck runs the job refusals and never creates a job or touches the terminal", async () => {
+  const pty = new FakePty();
+  const sessions = new Map([
+    ["ssh", { protocol: "ssh", stream: pty, shellKind: "posix", _promptTrackTail: "", lastIdlePrompt: "" }],
+    ["local-unknown", { protocol: "local", type: "local", stream: new FakePty(), shellKind: "unknown" }],
+    ["no-pty", { protocol: "ssh", shellKind: "posix" }],
+    ["serial", { protocol: "serial", stream: new FakePty(), shellKind: "posix" }],
+    ["busy", { protocol: "ssh", stream: new FakePty(), shellKind: "posix", _promptTrackTail: "", lastIdlePrompt: "" }],
+  ]);
+  const backgroundJobs = new Map();
+  const activeSessionJobs = new Map([["busy", "job-existing"]]);
+  const start = createWorkerAiJobStartHandler({ sessions, backgroundJobs, activeSessionJobs });
+  const precheck = (sessionId, command, extra = {}) => start(createFakeEvent(), {
+    sessionId, command, chatSessionId: "chat", commandTimeoutMs: 2000, precheck: true, ...extra,
+  });
+
+  assert.deepEqual(await precheck("ssh", "apt-get -y upgrade"), { ok: true });
+  assert.match(
+    (await precheck("ssh", "echo forbidden-word", { commandBlocklist: ["forbidden-word"] })).error,
+    /^Command blocked by safety policy\. Pattern: /,
+  );
+  assert.match((await precheck("local-unknown", "uptime")).error, /AI execution is not supported/);
+  assert.match((await precheck("no-pty", "uptime")).error, /requires a writable PTY-backed terminal session/);
+  assert.match((await precheck("serial", "uptime")).error, /supports shell-backed PTY sessions only/);
+  assert.equal((await precheck("busy", "uptime")).ok, false);
+  assert.deepEqual(await precheck("ghost", "uptime"), { ok: false, error: "Session not found" });
+  assert.deepEqual(pty.writes, [], "a precheck never types into the terminal");
+  assert.equal(backgroundJobs.size, 0, "a precheck never creates a job");
+  assert.deepEqual([...activeSessionJobs.keys()], ["busy"], "a precheck never reserves a session");
+});
+
+test("worker job-start precheck with probe:false opens no channel to the host; the full precheck still probes", async () => {
+  const make = () => {
+    const calls = { probe: 0 };
+    const session = {
+      protocol: "ssh", shellKind: "", stream: new FakePty(), _promptTrackTail: "", lastIdlePrompt: "",
+      _shellKindExecProbe: async () => { calls.probe += 1; return "/bin/bash\n"; },
+    };
+    const start = createWorkerAiJobStartHandler({ sessions: new Map([["ssh", session]]) });
+    return { calls, session, precheck: (extra) => start(createFakeEvent(), {
+      sessionId: "ssh", command: "uptime", chatSessionId: "chat", commandTimeoutMs: 2000, precheck: true, ...extra,
+    }) };
+  };
+
+  const light = make();
+  assert.deepEqual(await light.precheck({ probe: false }), { ok: true });
+  assert.equal(light.calls.probe, 0, "no remote command before approval");
+  assert.match(
+    (await light.precheck({ probe: false, command: "echo forbidden-word", commandBlocklist: ["forbidden-word"] })).error,
+    /^Command blocked by safety policy\. Pattern: /,
+    "user patterns still apply without probing",
+  );
+  assert.equal(light.calls.probe, 0);
+  assert.deepEqual(light.session.stream.writes, []);
+
+  const full = make();
+  assert.deepEqual(await full.precheck({}), { ok: true });
+  assert.ok(full.calls.probe >= 1, "after approval the shell kind is probed as for a real start");
+});

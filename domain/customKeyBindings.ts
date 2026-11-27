@@ -1,4 +1,39 @@
-import { CustomKeyBindings } from './models';
+import { CustomKeyBindings, KeyBinding } from './models';
+
+export const resolveKeyBindings = (
+  defaults: readonly KeyBinding[],
+  customKeyBindings: CustomKeyBindings,
+): KeyBinding[] => {
+  let merged = defaults.map(binding => {
+    const custom = customKeyBindings[binding.id];
+    if (!custom) return binding;
+    return {
+      ...binding,
+      mac: custom.mac ?? binding.mac,
+      pc: custom.pc ?? binding.pc,
+    };
+  });
+
+  for (const scheme of ['mac', 'pc'] as const) {
+    const customChords = { sftp: new Set<string>(), app: new Set<string>() };
+    for (const binding of merged) {
+      if (customKeyBindings[binding.id]?.[scheme] != null && binding[scheme] !== 'Disabled') {
+        customChords[binding.category === 'sftp' ? 'sftp' : 'app'].add(binding[scheme]);
+      }
+    }
+
+    // SFTP has its own input context; all other categories share the app-level handler.
+    // Custom shortcuts win over defaults in that context; custom conflicts remain unchanged.
+    merged = merged.map(binding => (
+      customKeyBindings[binding.id]?.[scheme] == null &&
+      customChords[binding.category === 'sftp' ? 'sftp' : 'app'].has(binding[scheme])
+        ? { ...binding, [scheme]: 'Disabled' }
+        : binding
+    ));
+  }
+
+  return merged;
+};
 
 const SYNC_VERSION_FIELD = '__netcattySyncVersion';
 const SYNC_ORIGIN_FIELD = '__netcattySyncOrigin';

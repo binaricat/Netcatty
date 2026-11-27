@@ -34,6 +34,8 @@ interface AppHostTreeLayerProps {
   themeById: ReadonlyMap<string, TerminalTheme>;
   resolveSessionAppearance?: (hostScope: TerminalAppearanceHostScope) => ResolvedAppearance;
   onConnect: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: 'vnc' | 'rdp') => void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: 'vnc' | 'rdp') => void;
   onNewHost?: (defaultGroup?: string) => void;
   onEditHost?: (host: Host) => void;
   onCreateLocalTerminal?: () => void;
@@ -68,6 +70,8 @@ function appHostTreeLayerAreEqual(
     && prev.themeById === next.themeById
     && prev.resolveSessionAppearance === next.resolveSessionAppearance
     && prev.onConnect === next.onConnect
+    && prev.onConnectRemoteDesktop === next.onConnectRemoteDesktop
+    && prev.onOpenSystemRemoteDesktop === next.onOpenSystemRemoteDesktop
     && prev.onNewHost === next.onNewHost
     && prev.onEditHost === next.onEditHost
     && prev.onCreateLocalTerminal === next.onCreateLocalTerminal;
@@ -89,6 +93,8 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
   themeById,
   resolveSessionAppearance,
   onConnect,
+  onConnectRemoteDesktop,
+  onOpenSystemRemoteDesktop,
   onNewHost,
   onEditHost,
   onCreateLocalTerminal,
@@ -185,6 +191,8 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
         resolvedPreviewTheme={sidebarPreviewTheme}
         activeHostId={activeHostId}
         onConnect={onConnect}
+        onConnectRemoteDesktop={onConnectRemoteDesktop}
+        onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
         onNewHost={onNewHost}
         onEditHost={onEditHost}
         onCreateLocalTerminal={onCreateLocalTerminal}

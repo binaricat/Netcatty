@@ -60,7 +60,7 @@ const noopSetMultiSelectMode = (_enabled: boolean) => {};
 const noopSetSelectedHostIds = (_ids: Set<string>) => {};
 
 export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext }) {
-  const { Badge, Boolean, Button, cancelInlineGroupEdit, CheckSquare, ClipboardCopy, Clock, cn, commitInlineGroupRename, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, displayedGroups, displayedHosts, DistroAvatar, Edit2, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, groupConfigs, groupedDisplayHosts, handleCopyCredentials, handleCopyHostname, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleHostConnect, handleOpenHostBrowser, hostClickBehavior: hostClickBehaviorProp, handleUnmanageGroup, hasHostsSidePanel, hostListScrollRef, HostTreeView, isHostsSectionActive, isMultiSelectMode, lastPinnedId, LayoutGrid, managedGroupPaths, moveGroup, moveHostToGroup, moveHostsToGroup, onDeleteHost, Pin, pinnedHosts, Plug, recentHosts, reorderGroup, reorderHost, sanitizeHost, search, selectedGroupPath, selectedGroupPaths, selectedHostIds, selectedTags, sessionCount, setDeleteTargetPath, setDragOverDropTarget, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsMultiSelectMode = noopSetMultiSelectMode, setIsNewFolderOpen, setLastPinnedId, setNewFolderName, setSelectedGroupPath, setSelectedHostIds = noopSetSelectedHostIds, setTargetParentPath, shouldHideEmptyRootHostsSection, showRecentHosts, sortMode, Square, Star, startInlineDeleteGroup, startInlineNewGroup, startInlineRenameGroup, t, toggleGroupSelection, toggleHostPinned, toggleHostSelection, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, viewMode, visibleDisplayedHosts } = ctx;
+  const { Badge, Boolean, Button, cancelInlineGroupEdit, CheckSquare, ClipboardCopy, Clock, cn, commitInlineGroupRename, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, displayedGroups, displayedHosts, DistroAvatar, Edit2, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, groupConfigs, groupedDisplayHosts, handleCopyCredentials, handleCopyHostname, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleHostConnect, handleOpenHostBrowser, hostClickBehavior: hostClickBehaviorProp, handleUnmanageGroup, hasHostsSidePanel, hostListScrollRef, HostTreeView, isHostsSectionActive, isMultiSelectMode, lastPinnedId, LayoutGrid, managedGroupPaths, moveGroup, moveHostToGroup, moveHostsToGroup, onConnectRemoteDesktop, onDeleteHost, onOpenSystemRemoteDesktop, Pin, pinnedHosts, Plug, recentHosts, reorderGroup, reorderHost, sanitizeHost, search, selectedGroupPath, selectedGroupPaths, selectedHostIds, selectedTags, sessionCount, setDeleteTargetPath, setDragOverDropTarget, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsMultiSelectMode = noopSetMultiSelectMode, setIsNewFolderOpen, setLastPinnedId, setNewFolderName, setSelectedGroupPath, setSelectedHostIds = noopSetSelectedHostIds, setTargetParentPath, shouldHideEmptyRootHostsSection, showRecentHosts, sortMode, Square, Star, startInlineDeleteGroup, startInlineNewGroup, startInlineRenameGroup, t, toggleGroupSelection, toggleHostPinned, toggleHostSelection, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, viewMode, visibleDisplayedHosts } = ctx;
   const hostClickBehavior: HostClickBehavior = hostClickBehaviorProp === 'select' ? 'select' : 'connect';
   const multiSelectedGroupPaths: Set<string> = selectedGroupPaths ?? EMPTY_GROUP_PATH_SET;
   const [draggingHostIds, setDraggingHostIds] = React.useState<ReadonlySet<string> | null>(null);
@@ -401,6 +401,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
       onDragStart={handleHostDragStart}
       onActivate={activateHost}
       onConnect={handleHostConnect}
+      onConnectRemoteDesktop={onConnectRemoteDesktop}
+      onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
       onOpenBrowser={handleOpenHostBrowser}
       onEdit={handleEditHost}
       onDuplicate={handleDuplicateHost}
@@ -880,6 +882,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                       onExpandAll={treeExpandedState.expandAll}
                       onCollapseAll={treeExpandedState.collapseAll}
                       onConnect={handleHostConnect}
+                      onConnectRemoteDesktop={onConnectRemoteDesktop}
+                      onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
                       onOpenBrowser={handleOpenHostBrowser}
                       onEditHost={handleEditHost}
                       onDuplicateHost={handleDuplicateHost}

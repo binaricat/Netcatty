@@ -203,7 +203,7 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
       try {
         if (typeof event.scrollTop === 'number') element.scrollTop = event.scrollTop;
         if (typeof event.scrollLeft === 'number') element.scrollLeft = event.scrollLeft;
-      } catch {}
+      } catch { /* scroll properties may be read-only in synthetic DOM */ }
       element.dispatchEvent(new CustomEvent('scroll', {
         bubbles: false,
         detail: {
@@ -237,7 +237,7 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
     if (eventType === 'keydown' || eventType === 'keyup') {
       const isTextControl = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
       if (isTextControl && typeof event.selectionStart === 'number' && typeof event.selectionEnd === 'number') {
-        try { element.setSelectionRange(event.selectionStart, event.selectionEnd); } catch {}
+        try { element.setSelectionRange(event.selectionStart, event.selectionEnd); } catch { /* selection unsupported for input type */ }
       }
       element.dispatchEvent(new KeyboardEvent(eventType, { key: event.key ?? '', ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey, bubbles: true, cancelable: true }));
       if (eventType === 'keydown') {
@@ -261,7 +261,7 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
       }
       if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
         && typeof event.selectionStart === 'number' && typeof event.selectionEnd === 'number') {
-        try { element.setSelectionRange(event.selectionStart, event.selectionEnd); } catch {}
+        try { element.setSelectionRange(event.selectionStart, event.selectionEnd); } catch { /* selection unsupported for input type */ }
       }
       if (element instanceof HTMLInputElement && typeof event.checked === 'boolean') {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked')?.set?.call(element, event.checked);

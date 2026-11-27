@@ -2291,6 +2291,38 @@ test("legacy and invalid packed download settings preserve the local preference"
   }
 });
 
+test("tree folder double-click preference round-trips in sync payloads and preserves local value on missing or invalid input", async () => {
+  const key = storageKeys.STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR;
+  assert.ok((SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(key));
+
+  for (const behavior of ["navigate", "expand"] as const) {
+    localStorage.clear();
+    localStorage.setItem(key, behavior);
+    const payload = buildSyncPayload(vault());
+    assert.equal(payload.settings?.sftpTreeDoubleClickBehavior, behavior);
+
+    localStorage.clear();
+    await applySyncPayload(payload, { importVaultData: () => {} });
+    assert.equal(localStorage.getItem(key), behavior);
+  }
+
+  localStorage.clear();
+  const emptyPayload = buildSyncPayload(vault());
+  assert.equal(emptyPayload.settings?.sftpTreeDoubleClickBehavior, undefined);
+
+  localStorage.setItem(key, "expand");
+  await applySyncPayload(emptyPayload, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(key), "expand");
+
+  for (const invalid of ["open", "transfer", 1, null]) {
+    await applySyncPayload({
+      ...emptyPayload,
+      settings: { sftpTreeDoubleClickBehavior: invalid },
+    } as unknown as SyncPayload, { importVaultData: () => {} });
+    assert.equal(localStorage.getItem(key), "expand");
+  }
+});
+
 test("old bottom tab preference is ignored by settings export and import", async () => {
   localStorage.clear();
   const legacyKey = "netcatty_tab_bar_position_v1";

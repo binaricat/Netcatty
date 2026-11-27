@@ -63,6 +63,13 @@ test("applyGroupDefaults lets host device type override group device type", () =
   assert.equal(result.deviceType, "general");
 });
 
+test("applyGroupDefaults preserves explicit DEL over group Ctrl-H after persistence", () => {
+  const groupDefaults: Partial<GroupConfig> = { backspaceBehavior: "ctrl-h" };
+  const saved: Host = JSON.parse(JSON.stringify(host({ backspaceBehavior: "default" })));
+  assert.equal(applyGroupDefaults(saved, groupDefaults).backspaceBehavior, "default");
+  assert.equal(applyGroupDefaults(host(), groupDefaults).backspaceBehavior, "ctrl-h");
+});
+
 test("applyGroupDefaults skips remote-only device type for local shell hosts", () => {
   const result = applyGroupDefaults(host({ protocol: "local" }), { deviceType: "network" });
 
@@ -896,4 +903,50 @@ test("applyGroupDefaults reads the active global default when callers omit it", 
   }
 
   assert.equal(getActiveGlobalDefaultProxyProfileId(), undefined);
+});
+
+test("applyGroupDefaults inherits hostChain and proxy for vnc/rdp hosts while skipping SSH-only keys", () => {
+  const groupDefaults: Partial<GroupConfig> = {
+    username: "ssh-user",
+    password: "ssh-password",
+    port: 2222,
+    protocol: "ssh",
+    deviceType: "network",
+    startupCommand: "uptime",
+    charset: "GBK",
+    theme: "dracula",
+    fontFamily: "JetBrains Mono",
+    fontSize: 16,
+    moshEnabled: true,
+    etEnabled: true,
+    hostChain: { hostIds: ["bastion-1"] },
+    proxyProfileId: "corp-proxy",
+  };
+
+  for (const protocol of ["rdp", "vnc"] as const) {
+    const result = applyGroupDefaults(
+      host({
+        protocol,
+        username: "",
+        port: protocol === "rdp" ? 3389 : 5900,
+      }),
+      groupDefaults,
+      { globalProxyProfileId: "" },
+    );
+
+    assert.deepEqual(result.hostChain, { hostIds: ["bastion-1"] });
+    assert.equal(result.proxyProfileId, "corp-proxy");
+    assert.equal(result.username, "");
+    assert.equal(result.password, undefined);
+    assert.equal(result.port, protocol === "rdp" ? 3389 : 5900);
+    assert.equal(result.protocol, protocol);
+    assert.equal(result.deviceType, undefined);
+    assert.equal(result.startupCommand, undefined);
+    assert.equal(result.charset, undefined);
+    assert.equal(result.theme, undefined);
+    assert.equal(result.fontFamily, undefined);
+    assert.equal(result.fontSize, undefined);
+    assert.equal(result.moshEnabled, undefined);
+    assert.equal(result.etEnabled, undefined);
+  }
 });

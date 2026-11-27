@@ -1,7 +1,14 @@
 import { readScreenContext } from "../scripts/screenSnapshotRegistry";
+import {
+  captureRemoteDesktopFrame,
+  getCapturedRemoteDesktopFrame,
+  normalizeRemoteDesktopQuality,
+  parseFlatRemoteDesktopCropParams,
+} from "../remoteDesktop/remoteDesktopSnapshotRegistry";
 import { normalizeTerminalContextRange } from "../../domain/terminalContextRead";
 import { resolveHostOs } from '../../domain/host';
 import { isSavedVaultHost } from '../../domain/ephemeralHosts';
+import { normalizeGroupTargetPath } from '../../domain/hostGroupPathMutations';
 import type { GroupConfig, Host, Identity, KnownHost, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
 import type { RememberImportedKeyPassphraseResult } from '../../application/defaultKeyPassphrases';
 import {
@@ -158,11 +165,58 @@ function summarizeHostForList(host: Host) {
 
 type HostListSummary = ReturnType<typeof summarizeHostForList>;
 
-/** Empty filter matches everything. Matches the group itself or any subgroup, on a path boundary. */
+/**
+ * Empty filter matches everything. Matches the group itself or any subgroup, on a path boundary.
+ * `group` is already normalized; the stored path is normalized the same way because hosts can
+ * carry noncanonical paths (e.g. "prod / web" saved verbatim from Host Details).
+ */
 function hostMatchesGroupFilter(host: HostListSummary, group: string): boolean {
   if (!group) return true;
-  const hostGroup = host.group ?? '';
+  const hostGroup = typeof host.group === 'string' ? normalizeGroupTargetPath(host.group) : '';
   return hostGroup === group || hostGroup.startsWith(`${group}/`);
+}
+
+/** Every known group path: saved groups plus every host's group and its parent paths. */
+function collectKnownGroupPaths(customGroups: readonly string[], hosts: readonly HostListSummary[]): Set<string> {
+  const known = new Set<string>();
+  const addWithParents = (raw: unknown) => {
+    if (typeof raw !== 'string') return;
+    const path = normalizeGroupTargetPath(raw);
+    if (!path) return;
+    const parts = path.split('/');
+    for (let i = 1; i <= parts.length; i++) known.add(parts.slice(0, i).join('/'));
+  };
+  customGroups.forEach(addWithParents);
+  hosts.forEach((host) => addWithParents(host.group));
+  return known;
+}
+
+const MAX_LISTED_GROUPS = 20;
+
+/**
+ * Explain an empty result caused by the group filter, so an agent can tell a
+ * mistyped group from an empty one. Returns undefined when the group has hosts
+ * (an empty result then comes from the query, which is self-explanatory).
+ */
+function describeEmptyGroupResult(
+  group: string,
+  allHosts: readonly HostListSummary[],
+  customGroups: readonly string[],
+): string | undefined {
+  if (allHosts.some((host) => hostMatchesGroupFilter(host, group))) return undefined;
+  const known = collectKnownGroupPaths(customGroups, allHosts);
+  if (known.has(group)) return `Group "${group}" exists but has no hosts.`;
+  const lowered = group.toLocaleLowerCase();
+  const caseMatch = [...known].sort().find((path) => path.toLocaleLowerCase() === lowered);
+  if (caseMatch) {
+    return `No group "${group}". Did you mean "${caseMatch}"? Group names are case-sensitive.`;
+  }
+  // List the names here: vault_groups_list returns only saved groups, not paths used only by hosts.
+  if (known.size === 0) return `No group "${group}". The vault has no groups.`;
+  const names = [...known].sort();
+  const shown = names.slice(0, MAX_LISTED_GROUPS);
+  const count = shown.length < names.length ? ` (${shown.length} of ${names.length})` : '';
+  return `No group "${group}". Known groups${count}: ${shown.map((name) => `"${name}"`).join(', ')}.`;
 }
 
 /** Every term must appear (case-insensitive) in label, hostname, username, or tags. Group is deliberately excluded. */
@@ -634,6 +688,9 @@ async function registerOpenedSessionInMcpScope(
     : host.moshEnabled
       ? 'mosh'
       : (host.protocol || 'ssh');
+  // Graphical remote desktop sessions (VNC/RDP) cannot run terminal commands or
+  // expose text screen snapshots; exclude them from MCP terminal scopes.
+  if (protocol === 'vnc' || protocol === 'rdp') return;
   const savedHostId = isSavedVaultHost(host) && protocol !== 'serial' && protocol !== 'local'
     ? host.id
     : undefined;
@@ -716,11 +773,17 @@ export async function handleVaultAgentOp(
       const queryTerms = typeof rawQuery === 'string'
         ? rawQuery.toLowerCase().split(/\s+/).filter(Boolean)
         : [];
-      const group = typeof rawGroup === 'string' ? rawGroup.trim().replace(/\/+$/, '') : '';
-      const hosts = deps
+      // Same normalization as saved group paths: "/prod", "prod / web", "prod\web" all work.
+      const group = typeof rawGroup === 'string' ? normalizeGroupTargetPath(rawGroup) : '';
+      const allHosts = deps
         .getHosts()
-        .map((host) => summarizeHostForList(deps.resolveEffectiveHost(host)))
+        .map((host) => summarizeHostForList(deps.resolveEffectiveHost(host)));
+      const hosts = allHosts
         .filter((host) => hostMatchesGroupFilter(host, group) && hostMatchesQueryTerms(host, queryTerms));
+      if (group && hosts.length === 0) {
+        const note = describeEmptyGroupResult(group, allHosts, deps.getCustomGroups());
+        if (note) return { ok: true, hosts, note };
+      }
       return { ok: true, hosts };
     }
     case 'host.open': {
@@ -746,6 +809,13 @@ export async function handleVaultAgentOp(
         : effectiveHost.moshEnabled
           ? 'mosh'
           : (effectiveHost.protocol || 'ssh');
+
+      if (protocol === 'vnc' || protocol === 'rdp') {
+        return {
+          ok: false,
+          error: `Remote desktop (${protocol.toUpperCase()}) hosts are graphical sessions and cannot be opened for AI terminal execution.`,
+        };
+      }
 
       // Reuse-first: a terminal tab keeps its sessionId across SSH
       // auto-reconnect, so blindly opening a new tab stacks duplicate tabs
@@ -1625,7 +1695,11 @@ export function shouldBypassVaultAgentSerialization(
 ): boolean {
   // Reconnect changes terminal runtime, not vault records. Never leave a
   // recovery request queued behind an unrelated long-running vault operation.
-  if (op === 'session.reconnect' || op === 'session.inspectRecovery') return true;
+  if (
+    op === 'session.reconnect'
+    || op === 'session.inspectRecovery'
+    || op === 'remoteDesktop.readScreen'
+  ) return true;
   if (op !== 'scripts.run' && op !== 'snippets.run') return false;
   return parseOptionalBoolean(params.wait) ?? false;
 }
@@ -1653,12 +1727,60 @@ export function registerVaultAgentHandler(handler: VaultAgentHandler | null): vo
 async function handleTerminalContextRead(params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const sessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
   if (!sessionId) return { ok: false, error: 'sessionId is required.' };
+  const protocol = typeof params.protocol === 'string' ? params.protocol.toLowerCase() : '';
+  if (protocol === 'vnc' || protocol === 'rdp') {
+    return {
+      ok: false,
+      error: `Remote desktop (${protocol.toUpperCase()}) sessions are graphical and do not support terminal_read_context. Use remote_desktop_read_screen instead.`,
+    };
+  }
   return { ...await readScreenContext({
     sessionId,
     range: normalizeTerminalContextRange(params.range),
     startLine: typeof params.startLine === 'number' ? params.startLine : undefined,
     maxLines: typeof params.maxLines === 'number' ? params.maxLines : undefined,
   }) };
+}
+
+export async function handleRemoteDesktopScreenRead(
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
+  if (!sessionId) return { ok: false, error: 'sessionId is required.' };
+  const cropParsed = parseFlatRemoteDesktopCropParams(params);
+  if (cropParsed.error) {
+    return { ok: false, code: 'INVALID_CROP', error: cropParsed.error };
+  }
+  const quality = normalizeRemoteDesktopQuality(params.quality);
+  const captured = await captureRemoteDesktopFrame(sessionId, {
+    quality,
+    crop: cropParsed.crop,
+    source: 'ai-tool',
+  });
+  if (captured.ok === false) {
+    return { ok: false, code: captured.code, error: captured.error };
+  }
+  const frame = getCapturedRemoteDesktopFrame(captured.captureId);
+  if (!frame || !frame.base64Data) {
+    return { ok: false, code: 'CAPTURE_FAILED', error: 'Captured remote desktop frame is unavailable.' };
+  }
+  return {
+    ok: true,
+    captureId: captured.captureId,
+    sessionId: captured.sessionId,
+    protocol: captured.protocol,
+    hostLabel: captured.hostLabel,
+    hostname: captured.hostname,
+    width: captured.width,
+    height: captured.height,
+    naturalWidth: captured.naturalWidth,
+    naturalHeight: captured.naturalHeight,
+    ...(captured.crop ? { crop: captured.crop } : {}),
+    mediaType: captured.mediaType,
+    byteLength: captured.byteLength,
+    capturedAt: captured.capturedAt,
+    base64Data: frame.base64Data,
+  };
 }
 
 export function setupVaultAgentBridge(): () => void {
@@ -1674,8 +1796,10 @@ export function setupVaultAgentBridge(): () => void {
       try {
         const result = op === 'terminal.readContext'
           ? await handleTerminalContextRead(safeParams)
-          : activeHandler ? await activeHandler(op, safeParams)
-          : { ok: false, error: 'Vault agent bridge is not ready.' };
+          : op === 'remoteDesktop.readScreen'
+            ? await handleRemoteDesktopScreenRead(safeParams)
+            : activeHandler ? await activeHandler(op, safeParams)
+            : { ok: false, error: 'Vault agent bridge is not ready.' };
         await bridge.respondVaultAgent?.(requestId, result);
       } catch (err) {
         await bridge.respondVaultAgent?.(requestId, {

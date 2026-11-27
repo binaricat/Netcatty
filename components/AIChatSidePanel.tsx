@@ -16,6 +16,7 @@ import type {
 import type { VaultNote } from '../domain/models';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import {
+  DEFAULT_MAX_ITERATIONS,
   filterAgentModelPresetsForCliVersion,
   getAgentModelPresets,
   resolveAgentCliVersion,
@@ -85,12 +86,14 @@ import { getAgentRuntime } from '../infrastructure/ai/harness/globalAgentRuntime
 import { useAIPermissionGrantsState } from '../application/state/useAIPermissionGrantsState';
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import { useAgentContextUsage } from '../application/state/useAgentCompactionUi';
+import { useModelCatalogWarningDismissal } from '../application/state/useModelCatalogWarningDismissal';
 import type { AIChatSidePanelProps } from './AIChatSidePanel.types';
 import {
   buildCursorListModelsAgentEnv,
   buildSdkRuntimeModelCacheKey,
   sdkRuntimeModelCache,
   reconcileRuntimeModelWarning,
+  isModelCatalogWarningVisible,
   retainStoredModelPresetForCatalog,
   toSdkRuntimeModelCatalog,
   generateId,
@@ -319,7 +322,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   commandBlocklist,
   commandTimeout,
   responseIdleTimeout,
-  maxIterations = 20,
+  maxIterations = DEFAULT_MAX_ITERATIONS,
   toolOutputMaxChars,
   webSearchConfig,
   quickMessages = [],
@@ -361,6 +364,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const [isUndoingLastTurn, setIsUndoingLastTurn] = useState(false);
   const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, { cacheKey: string; models: AgentModelPreset[]; catalogUnavailable: boolean }>>({});
   const [runtimeModelWarnings, setRuntimeModelWarnings] = useState<Record<string, { cacheKey: string; message: string }>>({});
+  const {
+    dismissedKeys: dismissedModelCatalogKeys,
+    dismissWarning: dismissModelCatalogWarning,
+    rearmWarning: rearmModelCatalogWarning,
+  } = useModelCatalogWarningDismissal();
   // Tracks SDK runtime model catalogs currently loading (per agent scope);
   // the composer shows the loading row alongside the build-time presets and
   // the live catalog replaces them when it arrives.
@@ -1352,6 +1360,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           t('ai.chat.modelCatalogWarning'),
         );
       });
+      // A clean catalog re-arms a banner the user previously dismissed, so a
+      // later failure for the same config is visible again.
+      if (catalog && !catalog.warning) {
+        rearmModelCatalogWarning(target.cacheKey);
+      }
       return catalog;
     }).catch((err) => {
       setRuntimeModelWarnings((current) => {
@@ -1367,7 +1380,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       }
       return null;
     });
-  }, [t, buildExternalAgentRuntimeModelTarget]);
+  }, [t, buildExternalAgentRuntimeModelTarget, rearmModelCatalogWarning]);
 
   useEffect(() => {
     if (!isVisible) return;
@@ -1390,6 +1403,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         Boolean(cached.warning),
         t('ai.chat.modelCatalogWarning'),
       ));
+      if (!cached.warning) {
+        rearmModelCatalogWarning(target.cacheKey);
+      }
     }
 
     // Respect renderer TTL / in-flight coalescing for all SDK agents including
@@ -1470,6 +1486,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     buildExternalAgentRuntimeModelTarget,
     loadSdkRuntimeModelCatalog,
     applySdkRuntimeModelCatalog,
+    rearmModelCatalogWarning,
     t,
   ]);
 
@@ -1625,6 +1642,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     applySdkRuntimeModelCatalog,
   ]);
 
+  // Hide the composer warning banner for this config until a clean catalog
+  // re-arms it. The underlying warning stays active so the model picker keeps
+  // its manual refresh action.
+  const handleDismissModelCatalogWarning = useCallback(() => {
+    const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
+    dismissModelCatalogWarning(target?.cacheKey);
+  }, [currentAgentConfig, buildExternalAgentRuntimeModelTarget, dismissModelCatalogWarning]);
+
   const selectedCattyThinking = agentThinkingMap.catty;
   const handleCattyThinkingSelect = useCallback((level: string) => {
     setAgentThinking('catty', level);
@@ -1709,14 +1734,18 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   }, [currentAgentId, enterScopeDraftMode, updateScopeDraft]);
 
 
-  const handleSend = useCallback(async (textOverride?: string) => {
+  const handleSend = useCallback(async (
+    textOverride?: string,
+    options?: { includeDraftAttachments?: boolean },
+  ) => {
     const draft = currentDraftRef.current;
     const currentPanelView = panelViewRef.current;
     const currentSessionView = activeSessionRef.current;
-    if (textOverride === undefined && !validateNoteMentions(draft?.attachments ?? [])) return;
+    const useDraftAttachments = textOverride === undefined || options?.includeDraftAttachments === true;
+    if (useDraftAttachments && !validateNoteMentions(draft?.attachments ?? [])) return;
     const trimmed = (textOverride ?? draft?.text ?? '').trim();
     const sendScopeKey = scopeKey;
-    const attachments = (textOverride === undefined ? draft?.attachments ?? [] : []).map((file) => ({
+    const attachments = (useDraftAttachments ? draft?.attachments ?? [] : []).map((file) => ({
       base64Data: file.base64Data,
       mediaType: file.mediaType,
       filename: file.filename,
@@ -1728,30 +1757,35 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       lineCount: file.lineCount,
     }));
     const hasInlineTextAttachments = attachments.some(isInlineTextAttachment);
-    if ((!trimmed && !hasInlineTextAttachments) || isStreaming) return;
+    const hasImageAttachments = attachments.some((attachment) => attachment.mediaType.startsWith('image/'));
+    if ((!trimmed && !hasInlineTextAttachments && !hasImageAttachments) || isStreaming) return;
     // While undo-last-turn is creating the branch, the target is still the source; a
     // turn submitted now would run in the soon-hidden source session, so
     // block it until the branch settles.
     if (isUndoingLastTurn) return;
-    // Note-only sends (empty text + a mentioned note) still need a usable
-    // session title: fall back to the first mentioned note's title so these
+    // Note-only / image-only sends (empty text + attachment) still need a usable
+    // session title: fall back to the note title or image filename so these
     // conversations don't all show up as "Untitled" in history.
     const noteOnlyTitle = attachments.find(
       (attachment) => isVaultNoteAttachment(attachment) && attachment.vaultNoteTitle,
     )?.vaultNoteTitle ?? '';
-    const titleText = trimmed || noteOnlyTitle.trim();
+    const imageOnlyTitle = attachments.find(
+      (attachment) => attachment.mediaType.startsWith('image/') && attachment.filename,
+    )?.filename ?? '';
+    const titleText = trimmed || noteOnlyTitle.trim() || imageOnlyTitle.trim();
     const sendAgentId = currentSessionView?.agentId ?? draft?.agentId ?? currentAgentId;
     const agentConfig = sendAgentId !== 'catty' ? findEnabledExternalAgent(externalAgents, sendAgentId) : undefined;
     if (sendAgentId !== 'catty' && !agentConfig) return;
 
-    const selectedSkillSlugs = textOverride === undefined ? draft?.selectedUserSkillSlugs ?? [] : [];
+    const selectedSkillSlugs = useDraftAttachments ? draft?.selectedUserSkillSlugs ?? [] : [];
     const modelPrompt = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
     const modelAttachments = attachments.filter((attachment) => !isInlineTextAttachment(attachment));
     const isDraftMode = currentPanelView.mode === 'draft';
 
-    if (textOverride === undefined) flushDraftText();
+    if (useDraftAttachments) flushDraftText();
     const submittedText = draft?.text ?? '';
     const keepPendingAfterSend = () => {
+      if (options?.includeDraftAttachments) return false;
       const pending = pendingComposerTextRef.current;
       return pending != null && pending !== submittedText;
     };
@@ -1838,7 +1872,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         const createdSession = createSession(scope, sendAgentId);
         sessionId = createdSession.id;
         currentSession = createdSession;
-        if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+        if (useDraftAttachments) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
         showScopeSessionView(createdSession.id);
         setActiveSessionId(createdSession.id);
         sessionSendGateKey = sessionId;
@@ -1869,7 +1903,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProvider'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {
-          if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+          if (useDraftAttachments) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
           showScopeSessionView(sessionId);
         }
         return;
@@ -1884,7 +1918,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProviderModel'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {
-          if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+          if (useDraftAttachments) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
           showScopeSessionView(sessionId);
         }
         return;
@@ -1897,7 +1931,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         ...(selectedSkillSlugs.length > 0 ? { selectedUserSkillSlugs: selectedSkillSlugs } : {}),
         timestamp: Date.now(),
       });
-      if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+      if (useDraftAttachments) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
       showScopeSessionView(sessionId);
       setActiveSessionId(sessionId);
       setStreamingForScope(sessionId, true);
@@ -2132,6 +2166,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   useEffect(() => {
     return registerGrantPersister((rule) => { addGrant(rule); });
   }, [addGrant]);
+
+  const handleSendQuickPrompt = useCallback((promptText: string) => {
+    void handleSend(promptText, { includeDraftAttachments: true });
+  }, [handleSend]);
 
   const handleStop = useCallback(() => {
     if (!activeSessionId) return;
@@ -2490,6 +2528,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         inputValue={inputValue}
         setInputValue={setInputValue}
         handleSend={handleSend}
+        handleSendQuickPrompt={handleSendQuickPrompt}
         handleCompact={handleCompact}
         onRenameSession={handleRenameSession}
         onRenameActiveChat={handleRenameSlashCommand}
@@ -2516,6 +2555,17 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           && runtimeModelWarnings[currentAgentId].cacheKey === buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey
           ? runtimeModelWarnings[currentAgentId].message
           : undefined}
+        modelCatalogWarningDismissed={!hasCodexCustomConfig
+          && Boolean(
+            runtimeModelWarnings[currentAgentId]
+            && runtimeModelWarnings[currentAgentId].cacheKey === buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey
+            && !isModelCatalogWarningVisible(
+              runtimeModelWarnings[currentAgentId],
+              buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey,
+              dismissedModelCatalogKeys,
+            ),
+          )}
+        handleModelCatalogDismiss={handleDismissModelCatalogWarning}
         modelCatalogLoading={
           !hasCodexCustomConfig
           && Boolean(runtimeModelLoading[currentAgentId])

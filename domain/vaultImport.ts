@@ -1,7 +1,18 @@
-import { Host, HostChainConfig, HostProtocol } from "./models";
+import { Host, HostChainConfig, HostProtocol, RdpConfig, VncConfig } from "./models";
 import { isEncryptedCredentialPlaceholder } from "./credentials";
 import { sanitizeHost } from "./host";
 import { hasMacKeychainAgentDirectives } from "./sshAuth";
+import {
+  decodeRdpFileText,
+  parseRdpFile,
+  rdpFileToHostDraft,
+} from "./rdpFileParser";
+import {
+  DEFAULT_RDP_PORT,
+  DEFAULT_VNC_PORT,
+  parseVncPortOrDisplay,
+  splitWindowsUserDomain,
+} from "./remoteDesktop";
 import {
   buildVaultHostFromDraft,
   buildVaultHostMergeKey,
@@ -130,7 +141,8 @@ export type VaultImportFormat =
   | "csv"
   | "securecrt"
   | "finalshell"
-  | "ssh_config";
+  | "ssh_config"
+  | "rdp";
 
 export const VAULT_IMPORT_FORMATS: VaultImportFormat[] = [
   "csv",
@@ -139,6 +151,7 @@ export const VAULT_IMPORT_FORMATS: VaultImportFormat[] = [
   "securecrt",
   "finalshell",
   "ssh_config",
+  "rdp",
 ];
 
 type VaultImportIssueLevel = "warning" | "error";
@@ -319,12 +332,14 @@ export function applyVaultImportDestination(
 
 const normalizeProtocol = (
   raw: string | undefined,
-): Exclude<HostProtocol, "mosh" | "et"> | undefined => {
+): VaultHostDraftProtocol | undefined => {
   const s = raw?.trim().toLowerCase();
   if (!s) return undefined;
   if (s === "ssh" || s === "ssh2" || s === "ssh-2") return "ssh";
   if (s === "telnet") return "telnet";
   if (s === "local") return "local";
+  if (s === "rdp") return "rdp";
+  if (s === "vnc") return "vnc";
   return undefined;
 };
 
@@ -360,9 +375,12 @@ const createHost = (input: {
   keyPath?: string;
   port?: number;
   protocol?: VaultHostDraftProtocol;
+  os?: Host["os"];
   group?: string;
   tags?: string[];
   notes?: string;
+  rdpConfig?: RdpConfig;
+  vncConfig?: VncConfig;
 }): Host => {
   const built = buildVaultHostFromDraft(input);
   if (!built.ok) {
@@ -435,12 +453,22 @@ const looksLikeHostnameToken = (token: string): boolean => {
 
 const parseTarget = (
   raw: string,
-): { hostname: string; username?: string; port?: number; protocol?: Exclude<HostProtocol, "mosh" | "et"> } | null => {
+): { hostname: string; username?: string; domain?: string; port?: number; protocol?: VaultHostDraftProtocol } | null => {
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
-  // URL form: ssh://user@host:22
+  // URL form: ssh://user@host:22, rdp://[domain\]user@host:3389, vnc://[user@]host:5900
   if (trimmed.includes("://")) {
+    const quickUri = parseQuickConnectInput(trimmed);
+    if (quickUri?.protocol === "rdp" || quickUri?.protocol === "vnc") {
+      return {
+        hostname: quickUri.hostname,
+        username: quickUri.username,
+        domain: quickUri.domain,
+        port: quickUri.port,
+        protocol: quickUri.protocol,
+      };
+    }
     try {
       const url = new URL(trimmed);
       const protocol = normalizeProtocol(url.protocol.replace(/:$/, ""));
@@ -455,7 +483,7 @@ const parseTarget = (
   }
 
   // host:proto form (seen in some CSV exports)
-  const protoSuffixMatch = trimmed.match(/^(.*?)(?::|\s+)(ssh|ssh2|telnet|local)$/i);
+  const protoSuffixMatch = trimmed.match(/^(.*?)(?::|\s+)(ssh|ssh2|telnet|local|rdp|vnc)$/i);
   if (protoSuffixMatch) {
     const left = protoSuffixMatch[1].trim();
     const protocol = normalizeProtocol(protoSuffixMatch[2]);
@@ -464,7 +492,7 @@ const parseTarget = (
   }
 
   const qc = parseQuickConnectInput(trimmed);
-  if (qc) return { hostname: qc.hostname, username: qc.username, port: qc.port };
+  if (qc) return { hostname: qc.hostname, username: qc.username, port: qc.port, protocol: qc.protocol, domain: qc.domain };
   return null;
 };
 
@@ -740,7 +768,20 @@ const importFromCsv = (
       target.protocol ??
       "ssh";
     const port = parsePort(portIdx >= 0 ? row[portIdx] : undefined) ?? target.port;
-    const username = (usernameIdx >= 0 ? row[usernameIdx] : undefined)?.trim() || target.username;
+    const rawUsername = (usernameIdx >= 0 ? row[usernameIdx] : undefined)?.trim() || target.username;
+    const rdpSplit = protocol === "rdp"
+      ? splitWindowsUserDomain(rawUsername, target.domain)
+      : undefined;
+    const username = rdpSplit ? rdpSplit.username : rawUsername;
+    const rdpConfig: RdpConfig | undefined = protocol === "rdp"
+      ? {
+          port: port ?? DEFAULT_RDP_PORT,
+          ...(rdpSplit?.domain ? { domain: rdpSplit.domain } : {}),
+        }
+      : undefined;
+    const vncConfig: VncConfig | undefined = protocol === "vnc"
+      ? { port: port ?? DEFAULT_VNC_PORT }
+      : undefined;
     const password = (passwordIdx >= 0 ? row[passwordIdx] : undefined) || undefined;
     const keyPathRaw = (keyPathIdx >= 0 ? row[keyPathIdx] : undefined)?.trim();
     const keyPath = keyPathRaw ? decodeCsvKeyPath(keyPathRaw) : undefined;
@@ -795,6 +836,8 @@ const importFromCsv = (
       group,
       tags,
       notes,
+      rdpConfig,
+      vncConfig,
     });
     if (inputCompatibilityIdx >= 0 && (protocol === undefined || protocol === "ssh")) {
       const choice = row[inputCompatibilityIdx]?.trim().toLowerCase();
@@ -1529,10 +1572,12 @@ const importFromMobaXterm = (
         ? keyParts.slice(0, -1).join("/")
         : undefined;
 
-    let protocol: Exclude<HostProtocol, "mosh" | "et"> | undefined;
+    let protocol: VaultHostDraftProtocol | undefined;
     let hostname: string | undefined;
     let username: string | undefined;
     let port: number | undefined;
+    let rdpConfig: RdpConfig | undefined;
+    let vncConfig: VncConfig | undefined;
 
     const outerFields = rawValue.split("#");
     const sessionFields = outerFields.length >= 3 ? outerFields[2].split("%") : [];
@@ -1548,7 +1593,12 @@ const importFromMobaXterm = (
         });
         continue;
       }
-      if (sessionType !== "0" && sessionType !== "7") {
+      if (
+        sessionType !== "0"
+        && sessionType !== "4"
+        && sessionType !== "5"
+        && sessionType !== "7"
+      ) {
         skipped++;
         issues.push({
           level: "warning",
@@ -1557,11 +1607,39 @@ const importFromMobaXterm = (
         continue;
       }
 
-      protocol = "ssh";
-      hostname = sessionFields[1]?.trim() || undefined;
-      port = parsePort(sessionFields[2]);
-      const rawUsername = sessionFields[3]?.trim();
-      username = rawUsername && rawUsername !== "<default>" ? rawUsername : undefined;
+      if (sessionType === "4") {
+        protocol = "rdp";
+        hostname = sessionFields[1]?.trim() || undefined;
+        port = parsePort(sessionFields[2]) ?? DEFAULT_RDP_PORT;
+        const rawUsername = sessionFields[3]?.trim();
+        const cleanedUser = rawUsername && rawUsername !== "<default>" ? rawUsername : undefined;
+        if (cleanedUser) {
+          const split = splitWindowsUserDomain(cleanedUser);
+          username = split.username || undefined;
+          rdpConfig = {
+            port,
+            ...(split.domain ? { domain: split.domain } : {}),
+          };
+        } else {
+          rdpConfig = { port };
+        }
+      } else if (sessionType === "5") {
+        protocol = "vnc";
+        hostname = sessionFields[1]?.trim() || undefined;
+        port = parseVncPortOrDisplay(sessionFields[2]) ?? DEFAULT_VNC_PORT;
+        const rawUserField = sessionFields[3]?.trim();
+        // MobaXterm VNC sessions commonly place numeric flags (e.g. -1 or 0) in slot 3.
+        username = rawUserField && rawUserField !== "<default>" && !/^-?\d+$/.test(rawUserField)
+          ? rawUserField
+          : undefined;
+        vncConfig = { port };
+      } else {
+        protocol = "ssh";
+        hostname = sessionFields[1]?.trim() || undefined;
+        port = parsePort(sessionFields[2]);
+        const rawUsername = sessionFields[3]?.trim();
+        username = rawUsername && rawUsername !== "<default>" ? rawUsername : undefined;
+      }
     } else {
       // Retain support for the simpler token layouts accepted by older imports.
       const tokens = rawValue
@@ -1575,7 +1653,7 @@ const importFromMobaXterm = (
           tokens.map((t) => normalizeProtocol(t)).find(Boolean);
 
         for (const tok of tokens) {
-          const target = parseTarget(tok.replace(/^ssh:/i, "").trim());
+          const target = parseTarget(tok.replace(/^(?:ssh|rdp|vnc):/i, "").trim());
           if (target) {
             hostname = target.hostname;
             username = target.username ?? username;
@@ -1604,14 +1682,28 @@ const importFromMobaXterm = (
       continue;
     }
 
+    const effectiveProtocol = protocol ?? "ssh";
+    if (effectiveProtocol === "rdp" && !rdpConfig) {
+      const split = splitWindowsUserDomain(username);
+      username = split.username || undefined;
+      rdpConfig = {
+        port: port ?? DEFAULT_RDP_PORT,
+        ...(split.domain ? { domain: split.domain } : {}),
+      };
+    } else if (effectiveProtocol === "vnc" && !vncConfig) {
+      vncConfig = { port: port ?? DEFAULT_VNC_PORT };
+    }
+
     parsedHosts.push(
       createHost({
         label,
         hostname,
         username,
         port,
-        protocol: protocol ?? "ssh",
+        protocol: effectiveProtocol,
         group,
+        rdpConfig,
+        vncConfig,
       }),
     );
   }
@@ -1634,6 +1726,37 @@ const importFromMobaXterm = (
     groups,
     issues,
     stats: { parsed, imported: hosts.length, skipped, duplicates },
+  };
+};
+
+const importFromRdp = (
+  text: string,
+  fileName?: string,
+): VaultImportResult => {
+  const issues: VaultImportIssue[] = [];
+  const parsed = parseRdpFile(text);
+  if (!parsed.hostname) {
+    return {
+      hosts: [],
+      groups: [],
+      issues: [{ level: "error", message: "RDP file is missing a valid full address." }],
+      stats: { parsed: 0, imported: 0, skipped: 1, duplicates: 0 },
+    };
+  }
+
+  if (parsed.gatewayHostname) {
+    issues.push({
+      level: "warning",
+      message: `RDP file specifies an RD Gateway (${parsed.gatewayHostname}); use "Open in System RDP Client" if gateway tunneling is required.`,
+    });
+  }
+
+  const host = rdpFileToHostDraft(parsed, fileName);
+  return {
+    hosts: [host],
+    groups: [],
+    issues,
+    stats: { parsed: 1, imported: 1, skipped: 0, duplicates: 0 },
   };
 };
 
@@ -1663,6 +1786,8 @@ export const importVaultHostsFromText = (
       return importFromFinalShell(input);
     case "mobaxterm":
       return importFromMobaXterm(input, options);
+    case "rdp":
+      return importFromRdp(input, options?.fileName);
     default: {
       const _exhaustive: never = format;
       return _exhaustive;
@@ -1671,8 +1796,13 @@ export const importVaultHostsFromText = (
 };
 
 export function detectVaultImportFormat(text: string): VaultImportFormat | null {
-  const input = (text ?? "").trim();
+  const decoded = decodeRdpFileText(text ?? "");
+  const input = decoded.trim();
   if (!input) return null;
+
+  if (/^(?:full address|alternate full address):s:/im.test(input)) {
+    return "rdp";
+  }
 
   if (
     /Windows Registry Editor Version/i.test(input)

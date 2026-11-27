@@ -267,30 +267,35 @@ class PluginHostInteractionService {
       throw fail("resourceExhausted", `Selected file exceeds the ${maxBytes} byte limit`);
     }
     const handle = this.#allocateFileHandle(context, filePath);
-    this.database?.recordSecurityAudit?.(context.pluginId, "ui.file.open", { size: stat.size });
-    const encoding = params.readAs === "utf8" ? "utf8" : "base64";
-    if (stat.size <= INLINE_FILE_BYTES) {
-      const raw = await fs.readFile(filePath);
-      await context.assertActive();
-      this.quotaManager?.chargeBytes?.(context.runtimeId, "ui", raw.byteLength);
+    try {
+      this.database?.recordSecurityAudit?.(context.pluginId, "ui.file.open", { size: stat.size });
+      const encoding = params.readAs === "utf8" ? "utf8" : "base64";
+      if (stat.size <= INLINE_FILE_BYTES) {
+        const raw = await fs.readFile(filePath);
+        await context.assertActive();
+        this.quotaManager?.chargeBytes?.(context.runtimeId, "ui", raw.byteLength);
+        return {
+          cancelled: false,
+          name: handle.name,
+          size: raw.byteLength,
+          handleId: handle.id,
+          streamed: false,
+          encoding,
+          data: encoding === "utf8" ? raw.toString("utf8") : raw.toString("base64"),
+        };
+      }
       return {
         cancelled: false,
         name: handle.name,
-        size: raw.byteLength,
+        size: stat.size,
         handleId: handle.id,
-        streamed: false,
+        streamed: true,
         encoding,
-        data: encoding === "utf8" ? raw.toString("utf8") : raw.toString("base64"),
       };
+    } catch (error) {
+      await this.#disposeFileHandle(handle);
+      throw error;
     }
-    return {
-      cancelled: false,
-      name: handle.name,
-      size: stat.size,
-      handleId: handle.id,
-      streamed: true,
-      encoding,
-    };
   }
 
   async saveFile(params, context) {
@@ -328,18 +333,23 @@ class PluginHostInteractionService {
       await this.#disposeFileHandle(handle);
       throw fail("resourceExhausted", "File payload exceeds the maximum size limit");
     }
-    this.quotaManager?.chargeBytes?.(context.runtimeId, "ui", buf.byteLength);
-    const tempPath = `${handle.filePath}.netcatty-tmp-${randomUUID()}`;
     try {
-      await fs.writeFile(tempPath, buf);
-      await context.assertActive();
-      await fs.rename(tempPath, handle.filePath);
+      this.quotaManager?.chargeBytes?.(context.runtimeId, "ui", buf.byteLength);
+      const tempPath = `${handle.filePath}.netcatty-tmp-${randomUUID()}`;
+      try {
+        await fs.writeFile(tempPath, buf);
+        await context.assertActive();
+        await fs.rename(tempPath, handle.filePath);
+      } catch (error) {
+        await fs.unlink(tempPath).catch(() => {});
+        throw error;
+      }
+      this.database?.recordSecurityAudit?.(context.pluginId, "ui.file.save", { size: buf.byteLength });
+      return { cancelled: false, name: handle.name, size: buf.byteLength, handleId: handle.id };
     } catch (error) {
-      await fs.unlink(tempPath).catch(() => {});
+      await this.#disposeFileHandle(handle);
       throw error;
     }
-    this.database?.recordSecurityAudit?.(context.pluginId, "ui.file.save", { size: buf.byteLength });
-    return { cancelled: false, name: handle.name, size: buf.byteLength, handleId: handle.id };
   }
 
   async readFileHandle(params, context) {
@@ -394,10 +404,16 @@ class PluginHostInteractionService {
       if (buf.byteLength > LIMITS.fileMaxBytes) {
         throw fail("resourceExhausted", "File write exceeds the maximum size limit");
       }
-      handle.stagingPath = `${handle.filePath}.netcatty-tmp-${randomUUID()}`;
-      handle.stagingBytes = buf.byteLength;
+      const stagingPath = `${handle.filePath}.netcatty-tmp-${randomUUID()}`;
       this.quotaManager?.chargeBytes?.(context.runtimeId, "ui", buf.byteLength);
-      await fs.writeFile(handle.stagingPath, buf);
+      try {
+        await fs.writeFile(stagingPath, buf);
+      } catch (error) {
+        await fs.unlink(stagingPath).catch(() => {});
+        throw error;
+      }
+      handle.stagingPath = stagingPath;
+      handle.stagingBytes = buf.byteLength;
     } else {
       if (!handle.stagingPath) {
         throw fail("failedPrecondition", "Append write requires an open replace transaction");

@@ -1,0 +1,3439 @@
+diff --git a/crates/ironrdp-web/src/drive.rs b/crates/ironrdp-web/src/drive.rs
+new file mode 100644
+index 0000000..aef2716
+--- /dev/null
++++ b/crates/ironrdp-web/src/drive.rs
+@@ -0,0 +1,2621 @@
++//! Browser/Electron-side redirected drive (filesystem) backend for RDPDR (`MS-RDPEFS`).
++//!
++//! Architecture mirrors [`crate::printer`] and [`crate::clipboard`]:
++//!
++//! * [`WasmDriveBackend`] lives inside the `Rdpdr` static virtual channel processor
++//!   (which must be `Send`). It forwards incoming [`ServerDriveIoRequest`]s to the
++//!   session event loop via `mpsc::UnboundedSender<RdpInputEvent>` and tracks
++//!   pending IRPs by `(device_id, completion_id)` so completions, resets, and
++//!   dynamic drive removals stay protocol-consistent.
++//! * When a virtual printer is also configured in the same session,
++//!   [`WasmDriveBackend`] composes [`WasmPrinterBackend`] and delegates all
++//!   printer IRPs to it on the single `rdpdr` static channel.
++//! * The session event loop converts incoming drive requests to plain JS objects
++//!   for `rdpdr_request_callback` and encodes JS responses submitted via
++//!   `Session.invokeExtension("rdpdr_response", ...)` into [`RdpdrPdu`] frames.
++
++use std::collections::{HashMap, HashSet};
++
++use anyhow::Context as _;
++use futures_channel::mpsc;
++use ironrdp::rdpdr::backend::RdpdrBackend;
++use ironrdp::rdpdr::pdu::RdpdrPdu;
++use ironrdp::rdpdr::pdu::efs::{
++    AnyIoCtlCode, Boolean, Characteristics, ClientDriveLockControlResponse, ClientDriveNotifyChangeDirectoryResponse,
++    ClientDriveQueryDirectoryResponse, ClientDriveQueryInformationResponse, ClientDriveQuerySecurityResponse,
++    ClientDriveQueryVolumeInformationResponse, ClientDriveSetInformationResponse, ClientDriveSetSecurityResponse,
++    DecodedDeviceControlRequest, DeviceCloseResponse, DeviceControlRequest, DeviceControlResponse,
++    DeviceCreateResponse, DeviceFlushBuffersResponse, DeviceIoRequest, DeviceIoResponse, DeviceReadResponse,
++    DeviceWriteResponse, FileAttributeTagInformation, FileAttributes, FileBasicInformation,
++    FileBothDirectoryInformation, FileDirectoryInformation, FileFullDirectoryInformation, FileInformationClass,
++    FileInformationClassLevel, FileNamesInformation, FileStandardInformation, FileSystemAttributes,
++    FileSystemInformationClass, FileSystemInformationClassLevel, Information, NtStatus, PrinterIoRequest,
++    ServerDeviceAnnounceResponse, ServerDriveIoRequest, ServerDriveSetInformationRequest,
++};
++use ironrdp::rdpdr::pdu::esc::{ScardCall, ScardIoCtlCode};
++use ironrdp_core::impl_as_any;
++use ironrdp_pdu::{PduResult, encode_err};
++use ironrdp_svc::SvcMessage;
++use tracing::{debug, trace, warn};
++use wasm_bindgen::{JsCast as _, JsValue};
++
++use crate::error::IronError;
++use crate::printer::WasmPrinterBackend;
++use crate::session::RdpInputEvent;
++
++/// `STATUS_CANCELLED` (`0xC0000120`), used when cancelling in-flight IRPs on drive removal.
++fn status_cancelled() -> NtStatus {
++    NtStatus::from(0xC000_0120)
++}
++
++/// Maximum UTF-8 byte length for a sanitized RDPDR drive share name.
++const MAX_DRIVE_NAME_BYTES: usize = 64;
++
++/// Sanitizes a drive share name for MS-RDPEFS announcement (`\\tsclient\<name>`).
++///
++/// Strips control characters and NULs, replaces characters forbidden in Windows
++/// share names (`< > " / \ | : ? *`), trims surrounding whitespace and trailing
++/// dots, truncates to [`MAX_DRIVE_NAME_BYTES`] on a UTF-8 boundary, and falls
++/// back to `"Share"` if empty.
++pub(crate) fn sanitize_drive_name(raw: &str) -> String {
++    let mut cleaned = String::with_capacity(raw.len().min(MAX_DRIVE_NAME_BYTES));
++    for ch in raw.trim().chars() {
++        if ch == '\0' || ch.is_control() {
++            continue;
++        }
++        let mapped = match ch {
++            '<' | '>' | '"' | '/' | '\\' | '|' | ':' | '?' | '*' => '_',
++            other => other,
++        };
++        if cleaned.len().saturating_add(mapped.len_utf8()) > MAX_DRIVE_NAME_BYTES {
++            break;
++        }
++        cleaned.push(mapped);
++    }
++    let trimmed = cleaned.trim_end_matches([' ', '.']);
++    if trimmed.is_empty() {
++        "Share".to_owned()
++    } else {
++        trimmed.to_owned()
++    }
++}
++
++/// Messages sent from [`WasmDriveBackend`] to the session event loop for delivery
++/// to the JS `rdpdr_request_callback`.
++#[derive(Debug)]
++pub(crate) enum DriveBackendMessage {
++    Request(DriveRequestPayload),
++    /// Emitted when the server restarts the RDPDR channel (e.g. post-logon re-announce)
++    /// so the JS/Electron bridge can close any stale open handles.
++    Reset,
++}
++
++/// Decoded filesystem IRP payload forwarded to JavaScript.
++#[derive(Debug)]
++pub(crate) enum DriveRequestPayload {
++    Create {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++        path: String,
++        desired_access: u32,
++        allocation_size: u64,
++        file_attributes: u32,
++        shared_access: u32,
++        create_disposition: u32,
++        create_options: u32,
++    },
++    Close {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++    },
++    Read {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++        offset: u64,
++        length: u32,
++    },
++    Write {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++        offset: u64,
++        data: Vec<u8>,
++    },
++    QueryDirectory {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++        information_class: u32,
++        initial_query: bool,
++        path: String,
++    },
++    QueryInformation {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++        information_class: u32,
++    },
++    QueryVolumeInformation {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++        information_class: u32,
++    },
++    SetInformation {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++        information_class: u32,
++        data: SetInformationPayload,
++    },
++    Flush {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++    },
++    LockControl {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++        operation: u32,
++        wait: bool,
++        locks: Vec<(u64, u64)>,
++    },
++    DeviceControl {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++        io_control_code: u32,
++        output_buffer_length: u32,
++        input_buffer: Vec<u8>,
++    },
++    NotifyChangeDirectory {
++        device_id: u32,
++        file_id: u32,
++        completion_id: u32,
++        watch_tree: bool,
++        completion_filter: u32,
++    },
++}
++
++#[derive(Debug)]
++pub(crate) enum SetInformationPayload {
++    Basic {
++        creation_time: i64,
++        last_access_time: i64,
++        last_write_time: i64,
++        change_time: i64,
++        file_attributes: u32,
++    },
++    Rename {
++        replace_if_exists: bool,
++        rename_target: String,
++    },
++    Disposition {
++        delete_on_close: bool,
++    },
++    Allocation {
++        allocation_size: i64,
++    },
++    EndOfFile {
++        eof_size: i64,
++    },
++    Other,
++}
++
++/// Metadata retained for each in-flight IRP so completions can be encoded faithfully
++/// (and cleanly cancelled if the drive is removed or the channel resets).
++#[derive(Debug)]
++enum PendingDriveIrp {
++    Create(DeviceIoRequest),
++    Close(DeviceIoRequest),
++    Read(DeviceIoRequest),
++    Write(DeviceIoRequest),
++    QueryDirectory {
++        io_req: DeviceIoRequest,
++        info_class: FileInformationClassLevel,
++    },
++    QueryInformation {
++        io_req: DeviceIoRequest,
++        info_class: FileInformationClassLevel,
++    },
++    QueryVolumeInformation {
++        io_req: DeviceIoRequest,
++        fs_info_class: FileSystemInformationClassLevel,
++    },
++    SetInformation(ServerDriveSetInformationRequest),
++    Flush(DeviceIoRequest),
++    LockControl(DeviceIoRequest),
++    DeviceControl(DeviceIoRequest),
++    NotifyChangeDirectory(DeviceIoRequest),
++}
++
++impl PendingDriveIrp {
++    fn cancel_message(self) -> PduResult<SvcMessage> {
++        let cancelled = status_cancelled();
++        let pdu = match self {
++            Self::Create(io_req) => RdpdrPdu::DeviceCreateResponse(DeviceCreateResponse {
++                device_io_reply: DeviceIoResponse::new(io_req, cancelled),
++                file_id: 0,
++                information: Information::empty(),
++            }),
++            Self::Close(io_req) => RdpdrPdu::DeviceCloseResponse(DeviceCloseResponse {
++                device_io_response: DeviceIoResponse::new(io_req, cancelled),
++            }),
++            Self::Read(io_req) => RdpdrPdu::DeviceReadResponse(DeviceReadResponse {
++                device_io_reply: DeviceIoResponse::new(io_req, cancelled),
++                read_data: Vec::new(),
++            }),
++            Self::Write(io_req) => RdpdrPdu::DeviceWriteResponse(DeviceWriteResponse {
++                device_io_reply: DeviceIoResponse::new(io_req, cancelled),
++                length: 0,
++            }),
++            Self::QueryDirectory { io_req, .. } => {
++                RdpdrPdu::ClientDriveQueryDirectoryResponse(ClientDriveQueryDirectoryResponse {
++                    device_io_reply: DeviceIoResponse::new(io_req, cancelled),
++                    buffer: None,
++                })
++            }
++            Self::QueryInformation { io_req, .. } => {
++                RdpdrPdu::ClientDriveQueryInformationResponse(ClientDriveQueryInformationResponse {
++                    device_io_response: DeviceIoResponse::new(io_req, cancelled),
++                    buffer: None,
++                })
++            }
++            Self::QueryVolumeInformation { io_req, .. } => {
++                RdpdrPdu::ClientDriveQueryVolumeInformationResponse(ClientDriveQueryVolumeInformationResponse {
++                    device_io_reply: DeviceIoResponse::new(io_req, cancelled),
++                    buffer: None,
++                })
++            }
++            Self::SetInformation(req) => RdpdrPdu::ClientDriveSetInformationResponse(
++                ClientDriveSetInformationResponse::new(&req, cancelled).map_err(|e| encode_err!(e))?,
++            ),
++            Self::Flush(io_req) => RdpdrPdu::DeviceFlushBuffersResponse(DeviceFlushBuffersResponse {
++                device_io_response: DeviceIoResponse::new(io_req, cancelled),
++            }),
++            Self::LockControl(io_req) => {
++                RdpdrPdu::ClientDriveLockControlResponse(ClientDriveLockControlResponse::new(io_req, cancelled))
++            }
++            Self::DeviceControl(io_req) => RdpdrPdu::DeviceControlResponse(DeviceControlResponse {
++                device_io_reply: DeviceIoResponse::new(io_req, cancelled),
++                output_buffer: None,
++            }),
++            Self::NotifyChangeDirectory(io_req) => RdpdrPdu::ClientDriveNotifyChangeDirectoryResponse(
++                ClientDriveNotifyChangeDirectoryResponse::new(io_req, cancelled, Vec::new()),
++            ),
++        };
++        Ok(SvcMessage::from(pdu))
++    }
++}
++
++/// Typed JS response parsed from `Session.invokeExtension("rdpdr_response", obj)`.
++#[derive(Debug)]
++pub(crate) enum DriveResponse {
++    Reset,
++    Create {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++        file_id: u32,
++        information: Information,
++    },
++    Close {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++    },
++    Read {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++        data: Vec<u8>,
++    },
++    Write {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++        bytes_written: u32,
++    },
++    QueryDirectory {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++        information_class: Option<u32>,
++        entry: Option<DriveDirectoryEntry>,
++    },
++    QueryInformation {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++        info: Option<DriveFileInfo>,
++    },
++    QueryVolumeInformation {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++        info: Option<DriveVolumeInfo>,
++    },
++    SetInformation {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++    },
++    Flush {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++    },
++    LockControl {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++    },
++    DeviceControl {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++        output_buffer: Vec<u8>,
++    },
++    NotifyChangeDirectory {
++        device_id: u32,
++        completion_id: u32,
++        status: NtStatus,
++        buffer: Vec<u8>,
++    },
++}
++
++#[derive(Debug, Clone)]
++pub(crate) struct DriveDirectoryEntry {
++    pub(crate) file_name: String,
++    pub(crate) creation_time: i64,
++    pub(crate) last_access_time: i64,
++    pub(crate) last_write_time: i64,
++    pub(crate) change_time: i64,
++    pub(crate) end_of_file: i64,
++    pub(crate) allocation_size: i64,
++    pub(crate) file_attributes: u32,
++}
++
++#[derive(Debug, Clone)]
++pub(crate) enum DriveFileInfo {
++    Basic(FileBasicInformation),
++    Standard(FileStandardInformation),
++    AttributeTag(FileAttributeTagInformation),
++}
++
++#[derive(Debug, Clone)]
++pub(crate) enum DriveVolumeInfo {
++    Volume {
++        creation_time: i64,
++        serial_number: u32,
++        supports_objects: bool,
++        label: String,
++    },
++    Size {
++        total_alloc_units: i64,
++        available_alloc_units: i64,
++        sectors_per_alloc_unit: u32,
++        bytes_per_sector: u32,
++    },
++    Device {
++        device_type: u32,
++        characteristics: u32,
++    },
++    Attribute {
++        attributes: u32,
++        max_component_name_len: u32,
++        file_system_name: String,
++    },
++    FullSize {
++        total_alloc_units: i64,
++        caller_available_alloc_units: i64,
++        actual_available_alloc_units: i64,
++        sectors_per_alloc_unit: u32,
++        bytes_per_sector: u32,
++    },
++}
++
++/// RDPDR backend that delegates drive IRPs asynchronously to JS and optionally
++/// delegates printer IRPs to [`WasmPrinterBackend`].
++#[derive(Debug)]
++pub(crate) struct WasmDriveBackend {
++    tx: mpsc::UnboundedSender<RdpInputEvent>,
++    active_drives: HashSet<u32>,
++    pending_irps: HashMap<(u32, u32), PendingDriveIrp>,
++    printer: Option<WasmPrinterBackend>,
++}
++
++impl_as_any!(WasmDriveBackend);
++
++impl WasmDriveBackend {
++    pub(crate) fn new(tx: mpsc::UnboundedSender<RdpInputEvent>) -> Self {
++        Self {
++            tx,
++            active_drives: HashSet::new(),
++            pending_irps: HashMap::new(),
++            printer: None,
++        }
++    }
++
++    #[must_use]
++    pub(crate) fn with_printer(mut self, printer: WasmPrinterBackend) -> Self {
++        self.printer = Some(printer);
++        self
++    }
++
++    fn send_to_loop(&self, msg: DriveBackendMessage) -> bool {
++        if self.tx.unbounded_send(RdpInputEvent::DriveRequest(msg)).is_err() {
++            warn!("Drive request dropped: session event loop receiver is closed");
++            return false;
++        }
++        true
++    }
++
++    /// Completes a previously deferred drive IRP with the response returned by JS.
++    ///
++    /// Returns `Ok(None)` if the response is a reset acknowledgement or references a
++    /// completion that was already cancelled/reset.
++    pub(crate) fn complete_response(&mut self, response: DriveResponse) -> PduResult<Option<SvcMessage>> {
++        let (device_id, completion_id) = match &response {
++            DriveResponse::Reset => return Ok(None),
++            DriveResponse::Create {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::Close {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::Read {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::Write {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::QueryDirectory {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::QueryInformation {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::QueryVolumeInformation {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::SetInformation {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::Flush {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::LockControl {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::DeviceControl {
++                device_id,
++                completion_id,
++                ..
++            }
++            | DriveResponse::NotifyChangeDirectory {
++                device_id,
++                completion_id,
++                ..
++            } => (*device_id, *completion_id),
++        };
++
++        let Some(pending) = self.pending_irps.remove(&(device_id, completion_id)) else {
++            debug!(
++                device_id,
++                completion_id, "Ignoring RDPDR drive response for unknown or cancelled completion"
++            );
++            return Ok(None);
++        };
++
++        let pdu = encode_drive_completion(pending, response)?;
++        Ok(Some(SvcMessage::from(pdu)))
++    }
++}
++
++fn encode_drive_completion(pending: PendingDriveIrp, response: DriveResponse) -> PduResult<RdpdrPdu> {
++    match (pending, response) {
++        (
++            PendingDriveIrp::Create(io_req),
++            DriveResponse::Create {
++                status,
++                file_id,
++                information,
++                ..
++            },
++        ) => Ok(RdpdrPdu::DeviceCreateResponse(DeviceCreateResponse {
++            device_io_reply: DeviceIoResponse::new(io_req, status),
++            file_id: if status == NtStatus::SUCCESS { file_id } else { 0 },
++            information: if status == NtStatus::SUCCESS {
++                information
++            } else {
++                Information::empty()
++            },
++        })),
++        (PendingDriveIrp::Close(io_req), DriveResponse::Close { status, .. }) => {
++            Ok(RdpdrPdu::DeviceCloseResponse(DeviceCloseResponse {
++                device_io_response: DeviceIoResponse::new(io_req, status),
++            }))
++        }
++        (PendingDriveIrp::Read(io_req), DriveResponse::Read { status, data, .. }) => {
++            Ok(RdpdrPdu::DeviceReadResponse(DeviceReadResponse {
++                device_io_reply: DeviceIoResponse::new(io_req, status),
++                read_data: if status == NtStatus::SUCCESS { data } else { Vec::new() },
++            }))
++        }
++        (
++            PendingDriveIrp::Write(io_req),
++            DriveResponse::Write {
++                status, bytes_written, ..
++            },
++        ) => Ok(RdpdrPdu::DeviceWriteResponse(DeviceWriteResponse {
++            device_io_reply: DeviceIoResponse::new(io_req, status),
++            length: if status == NtStatus::SUCCESS { bytes_written } else { 0 },
++        })),
++        (
++            PendingDriveIrp::QueryDirectory { io_req, info_class },
++            DriveResponse::QueryDirectory {
++                status,
++                information_class,
++                entry,
++                ..
++            },
++        ) => {
++            let class = information_class.map(FileInformationClassLevel::from).unwrap_or(info_class);
++            let (effective_status, buffer) = if status == NtStatus::SUCCESS {
++                if let Some(entry) = entry {
++                    match build_directory_info_class(&class, entry) {
++                        Some(buf) => (NtStatus::SUCCESS, Some(buf)),
++                        None => (NtStatus::NOT_SUPPORTED, None),
++                    }
++                } else {
++                    (NtStatus::NO_MORE_FILES, None)
++                }
++            } else {
++                (status, None)
++            };
++            Ok(RdpdrPdu::ClientDriveQueryDirectoryResponse(
++                ClientDriveQueryDirectoryResponse {
++                    device_io_reply: DeviceIoResponse::new(io_req, effective_status),
++                    buffer,
++                },
++            ))
++        }
++        (
++            PendingDriveIrp::QueryInformation { io_req, info_class },
++            DriveResponse::QueryInformation { status, info, .. },
++        ) => {
++            let (effective_status, buffer) = if status == NtStatus::SUCCESS {
++                match info {
++                    Some(DriveFileInfo::Basic(basic)) => (NtStatus::SUCCESS, Some(FileInformationClass::Basic(basic))),
++                    Some(DriveFileInfo::Standard(standard)) => {
++                        (NtStatus::SUCCESS, Some(FileInformationClass::Standard(standard)))
++                    }
++                    Some(DriveFileInfo::AttributeTag(attr)) => {
++                        (NtStatus::SUCCESS, Some(FileInformationClass::AttributeTag(attr)))
++                    }
++                    None => {
++                        warn!(?info_class, "QueryInformation success response missing info payload");
++                        (NtStatus::UNSUCCESSFUL, None)
++                    }
++                }
++            } else {
++                (status, None)
++            };
++            Ok(RdpdrPdu::ClientDriveQueryInformationResponse(
++                ClientDriveQueryInformationResponse {
++                    device_io_response: DeviceIoResponse::new(io_req, effective_status),
++                    buffer,
++                },
++            ))
++        }
++        (
++            PendingDriveIrp::QueryVolumeInformation { io_req, fs_info_class },
++            DriveResponse::QueryVolumeInformation { status, info, .. },
++        ) => {
++            let (effective_status, buffer) = if status == NtStatus::SUCCESS {
++                match info {
++                    Some(info) => (NtStatus::SUCCESS, Some(build_volume_info_class(info))),
++                    None => {
++                        warn!(
++                            ?fs_info_class,
++                            "QueryVolumeInformation success response missing info payload"
++                        );
++                        (NtStatus::UNSUCCESSFUL, None)
++                    }
++                }
++            } else {
++                (status, None)
++            };
++            Ok(RdpdrPdu::ClientDriveQueryVolumeInformationResponse(
++                ClientDriveQueryVolumeInformationResponse {
++                    device_io_reply: DeviceIoResponse::new(io_req, effective_status),
++                    buffer,
++                },
++            ))
++        }
++        (PendingDriveIrp::SetInformation(orig_req), DriveResponse::SetInformation { status, .. }) => {
++            let pdu = ClientDriveSetInformationResponse::new(&orig_req, status).map_err(|e| encode_err!(e))?;
++            Ok(RdpdrPdu::ClientDriveSetInformationResponse(pdu))
++        }
++        (PendingDriveIrp::Flush(io_req), DriveResponse::Flush { status, .. }) => {
++            Ok(RdpdrPdu::DeviceFlushBuffersResponse(DeviceFlushBuffersResponse {
++                device_io_response: DeviceIoResponse::new(io_req, status),
++            }))
++        }
++        (PendingDriveIrp::LockControl(io_req), DriveResponse::LockControl { status, .. }) => Ok(
++            RdpdrPdu::ClientDriveLockControlResponse(ClientDriveLockControlResponse::new(io_req, status)),
++        ),
++        (
++            PendingDriveIrp::DeviceControl(io_req),
++            DriveResponse::DeviceControl {
++                status, output_buffer, ..
++            },
++        ) => Ok(RdpdrPdu::DeviceControlResponse(
++            DeviceControlResponse::with_raw_output(
++                io_req,
++                status,
++                if status == NtStatus::SUCCESS {
++                    output_buffer
++                } else {
++                    Vec::new()
++                },
++            ),
++        )),
++        (
++            PendingDriveIrp::NotifyChangeDirectory(io_req),
++            DriveResponse::NotifyChangeDirectory { status, buffer, .. },
++        ) => Ok(RdpdrPdu::ClientDriveNotifyChangeDirectoryResponse(
++            ClientDriveNotifyChangeDirectoryResponse::new(
++                io_req,
++                status,
++                if status == NtStatus::SUCCESS { buffer } else { Vec::new() },
++            ),
++        )),
++        (pending, response) => {
++            warn!(?pending, ?response, "Mismatched RDPDR drive response op; failing IRP");
++            // Complete with UNSUCCESSFUL using the pending IRP's expected wire format.
++            let pdu = match pending {
++                PendingDriveIrp::Create(io_req) => RdpdrPdu::DeviceCreateResponse(DeviceCreateResponse {
++                    device_io_reply: DeviceIoResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                    file_id: 0,
++                    information: Information::empty(),
++                }),
++                PendingDriveIrp::Close(io_req) => RdpdrPdu::DeviceCloseResponse(DeviceCloseResponse {
++                    device_io_response: DeviceIoResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                }),
++                PendingDriveIrp::Read(io_req) => RdpdrPdu::DeviceReadResponse(DeviceReadResponse {
++                    device_io_reply: DeviceIoResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                    read_data: Vec::new(),
++                }),
++                PendingDriveIrp::Write(io_req) => RdpdrPdu::DeviceWriteResponse(DeviceWriteResponse {
++                    device_io_reply: DeviceIoResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                    length: 0,
++                }),
++                PendingDriveIrp::QueryDirectory { io_req, .. } => {
++                    RdpdrPdu::ClientDriveQueryDirectoryResponse(ClientDriveQueryDirectoryResponse {
++                        device_io_reply: DeviceIoResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                        buffer: None,
++                    })
++                }
++                PendingDriveIrp::QueryInformation { io_req, .. } => {
++                    RdpdrPdu::ClientDriveQueryInformationResponse(ClientDriveQueryInformationResponse {
++                        device_io_response: DeviceIoResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                        buffer: None,
++                    })
++                }
++                PendingDriveIrp::QueryVolumeInformation { io_req, .. } => {
++                    RdpdrPdu::ClientDriveQueryVolumeInformationResponse(ClientDriveQueryVolumeInformationResponse {
++                        device_io_reply: DeviceIoResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                        buffer: None,
++                    })
++                }
++                PendingDriveIrp::SetInformation(req) => RdpdrPdu::ClientDriveSetInformationResponse(
++                    ClientDriveSetInformationResponse::new(&req, NtStatus::UNSUCCESSFUL).map_err(|e| encode_err!(e))?,
++                ),
++                PendingDriveIrp::Flush(io_req) => RdpdrPdu::DeviceFlushBuffersResponse(DeviceFlushBuffersResponse {
++                    device_io_response: DeviceIoResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                }),
++                PendingDriveIrp::LockControl(io_req) => RdpdrPdu::ClientDriveLockControlResponse(
++                    ClientDriveLockControlResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                ),
++                PendingDriveIrp::DeviceControl(io_req) => RdpdrPdu::DeviceControlResponse(DeviceControlResponse {
++                    device_io_reply: DeviceIoResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                    output_buffer: None,
++                }),
++                PendingDriveIrp::NotifyChangeDirectory(io_req) => RdpdrPdu::ClientDriveNotifyChangeDirectoryResponse(
++                    ClientDriveNotifyChangeDirectoryResponse::new(io_req, NtStatus::UNSUCCESSFUL, Vec::new()),
++                ),
++            };
++            Ok(pdu)
++        }
++    }
++}
++
++fn build_directory_info_class(
++    class: &FileInformationClassLevel,
++    entry: DriveDirectoryEntry,
++) -> Option<FileInformationClass> {
++    let attrs = FileAttributes::from_bits_retain(entry.file_attributes);
++    if *class == FileInformationClassLevel::FILE_BOTH_DIRECTORY_INFORMATION {
++        let mut info = FileBothDirectoryInformation::new(
++            entry.creation_time,
++            entry.last_access_time,
++            entry.last_write_time,
++            entry.change_time,
++            entry.end_of_file,
++            attrs,
++            entry.file_name,
++        );
++        info.allocation_size = entry.allocation_size;
++        Some(FileInformationClass::BothDirectory(info))
++    } else if *class == FileInformationClassLevel::FILE_FULL_DIRECTORY_INFORMATION {
++        let mut info = FileFullDirectoryInformation::new(
++            entry.creation_time,
++            entry.last_access_time,
++            entry.last_write_time,
++            entry.change_time,
++            entry.end_of_file,
++            attrs,
++            entry.file_name,
++        );
++        info.allocation_size = entry.allocation_size;
++        Some(FileInformationClass::FullDirectory(info))
++    } else if *class == FileInformationClassLevel::FILE_DIRECTORY_INFORMATION {
++        let mut info = FileDirectoryInformation::new(
++            entry.creation_time,
++            entry.last_access_time,
++            entry.last_write_time,
++            entry.change_time,
++            entry.end_of_file,
++            attrs,
++            entry.file_name,
++        );
++        info.allocation_size = entry.allocation_size;
++        Some(FileInformationClass::Directory(info))
++    } else if *class == FileInformationClassLevel::FILE_NAMES_INFORMATION {
++        Some(FileInformationClass::Names(FileNamesInformation::new(entry.file_name)))
++    } else {
++        None
++    }
++}
++
++fn build_volume_info_class(info: DriveVolumeInfo) -> FileSystemInformationClass {
++    match info {
++        DriveVolumeInfo::Volume {
++            creation_time,
++            serial_number,
++            supports_objects,
++            label,
++        } => FileSystemInformationClass::FileFsVolumeInformation(
++            ironrdp::rdpdr::pdu::efs::FileFsVolumeInformation {
++                volume_creation_time: creation_time,
++                volume_serial_number: serial_number,
++                supports_objects: if supports_objects {
++                    Boolean::True
++                } else {
++                    Boolean::False
++                },
++                volume_label: label,
++            },
++        ),
++        DriveVolumeInfo::Size {
++            total_alloc_units,
++            available_alloc_units,
++            sectors_per_alloc_unit,
++            bytes_per_sector,
++        } => FileSystemInformationClass::FileFsSizeInformation(ironrdp::rdpdr::pdu::efs::FileFsSizeInformation {
++            total_alloc_units,
++            available_alloc_units,
++            sectors_per_alloc_unit,
++            bytes_per_sector,
++        }),
++        DriveVolumeInfo::Device {
++            device_type,
++            characteristics,
++        } => FileSystemInformationClass::FileFsDeviceInformation(ironrdp::rdpdr::pdu::efs::FileFsDeviceInformation {
++            device_type,
++            characteristics: Characteristics::from_bits_retain(characteristics),
++        }),
++        DriveVolumeInfo::Attribute {
++            attributes,
++            max_component_name_len,
++            file_system_name,
++        } => FileSystemInformationClass::FileFsAttributeInformation(
++            ironrdp::rdpdr::pdu::efs::FileFsAttributeInformation {
++                file_system_attributes: FileSystemAttributes::from_bits_retain(attributes),
++                max_component_name_len,
++                file_system_name,
++            },
++        ),
++        DriveVolumeInfo::FullSize {
++            total_alloc_units,
++            caller_available_alloc_units,
++            actual_available_alloc_units,
++            sectors_per_alloc_unit,
++            bytes_per_sector,
++        } => FileSystemInformationClass::FileFsFullSizeInformation(
++            ironrdp::rdpdr::pdu::efs::FileFsFullSizeInformation {
++                total_alloc_units,
++                caller_available_alloc_units,
++                actual_available_alloc_units,
++                sectors_per_alloc_unit,
++                bytes_per_sector,
++            },
++        ),
++    }
++}
++
++impl RdpdrBackend for WasmDriveBackend {
++    fn reset(&mut self) -> PduResult<()> {
++        debug!(
++            pending_irps = self.pending_irps.len(),
++            active_drives = self.active_drives.len(),
++            "Resetting WasmDriveBackend state for new RDPDR sequence"
++        );
++        self.pending_irps.clear();
++        self.active_drives.clear();
++        if let Some(printer) = self.printer.as_mut() {
++            printer.reset()?;
++        }
++        let _ = self.send_to_loop(DriveBackendMessage::Reset);
++        Ok(())
++    }
++
++    fn restore_drive(&mut self, device_id: u32) -> PduResult<()> {
++        debug!(device_id, "Restoring redirected drive after RDPDR reset");
++        self.active_drives.insert(device_id);
++        Ok(())
++    }
++
++    fn add_drive(&mut self, device_id: u32) -> PduResult<()> {
++        debug!(device_id, "Activating dynamic redirected drive");
++        self.active_drives.insert(device_id);
++        Ok(())
++    }
++
++    fn remove_drive(&mut self, device_id: u32) -> PduResult<Vec<SvcMessage>> {
++        debug!(device_id, "Removing redirected drive and cancelling pending IRPs");
++        self.active_drives.remove(&device_id);
++        let keys: Vec<(u32, u32)> = self
++            .pending_irps
++            .keys()
++            .copied()
++            .filter(|(dev_id, _)| *dev_id == device_id)
++            .collect();
++        let mut cancelled = Vec::with_capacity(keys.len());
++        for key in keys {
++            if let Some(pending) = self.pending_irps.remove(&key) {
++                cancelled.push(pending.cancel_message()?);
++            }
++        }
++        Ok(cancelled)
++    }
++
++    fn handle_server_device_announce_response(&mut self, pdu: ServerDeviceAnnounceResponse) -> PduResult<()> {
++        if self.active_drives.contains(&pdu.device_id) {
++            if pdu.result_code == NtStatus::SUCCESS {
++                debug!(device_id = pdu.device_id, "RDPDR drive announce accepted by server");
++            } else {
++                warn!(
++                    device_id = pdu.device_id,
++                    result_code = ?pdu.result_code,
++                    "RDPDR drive announce rejected by server"
++                );
++            }
++            return Ok(());
++        }
++        if let Some(printer) = self.printer.as_mut() {
++            return printer.handle_server_device_announce_response(pdu);
++        }
++        if pdu.result_code != NtStatus::SUCCESS {
++            warn!(
++                device_id = pdu.device_id,
++                result_code = ?pdu.result_code,
++                "RDPDR device announce rejected by server"
++            );
++        }
++        Ok(())
++    }
++
++    fn handle_scard_call(
++        &mut self,
++        _req: DeviceControlRequest<ScardIoCtlCode>,
++        _call: ScardCall,
++    ) -> PduResult<Vec<SvcMessage>> {
++        warn!("Smartcard IOCTL reached drive backend; ignoring");
++        Ok(Vec::new())
++    }
++
++    fn handle_drive_device_control(
++        &mut self,
++        req: DecodedDeviceControlRequest<AnyIoCtlCode>,
++    ) -> PduResult<Vec<SvcMessage>> {
++        let io_req = req.request.header;
++        let device_id = io_req.device_id;
++        let file_id = io_req.file_id;
++        let completion_id = io_req.completion_id;
++        let payload = DriveRequestPayload::DeviceControl {
++            device_id,
++            file_id,
++            completion_id,
++            io_control_code: req.request.io_control_code.0,
++            output_buffer_length: req.request.output_buffer_length,
++            input_buffer: req.input_buffer,
++        };
++        if !self.send_to_loop(DriveBackendMessage::Request(payload)) {
++            return Ok(vec![SvcMessage::from(RdpdrPdu::DeviceControlResponse(
++                DeviceControlResponse {
++                    device_io_reply: DeviceIoResponse::new(io_req, NtStatus::UNSUCCESSFUL),
++                    output_buffer: None,
++                },
++            ))]);
++        }
++        self.pending_irps
++            .insert((device_id, completion_id), PendingDriveIrp::DeviceControl(io_req));
++        Ok(Vec::new())
++    }
++
++    fn handle_drive_io_request(&mut self, req: ServerDriveIoRequest) -> PduResult<Vec<SvcMessage>> {
++        trace!(?req, "Forwarding RDPDR drive IRP to JS");
++        match req {
++            ServerDriveIoRequest::ServerDriveQuerySecurityRequest(req_inner) => {
++                return Ok(vec![SvcMessage::from(RdpdrPdu::ClientDriveQuerySecurityResponse(
++                    ClientDriveQuerySecurityResponse {
++                        device_io_response: DeviceIoResponse::new(req_inner.device_io_request, NtStatus::NOT_SUPPORTED),
++                        security_descriptor: None,
++                    },
++                ))]);
++            }
++            ServerDriveIoRequest::ServerDriveSetSecurityRequest(req_inner) => {
++                let response = ClientDriveSetSecurityResponse::new(&req_inner, NtStatus::NOT_SUPPORTED)
++                    .map_err(|e| encode_err!(e))?;
++                return Ok(vec![SvcMessage::from(RdpdrPdu::ClientDriveSetSecurityResponse(
++                    response,
++                ))]);
++            }
++            _ => {}
++        }
++
++        let (key, pending, payload) = match req {
++            ServerDriveIoRequest::ServerCreateDriveRequest(r) => {
++                let io_req = r.device_io_request;
++                let key = (io_req.device_id, io_req.completion_id);
++                let payload = DriveRequestPayload::Create {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                    path: r.path,
++                    desired_access: r.desired_access.bits(),
++                    allocation_size: r.allocation_size,
++                    file_attributes: r.file_attributes.bits(),
++                    shared_access: r.shared_access.bits(),
++                    create_disposition: u32::from(r.create_disposition),
++                    create_options: r.create_options.bits(),
++                };
++                (key, PendingDriveIrp::Create(io_req), payload)
++            }
++            ServerDriveIoRequest::DeviceCloseRequest(r) => {
++                let io_req = r.device_io_request;
++                let key = (io_req.device_id, io_req.completion_id);
++                let payload = DriveRequestPayload::Close {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                };
++                (key, PendingDriveIrp::Close(io_req), payload)
++            }
++            ServerDriveIoRequest::DeviceReadRequest(r) => {
++                let io_req = r.device_io_request;
++                let key = (io_req.device_id, io_req.completion_id);
++                let payload = DriveRequestPayload::Read {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                    offset: r.offset,
++                    length: r.length,
++                };
++                (key, PendingDriveIrp::Read(io_req), payload)
++            }
++            ServerDriveIoRequest::DeviceWriteRequest(r) => {
++                let io_req = r.device_io_request;
++                let key = (io_req.device_id, io_req.completion_id);
++                let payload = DriveRequestPayload::Write {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                    offset: r.offset,
++                    data: r.write_data,
++                };
++                (key, PendingDriveIrp::Write(io_req), payload)
++            }
++            ServerDriveIoRequest::ServerDriveQueryDirectoryRequest(r) => {
++                let io_req = r.device_io_request;
++                let key = (io_req.device_id, io_req.completion_id);
++                let info_class = r.file_info_class_lvl;
++                let payload = DriveRequestPayload::QueryDirectory {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                    information_class: u32::from(info_class.clone()),
++                    initial_query: r.initial_query != 0,
++                    path: r.path,
++                };
++                (
++                    key,
++                    PendingDriveIrp::QueryDirectory { io_req, info_class },
++                    payload,
++                )
++            }
++            ServerDriveIoRequest::ServerDriveQueryInformationRequest(r) => {
++                let io_req = r.device_io_request;
++                let key = (io_req.device_id, io_req.completion_id);
++                let info_class = r.file_info_class_lvl;
++                let payload = DriveRequestPayload::QueryInformation {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                    information_class: u32::from(info_class.clone()),
++                };
++                (
++                    key,
++                    PendingDriveIrp::QueryInformation { io_req, info_class },
++                    payload,
++                )
++            }
++            ServerDriveIoRequest::ServerDriveQueryVolumeInformationRequest(r) => {
++                let io_req = r.device_io_request;
++                let key = (io_req.device_id, io_req.completion_id);
++                let fs_info_class = r.fs_info_class_lvl;
++                let payload = DriveRequestPayload::QueryVolumeInformation {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                    information_class: u32::from(fs_info_class.clone()),
++                };
++                (
++                    key,
++                    PendingDriveIrp::QueryVolumeInformation { io_req, fs_info_class },
++                    payload,
++                )
++            }
++            ServerDriveIoRequest::ServerDriveSetInformationRequest(r) => {
++                let device_id = r.device_io_request.device_id;
++                let file_id = r.device_io_request.file_id;
++                let completion_id = r.device_io_request.completion_id;
++                let key = (device_id, completion_id);
++                let (information_class, data) = match &r.set_buffer {
++                    FileInformationClass::Basic(info) => (
++                        u32::from(FileInformationClassLevel::FILE_BASIC_INFORMATION),
++                        SetInformationPayload::Basic {
++                            creation_time: info.creation_time,
++                            last_access_time: info.last_access_time,
++                            last_write_time: info.last_write_time,
++                            change_time: info.change_time,
++                            file_attributes: info.file_attributes.bits(),
++                        },
++                    ),
++                    FileInformationClass::Rename(info) => (
++                        u32::from(FileInformationClassLevel::FILE_RENAME_INFORMATION),
++                        SetInformationPayload::Rename {
++                            replace_if_exists: info.replace_if_exists == Boolean::True,
++                            rename_target: info.file_name.clone(),
++                        },
++                    ),
++                    FileInformationClass::Disposition(info) => (
++                        u32::from(FileInformationClassLevel::FILE_DISPOSITION_INFORMATION),
++                        SetInformationPayload::Disposition {
++                            delete_on_close: info.delete_pending != 0,
++                        },
++                    ),
++                    FileInformationClass::Allocation(info) => (
++                        u32::from(FileInformationClassLevel::FILE_ALLOCATION_INFORMATION),
++                        SetInformationPayload::Allocation {
++                            allocation_size: info.allocation_size,
++                        },
++                    ),
++                    FileInformationClass::EndOfFile(info) => (
++                        u32::from(FileInformationClassLevel::FILE_END_OF_FILE_INFORMATION),
++                        SetInformationPayload::EndOfFile {
++                            eof_size: info.end_of_file,
++                        },
++                    ),
++                    _ => (0, SetInformationPayload::Other),
++                };
++                let payload = DriveRequestPayload::SetInformation {
++                    device_id,
++                    file_id,
++                    completion_id,
++                    information_class,
++                    data,
++                };
++                (key, PendingDriveIrp::SetInformation(r), payload)
++            }
++            ServerDriveIoRequest::DeviceFlushBuffersRequest(r) => {
++                let io_req = r.device_io_request;
++                let key = (io_req.device_id, io_req.completion_id);
++                let payload = DriveRequestPayload::Flush {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                };
++                (key, PendingDriveIrp::Flush(io_req), payload)
++            }
++            ServerDriveIoRequest::ServerDriveLockControlRequest(r) => {
++                let io_req = r.device_io_request;
++                let key = (io_req.device_id, io_req.completion_id);
++                let payload = DriveRequestPayload::LockControl {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                    operation: u32::from(r.operation),
++                    wait: r.wait,
++                    locks: r.locks.into_iter().map(|l| (l.offset, l.length)).collect(),
++                };
++                (key, PendingDriveIrp::LockControl(io_req), payload)
++            }
++            ServerDriveIoRequest::DeviceControlRequest(r) => {
++                let io_req = r.header;
++                let key = (io_req.device_id, io_req.completion_id);
++                let payload = DriveRequestPayload::DeviceControl {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                    io_control_code: r.io_control_code.0,
++                    output_buffer_length: r.output_buffer_length,
++                    input_buffer: Vec::new(),
++                };
++                (key, PendingDriveIrp::DeviceControl(io_req), payload)
++            }
++            ServerDriveIoRequest::ServerDriveNotifyChangeDirectoryRequest(r) => {
++                let io_req = r.device_io_request;
++                let key = (io_req.device_id, io_req.completion_id);
++                let payload = DriveRequestPayload::NotifyChangeDirectory {
++                    device_id: io_req.device_id,
++                    file_id: io_req.file_id,
++                    completion_id: io_req.completion_id,
++                    watch_tree: r.watch_tree != 0,
++                    completion_filter: r.completion_filter,
++                };
++                (key, PendingDriveIrp::NotifyChangeDirectory(io_req), payload)
++            }
++            ServerDriveIoRequest::ServerDriveQuerySecurityRequest(_)
++            | ServerDriveIoRequest::ServerDriveSetSecurityRequest(_) => {
++                unreachable!("security requests handled above")
++            }
++        };
++
++        if !self.send_to_loop(DriveBackendMessage::Request(payload)) {
++            return Ok(vec![pending.cancel_message()?]);
++        }
++
++        self.pending_irps.insert(key, pending);
++        Ok(Vec::new())
++    }
++
++    fn handle_printer_io_request(&mut self, req: PrinterIoRequest) -> PduResult<Vec<SvcMessage>> {
++        if let Some(printer) = self.printer.as_mut() {
++            return printer.handle_printer_io_request(req);
++        }
++        let device_io_request = req.into_device_io_request();
++        Ok(vec![SvcMessage::from(RdpdrPdu::DeviceCloseResponse(
++            DeviceCloseResponse {
++                device_io_response: DeviceIoResponse::new(device_io_request, NtStatus::NOT_SUPPORTED),
++            },
++        ))])
++    }
++
++    fn reject_printer_write(&mut self, req: DeviceIoRequest) -> PduResult<Vec<SvcMessage>> {
++        if let Some(printer) = self.printer.as_mut() {
++            return printer.reject_printer_write(req);
++        }
++        Ok(vec![SvcMessage::from(RdpdrPdu::DeviceWriteResponse(
++            DeviceWriteResponse {
++                device_io_reply: DeviceIoResponse::new(req, NtStatus::NOT_SUPPORTED),
++                length: 0,
++            },
++        ))])
++    }
++}
++
++/// Converts a [`DriveBackendMessage`] into the plain JavaScript object passed to
++/// `rdpdr_request_callback`.
++pub(crate) fn drive_message_to_js(message: DriveBackendMessage) -> JsValue {
++    let obj = js_sys::Object::new();
++    let set = |key: &str, value: JsValue| {
++        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(key), &value);
++    };
++
++    match message {
++        DriveBackendMessage::Reset => {
++            set("op", JsValue::from_str("reset"));
++            set("deviceId", JsValue::from(0u32));
++            set("fileId", JsValue::from(0u32));
++            set("completionId", JsValue::from(0u32));
++        }
++        DriveBackendMessage::Request(req) => match req {
++            DriveRequestPayload::Create {
++                device_id,
++                file_id,
++                completion_id,
++                path,
++                desired_access,
++                allocation_size,
++                file_attributes,
++                shared_access,
++                create_disposition,
++                create_options,
++            } => {
++                set("op", JsValue::from_str("create"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++                set("path", JsValue::from_str(&path));
++                set("desiredAccess", JsValue::from(desired_access));
++                set("allocationSize", u64_to_js_number(allocation_size));
++                set("fileAttributes", JsValue::from(file_attributes));
++                set("sharedAccess", JsValue::from(shared_access));
++                set("createDisposition", JsValue::from(create_disposition));
++                set("createOptions", JsValue::from(create_options));
++            }
++            DriveRequestPayload::Close {
++                device_id,
++                file_id,
++                completion_id,
++            } => {
++                set("op", JsValue::from_str("close"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++            }
++            DriveRequestPayload::Read {
++                device_id,
++                file_id,
++                completion_id,
++                offset,
++                length,
++            } => {
++                set("op", JsValue::from_str("read"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++                set("offset", u64_to_js_number(offset));
++                set("length", JsValue::from(length));
++            }
++            DriveRequestPayload::Write {
++                device_id,
++                file_id,
++                completion_id,
++                offset,
++                data,
++            } => {
++                set("op", JsValue::from_str("write"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++                set("offset", u64_to_js_number(offset));
++                set("data", js_sys::Uint8Array::from(data.as_slice()).into());
++            }
++            DriveRequestPayload::QueryDirectory {
++                device_id,
++                file_id,
++                completion_id,
++                information_class,
++                initial_query,
++                path,
++            } => {
++                set("op", JsValue::from_str("query_directory"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++                set("informationClass", JsValue::from(information_class));
++                set("initialQuery", JsValue::from_bool(initial_query));
++                set("path", JsValue::from_str(&path));
++            }
++            DriveRequestPayload::QueryInformation {
++                device_id,
++                file_id,
++                completion_id,
++                information_class,
++            } => {
++                set("op", JsValue::from_str("query_information"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++                set("informationClass", JsValue::from(information_class));
++            }
++            DriveRequestPayload::QueryVolumeInformation {
++                device_id,
++                file_id,
++                completion_id,
++                information_class,
++            } => {
++                set("op", JsValue::from_str("query_volume_information"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++                set("informationClass", JsValue::from(information_class));
++            }
++            DriveRequestPayload::SetInformation {
++                device_id,
++                file_id,
++                completion_id,
++                information_class,
++                data,
++            } => {
++                set("op", JsValue::from_str("set_information"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++                set("informationClass", JsValue::from(information_class));
++                match data {
++                    SetInformationPayload::Basic {
++                        creation_time,
++                        last_access_time,
++                        last_write_time,
++                        change_time,
++                        file_attributes,
++                    } => {
++                        set("creationTime", JsValue::from_str(&creation_time.to_string()));
++                        set("lastAccessTime", JsValue::from_str(&last_access_time.to_string()));
++                        set("lastWriteTime", JsValue::from_str(&last_write_time.to_string()));
++                        set("changeTime", JsValue::from_str(&change_time.to_string()));
++                        set("fileAttributes", JsValue::from(file_attributes));
++                    }
++                    SetInformationPayload::Rename {
++                        replace_if_exists,
++                        rename_target,
++                    } => {
++                        set("replaceIfExists", JsValue::from_bool(replace_if_exists));
++                        set("renameTarget", JsValue::from_str(&rename_target));
++                    }
++                    SetInformationPayload::Disposition { delete_on_close } => {
++                        set("deleteOnClose", JsValue::from_bool(delete_on_close));
++                    }
++                    SetInformationPayload::Allocation { allocation_size } => {
++                        set("allocationSize", i64_to_js_number(allocation_size));
++                    }
++                    SetInformationPayload::EndOfFile { eof_size } => {
++                        set("eofSize", i64_to_js_number(eof_size));
++                    }
++                    SetInformationPayload::Other => {}
++                }
++            }
++            DriveRequestPayload::Flush {
++                device_id,
++                file_id,
++                completion_id,
++            } => {
++                set("op", JsValue::from_str("flush"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++            }
++            DriveRequestPayload::LockControl {
++                device_id,
++                file_id,
++                completion_id,
++                operation,
++                wait,
++                locks,
++            } => {
++                set("op", JsValue::from_str("lock_control"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++                set("operation", JsValue::from(operation));
++                set("wait", JsValue::from_bool(wait));
++                let js_locks = js_sys::Array::new();
++                for (offset, length) in locks {
++                    let lock_obj = js_sys::Object::new();
++                    let _ = js_sys::Reflect::set(&lock_obj, &JsValue::from_str("offset"), &u64_to_js_number(offset));
++                    let _ = js_sys::Reflect::set(&lock_obj, &JsValue::from_str("length"), &u64_to_js_number(length));
++                    js_locks.push(&lock_obj);
++                }
++                set("locks", js_locks.into());
++            }
++            DriveRequestPayload::DeviceControl {
++                device_id,
++                file_id,
++                completion_id,
++                io_control_code,
++                output_buffer_length,
++                input_buffer,
++            } => {
++                set("op", JsValue::from_str("device_control"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++                set("ioControlCode", JsValue::from(io_control_code));
++                set("outputBufferLength", JsValue::from(output_buffer_length));
++                set("inputBuffer", js_sys::Uint8Array::from(input_buffer.as_slice()).into());
++            }
++            DriveRequestPayload::NotifyChangeDirectory {
++                device_id,
++                file_id,
++                completion_id,
++                watch_tree,
++                completion_filter,
++            } => {
++                set("op", JsValue::from_str("notify_change_directory"));
++                set("deviceId", JsValue::from(device_id));
++                set("fileId", JsValue::from(file_id));
++                set("completionId", JsValue::from(completion_id));
++                set("watchTree", JsValue::from_bool(watch_tree));
++                set("completionFilter", JsValue::from(completion_filter));
++            }
++        },
++    }
++
++    obj.into()
++}
++
++/// Parses `rdpdr_drives` JS array (`Array<{ deviceId: number, name: string }>`).
++pub(crate) fn parse_drives_array(value: JsValue) -> Result<Vec<(u32, String)>, IronError> {
++    if value.is_null() || value.is_undefined() {
++        return Ok(Vec::new());
++    }
++    if !js_sys::Array::is_array(&value) {
++        return Err(anyhow::anyhow!("rdpdr_drives must be an array").into());
++    }
++    let arr = js_sys::Array::from(&value);
++    let mut seen_ids = HashSet::new();
++    let mut drives = Vec::new();
++    for idx in 0..arr.length() {
++        let item = arr.get(idx);
++        let (device_id, name) = parse_drive_descriptor(item)?;
++        if device_id == 0 {
++            return Err(anyhow::anyhow!("rdpdr drive deviceId must be non-zero").into());
++        }
++        if !seen_ids.insert(device_id) {
++            return Err(anyhow::anyhow!("duplicate rdpdr drive deviceId {device_id}").into());
++        }
++        drives.push((device_id, name));
++    }
++    Ok(drives)
++}
++
++/// Parses a single `{ deviceId: number, name: string }` descriptor for `rdpdr_add_drive`.
++pub(crate) fn parse_drive_descriptor(value: JsValue) -> Result<(u32, String), IronError> {
++    let obj = value
++        .dyn_into::<js_sys::Object>()
++        .map_err(|_| anyhow::anyhow!("drive descriptor must be an object"))?;
++    let device_id = prop_u32(&obj, "deviceId")?;
++    if device_id == 0 {
++        return Err(anyhow::anyhow!("drive deviceId must be non-zero").into());
++    }
++    let raw_name = prop_string(&obj, "name")?;
++    Ok((device_id, sanitize_drive_name(&raw_name)))
++}
++
++/// Parses a `deviceId` (either a bare number or `{ deviceId: number }`) for `rdpdr_remove_drive`.
++pub(crate) fn parse_drive_device_id(value: JsValue) -> Result<u32, IronError> {
++    if let Some(num) = value.as_f64() {
++        let id = f64_to_u32(num).context("invalid deviceId")?;
++        if id == 0 {
++            return Err(anyhow::anyhow!("drive deviceId must be non-zero").into());
++        }
++        return Ok(id);
++    }
++    let obj = value
++        .dyn_into::<js_sys::Object>()
++        .map_err(|_| anyhow::anyhow!("rdpdr_remove_drive expects a deviceId number or object"))?;
++    let id = prop_u32(&obj, "deviceId")?;
++    if id == 0 {
++        return Err(anyhow::anyhow!("drive deviceId must be non-zero").into());
++    }
++    Ok(id)
++}
++
++/// Parses the JS response object passed to `Session.invokeExtension("rdpdr_response", resp)`.
++pub(crate) fn parse_drive_response(value: JsValue) -> Result<DriveResponse, IronError> {
++    let obj = value
++        .dyn_into::<js_sys::Object>()
++        .map_err(|_| anyhow::anyhow!("rdpdr_response expects an object"))?;
++    let op = prop_string(&obj, "op")?;
++    if op == "reset" {
++        return Ok(DriveResponse::Reset);
++    }
++
++    let device_id = prop_u32(&obj, "deviceId")?;
++    let completion_id = prop_u32(&obj, "completionId")?;
++    let status = NtStatus::from(prop_u32(&obj, "status")?);
++
++    match op.as_str() {
++        "create" => {
++            let file_id = prop_u32_opt(&obj, "fileId")?.unwrap_or(0);
++            let default_info = if status == NtStatus::SUCCESS {
++                Information::FILE_OPENED.bits()
++            } else {
++                0
++            };
++            let info_u8 = prop_u32_opt(&obj, "information")?
++                .and_then(|v| u8::try_from(v).ok())
++                .unwrap_or(default_info);
++            Ok(DriveResponse::Create {
++                device_id,
++                completion_id,
++                status,
++                file_id,
++                information: Information::from_bits_retain(info_u8),
++            })
++        }
++        "close" => Ok(DriveResponse::Close {
++            device_id,
++            completion_id,
++            status,
++        }),
++        "read" => {
++            let data = if status == NtStatus::SUCCESS {
++                prop_bytes_opt(&obj, "data")?
++            } else {
++                Vec::new()
++            };
++            Ok(DriveResponse::Read {
++                device_id,
++                completion_id,
++                status,
++                data,
++            })
++        }
++        "write" => {
++            let bytes_written = match prop_u32_opt(&obj, "bytesWritten")? {
++                Some(n) => n,
++                None => prop_u32_opt(&obj, "length")?.unwrap_or(0),
++            };
++            Ok(DriveResponse::Write {
++                device_id,
++                completion_id,
++                status,
++                bytes_written,
++            })
++        }
++        "query_directory" => {
++            let information_class = prop_u32_opt(&obj, "informationClass")?;
++            let entry = if status == NtStatus::SUCCESS {
++                prop_object_opt(&obj, "entry")?
++                    .map(|entry_obj| parse_directory_entry(&entry_obj))
++                    .transpose()?
++            } else {
++                None
++            };
++            Ok(DriveResponse::QueryDirectory {
++                device_id,
++                completion_id,
++                status,
++                information_class,
++                entry,
++            })
++        }
++        "query_information" => {
++            let information_class = prop_u32_opt(&obj, "informationClass")?;
++            let info = if status == NtStatus::SUCCESS {
++                parse_query_info(&obj, information_class)?
++            } else {
++                None
++            };
++            Ok(DriveResponse::QueryInformation {
++                device_id,
++                completion_id,
++                status,
++                info,
++            })
++        }
++        "query_volume_information" => {
++            let information_class = prop_u32_opt(&obj, "informationClass")?;
++            let info = if status == NtStatus::SUCCESS {
++                parse_query_volume_info(&obj, information_class)?
++            } else {
++                None
++            };
++            Ok(DriveResponse::QueryVolumeInformation {
++                device_id,
++                completion_id,
++                status,
++                info,
++            })
++        }
++        "set_information" => Ok(DriveResponse::SetInformation {
++            device_id,
++            completion_id,
++            status,
++        }),
++        "flush" => Ok(DriveResponse::Flush {
++            device_id,
++            completion_id,
++            status,
++        }),
++        "lock_control" => Ok(DriveResponse::LockControl {
++            device_id,
++            completion_id,
++            status,
++        }),
++        "device_control" => {
++            let output_buffer = if status == NtStatus::SUCCESS {
++                prop_bytes_opt(&obj, "outputBuffer")?
++            } else {
++                Vec::new()
++            };
++            Ok(DriveResponse::DeviceControl {
++                device_id,
++                completion_id,
++                status,
++                output_buffer,
++            })
++        }
++        "notify_change_directory" => {
++            let buffer = if status == NtStatus::SUCCESS {
++                prop_bytes_opt(&obj, "buffer")?
++            } else {
++                Vec::new()
++            };
++            Ok(DriveResponse::NotifyChangeDirectory {
++                device_id,
++                completion_id,
++                status,
++                buffer,
++            })
++        }
++        other => Err(anyhow::anyhow!("unknown rdpdr_response op `{other}`").into()),
++    }
++}
++
++fn parse_directory_entry(obj: &js_sys::Object) -> Result<DriveDirectoryEntry, IronError> {
++    let file_name = match prop_string_opt(obj, "fileName")? {
++        Some(name) => name,
++        None => prop_string(obj, "name")?,
++    };
++    let creation_time = prop_i64_flexible_opt(obj, "creationTime")?.unwrap_or(0);
++    let last_access_time = prop_i64_flexible_opt(obj, "lastAccessTime")?.unwrap_or(0);
++    let last_write_time = prop_i64_flexible_opt(obj, "lastWriteTime")?.unwrap_or(0);
++    let change_time = prop_i64_flexible_opt(obj, "changeTime")?.unwrap_or(last_write_time);
++    let end_of_file = match prop_i64_flexible_opt(obj, "endOfFile")? {
++        Some(size) => size,
++        None => prop_i64_flexible_opt(obj, "size")?.unwrap_or(0),
++    };
++    let allocation_size = prop_i64_flexible_opt(obj, "allocationSize")?.unwrap_or(end_of_file);
++    let file_attributes = prop_u32_opt(obj, "fileAttributes")?.unwrap_or(0);
++
++    Ok(DriveDirectoryEntry {
++        file_name,
++        creation_time,
++        last_access_time,
++        last_write_time,
++        change_time,
++        end_of_file,
++        allocation_size,
++        file_attributes,
++    })
++}
++
++fn parse_query_info(obj: &js_sys::Object, info_class: Option<u32>) -> Result<Option<DriveFileInfo>, IronError> {
++    if let Some(basic_obj) = prop_object_opt(obj, "basic")? {
++        return Ok(Some(parse_basic_info(&basic_obj)?));
++    }
++    if let Some(standard_obj) = prop_object_opt(obj, "standard")? {
++        return Ok(Some(parse_standard_info(&standard_obj)?));
++    }
++    if let Some(attr_obj) = prop_object_opt(obj, "attributeTag")? {
++        return Ok(Some(parse_attribute_tag_info(&attr_obj)?));
++    }
++
++    // Fallback: accept generic `info` property keyed by `informationClass`.
++    if let Some(info_obj) = prop_object_opt(obj, "info")? {
++        let class = info_class.map(FileInformationClassLevel::from);
++        if class == Some(FileInformationClassLevel::FILE_BASIC_INFORMATION) {
++            return Ok(Some(parse_basic_info(&info_obj)?));
++        }
++        if class == Some(FileInformationClassLevel::FILE_STANDARD_INFORMATION) {
++            return Ok(Some(parse_standard_info(&info_obj)?));
++        }
++        if class == Some(FileInformationClassLevel::FILE_ATTRIBUTE_TAG_INFORMATION) {
++            return Ok(Some(parse_attribute_tag_info(&info_obj)?));
++        }
++    }
++
++    Ok(None)
++}
++
++fn parse_basic_info(obj: &js_sys::Object) -> Result<DriveFileInfo, IronError> {
++    Ok(DriveFileInfo::Basic(FileBasicInformation {
++        creation_time: prop_i64_flexible_opt(obj, "creationTime")?.unwrap_or(0),
++        last_access_time: prop_i64_flexible_opt(obj, "lastAccessTime")?.unwrap_or(0),
++        last_write_time: prop_i64_flexible_opt(obj, "lastWriteTime")?.unwrap_or(0),
++        change_time: prop_i64_flexible_opt(obj, "changeTime")?.unwrap_or(0),
++        file_attributes: FileAttributes::from_bits_retain(prop_u32_opt(obj, "fileAttributes")?.unwrap_or(0)),
++    }))
++}
++
++fn parse_standard_info(obj: &js_sys::Object) -> Result<DriveFileInfo, IronError> {
++    let end_of_file = prop_i64_flexible_opt(obj, "endOfFile")?.unwrap_or(0);
++    let allocation_size = prop_i64_flexible_opt(obj, "allocationSize")?.unwrap_or(end_of_file);
++    let number_of_links = prop_u32_opt(obj, "numberOfLinks")?.unwrap_or(1);
++    let delete_pending = prop_bool_opt(obj, "deletePending")?.unwrap_or(false);
++    let directory = match prop_bool_opt(obj, "directory")? {
++        Some(flag) => flag,
++        None => prop_bool_opt(obj, "isDirectory")?.unwrap_or(false),
++    };
++    Ok(DriveFileInfo::Standard(FileStandardInformation {
++        allocation_size,
++        end_of_file,
++        number_of_links,
++        delete_pending: if delete_pending { Boolean::True } else { Boolean::False },
++        directory: if directory { Boolean::True } else { Boolean::False },
++    }))
++}
++
++fn parse_attribute_tag_info(obj: &js_sys::Object) -> Result<DriveFileInfo, IronError> {
++    Ok(DriveFileInfo::AttributeTag(FileAttributeTagInformation {
++        file_attributes: FileAttributes::from_bits_retain(prop_u32_opt(obj, "fileAttributes")?.unwrap_or(0)),
++        reparse_tag: prop_u32_opt(obj, "reparseTag")?.unwrap_or(0),
++    }))
++}
++
++fn parse_query_volume_info(obj: &js_sys::Object, info_class: Option<u32>) -> Result<Option<DriveVolumeInfo>, IronError> {
++    if let Some(vol_obj) = prop_object_opt(obj, "volume")? {
++        return Ok(Some(parse_fs_volume_info(&vol_obj)?));
++    }
++    if let Some(size_obj) = prop_object_opt(obj, "size")? {
++        return Ok(Some(parse_fs_size_info(&size_obj)?));
++    }
++    if let Some(dev_obj) = prop_object_opt(obj, "device")? {
++        return Ok(Some(parse_fs_device_info(&dev_obj)?));
++    }
++    if let Some(attr_obj) = prop_object_opt(obj, "attribute")? {
++        return Ok(Some(parse_fs_attribute_info(&attr_obj)?));
++    }
++    if let Some(full_obj) = prop_object_opt(obj, "fullSize")? {
++        return Ok(Some(parse_fs_full_size_info(&full_obj)?));
++    }
++
++    // Fallback: accept generic `info` property keyed by `informationClass`.
++    if let Some(info_obj) = prop_object_opt(obj, "info")? {
++        let class = info_class.map(FileSystemInformationClassLevel::from);
++        if class == Some(FileSystemInformationClassLevel::FILE_FS_VOLUME_INFORMATION) {
++            return Ok(Some(parse_fs_volume_info(&info_obj)?));
++        }
++        if class == Some(FileSystemInformationClassLevel::FILE_FS_SIZE_INFORMATION) {
++            return Ok(Some(parse_fs_size_info(&info_obj)?));
++        }
++        if class == Some(FileSystemInformationClassLevel::FILE_FS_DEVICE_INFORMATION) {
++            return Ok(Some(parse_fs_device_info(&info_obj)?));
++        }
++        if class == Some(FileSystemInformationClassLevel::FILE_FS_ATTRIBUTE_INFORMATION) {
++            return Ok(Some(parse_fs_attribute_info(&info_obj)?));
++        }
++        if class == Some(FileSystemInformationClassLevel::FILE_FS_FULL_SIZE_INFORMATION) {
++            return Ok(Some(parse_fs_full_size_info(&info_obj)?));
++        }
++    }
++
++    Ok(None)
++}
++
++fn parse_fs_volume_info(obj: &js_sys::Object) -> Result<DriveVolumeInfo, IronError> {
++    let creation_time = match prop_i64_flexible_opt(obj, "creationTime")? {
++        Some(t) => t,
++        None => prop_i64_flexible_opt(obj, "volumeCreationTime")?.unwrap_or(0),
++    };
++    let serial_number = match prop_u32_opt(obj, "serialNumber")? {
++        Some(n) => n,
++        None => prop_u32_opt(obj, "volumeSerialNumber")?.unwrap_or(0),
++    };
++    let supports_objects = prop_bool_opt(obj, "supportsObjects")?.unwrap_or(false);
++    let label = match prop_string_opt(obj, "label")? {
++        Some(s) => s,
++        None => prop_string_opt(obj, "volumeLabel")?.unwrap_or_else(|| "NETCATTY".to_owned()),
++    };
++    Ok(DriveVolumeInfo::Volume {
++        creation_time,
++        serial_number,
++        supports_objects,
++        label,
++    })
++}
++
++fn parse_fs_size_info(obj: &js_sys::Object) -> Result<DriveVolumeInfo, IronError> {
++    let total_alloc_units = match prop_i64_flexible_opt(obj, "totalAllocationUnits")? {
++        Some(n) => n,
++        None => prop_i64_flexible_opt(obj, "totalAllocUnits")?.unwrap_or(0),
++    };
++    let available_alloc_units = match prop_i64_flexible_opt(obj, "availableAllocationUnits")? {
++        Some(n) => n,
++        None => prop_i64_flexible_opt(obj, "availableAllocUnits")?.unwrap_or(0),
++    };
++    let sectors_per_alloc_unit = match prop_u32_opt(obj, "sectorsPerAllocationUnit")? {
++        Some(n) => n,
++        None => prop_u32_opt(obj, "sectorsPerAllocUnit")?.unwrap_or(1),
++    };
++    let bytes_per_sector = prop_u32_opt(obj, "bytesPerSector")?.unwrap_or(512);
++    Ok(DriveVolumeInfo::Size {
++        total_alloc_units,
++        available_alloc_units,
++        sectors_per_alloc_unit,
++        bytes_per_sector,
++    })
++}
++
++fn parse_fs_device_info(obj: &js_sys::Object) -> Result<DriveVolumeInfo, IronError> {
++    Ok(DriveVolumeInfo::Device {
++        device_type: prop_u32_opt(obj, "deviceType")?.unwrap_or(0x0000_0007),
++        characteristics: prop_u32_opt(obj, "characteristics")?.unwrap_or(0),
++    })
++}
++
++fn parse_fs_attribute_info(obj: &js_sys::Object) -> Result<DriveVolumeInfo, IronError> {
++    let attributes = match prop_u32_opt(obj, "attributes")? {
++        Some(n) => n,
++        None => prop_u32_opt(obj, "fileSystemAttributes")?.unwrap_or(
++            (FileSystemAttributes::FILE_CASE_PRESERVED_NAMES | FileSystemAttributes::FILE_UNICODE_ON_DISK).bits(),
++        ),
++    };
++    let max_component_name_len = prop_u32_opt(obj, "maxComponentNameLen")?.unwrap_or(255);
++    let file_system_name = prop_string_opt(obj, "fileSystemName")?.unwrap_or_else(|| "FAT32".to_owned());
++    Ok(DriveVolumeInfo::Attribute {
++        attributes,
++        max_component_name_len,
++        file_system_name,
++    })
++}
++
++fn parse_fs_full_size_info(obj: &js_sys::Object) -> Result<DriveVolumeInfo, IronError> {
++    let total_alloc_units = match prop_i64_flexible_opt(obj, "totalAllocationUnits")? {
++        Some(n) => n,
++        None => prop_i64_flexible_opt(obj, "totalAllocUnits")?.unwrap_or(0),
++    };
++    let caller_available_alloc_units = match prop_i64_flexible_opt(obj, "callerAvailableAllocationUnits")? {
++        Some(n) => n,
++        None => prop_i64_flexible_opt(obj, "callerAvailableAllocUnits")?.unwrap_or(0),
++    };
++    let actual_available_alloc_units = match prop_i64_flexible_opt(obj, "actualAvailableAllocationUnits")? {
++        Some(n) => n,
++        None => prop_i64_flexible_opt(obj, "actualAvailableAllocUnits")?.unwrap_or(caller_available_alloc_units),
++    };
++    let sectors_per_alloc_unit = match prop_u32_opt(obj, "sectorsPerAllocationUnit")? {
++        Some(n) => n,
++        None => prop_u32_opt(obj, "sectorsPerAllocUnit")?.unwrap_or(1),
++    };
++    let bytes_per_sector = prop_u32_opt(obj, "bytesPerSector")?.unwrap_or(512);
++    Ok(DriveVolumeInfo::FullSize {
++        total_alloc_units,
++        caller_available_alloc_units,
++        actual_available_alloc_units,
++        sectors_per_alloc_unit,
++        bytes_per_sector,
++    })
++}
++
++// ---- JS reflection helpers ----
++
++fn prop_raw(obj: &js_sys::Object, key: &str) -> Result<JsValue, IronError> {
++    js_sys::Reflect::get(obj, &JsValue::from_str(key))
++        .map_err(|e| anyhow::anyhow!("get property `{key}`: {e:?}").into())
++}
++
++fn prop_string(obj: &js_sys::Object, key: &str) -> Result<String, IronError> {
++    prop_string_opt(obj, key)?.ok_or_else(|| anyhow::anyhow!("missing string property `{key}`").into())
++}
++
++fn prop_string_opt(obj: &js_sys::Object, key: &str) -> Result<Option<String>, IronError> {
++    let val = prop_raw(obj, key)?;
++    if val.is_undefined() || val.is_null() {
++        return Ok(None);
++    }
++    val.as_string()
++        .map(Some)
++        .ok_or_else(|| anyhow::anyhow!("property `{key}` must be a string").into())
++}
++
++fn prop_u32(obj: &js_sys::Object, key: &str) -> Result<u32, IronError> {
++    prop_u32_opt(obj, key)?.ok_or_else(|| anyhow::anyhow!("missing number property `{key}`").into())
++}
++
++fn prop_u32_opt(obj: &js_sys::Object, key: &str) -> Result<Option<u32>, IronError> {
++    let val = prop_raw(obj, key)?;
++    if val.is_undefined() || val.is_null() {
++        return Ok(None);
++    }
++    let f = val
++        .as_f64()
++        .ok_or_else(|| anyhow::anyhow!("property `{key}` must be a number"))?;
++    let v = f64_to_u32(f).with_context(|| format!("invalid u32 value for `{key}`"))?;
++    Ok(Some(v))
++}
++
++fn prop_bool_opt(obj: &js_sys::Object, key: &str) -> Result<Option<bool>, IronError> {
++    let val = prop_raw(obj, key)?;
++    if val.is_undefined() || val.is_null() {
++        return Ok(None);
++    }
++    val.as_bool()
++        .map(Some)
++        .ok_or_else(|| anyhow::anyhow!("property `{key}` must be a boolean").into())
++}
++
++fn prop_object_opt(obj: &js_sys::Object, key: &str) -> Result<Option<js_sys::Object>, IronError> {
++    let val = prop_raw(obj, key)?;
++    if val.is_undefined() || val.is_null() {
++        return Ok(None);
++    }
++    val.dyn_into::<js_sys::Object>()
++        .map(Some)
++        .map_err(|_| anyhow::anyhow!("property `{key}` must be an object").into())
++}
++
++fn prop_bytes_opt(obj: &js_sys::Object, key: &str) -> Result<Vec<u8>, IronError> {
++    let val = prop_raw(obj, key)?;
++    if val.is_undefined() || val.is_null() {
++        return Ok(Vec::new());
++    }
++    if let Ok(arr) = val.clone().dyn_into::<js_sys::Uint8Array>() {
++        return Ok(arr.to_vec());
++    }
++    if let Ok(buf) = val.clone().dyn_into::<js_sys::ArrayBuffer>() {
++        return Ok(js_sys::Uint8Array::new(&buf).to_vec());
++    }
++    if js_sys::Array::is_array(&val) {
++        return Ok(js_sys::Uint8Array::new(&val).to_vec());
++    }
++    Err(anyhow::anyhow!("property `{key}` must be a Uint8Array, ArrayBuffer, or byte array").into())
++}
++
++fn prop_i64_flexible_opt(obj: &js_sys::Object, key: &str) -> Result<Option<i64>, IronError> {
++    let val = prop_raw(obj, key)?;
++    if val.is_undefined() || val.is_null() {
++        return Ok(None);
++    }
++    if let Some(text) = val.as_string() {
++        let parsed = text
++            .trim()
++            .parse::<i64>()
++            .with_context(|| format!("invalid i64 string for `{key}`"))?;
++        return Ok(Some(parsed));
++    }
++    if let Some(num) = val.as_f64() {
++        if !num.is_finite() {
++            return Err(anyhow::anyhow!("property `{key}` must be finite").into());
++        }
++        #[expect(
++            clippy::as_conversions,
++            clippy::cast_possible_truncation,
++            clippy::cast_precision_loss,
++            reason = "clamped to finite i64 range before conversion"
++        )]
++        let clamped = num.clamp(i64::MIN as f64, i64::MAX as f64) as i64;
++        return Ok(Some(clamped));
++    }
++    if val.is_bigint() {
++        let bigint = js_sys::BigInt::from(val);
++        let text = bigint
++            .to_string(10)
++            .map_err(|e| anyhow::anyhow!("format bigint `{key}`: {e:?}"))?
++            .as_string()
++            .ok_or_else(|| anyhow::anyhow!("bigint `{key}` to_string returned non-string"))?;
++        let parsed = text
++            .parse::<i64>()
++            .with_context(|| format!("bigint `{key}` out of i64 range"))?;
++        return Ok(Some(parsed));
++    }
++    Err(anyhow::anyhow!("property `{key}` must be a string, number, or bigint").into())
++}
++
++fn f64_to_u32(val: f64) -> anyhow::Result<u32> {
++    if !val.is_finite() || val < 0.0 || val > f64::from(u32::MAX) || val.fract() != 0.0 {
++        anyhow::bail!("expected u32 integer, got {val}");
++    }
++    #[expect(
++        clippy::as_conversions,
++        clippy::cast_possible_truncation,
++        clippy::cast_sign_loss,
++        reason = "validated as finite integral value within 0..=u32::MAX"
++    )]
++    Ok(val as u32)
++}
++
++fn u64_to_js_number(val: u64) -> JsValue {
++    #[expect(
++        clippy::as_conversions,
++        clippy::cast_precision_loss,
++        reason = "JS number representation for file offsets/sizes"
++    )]
++    JsValue::from_f64(val as f64)
++}
++
++fn i64_to_js_number(val: i64) -> JsValue {
++    #[expect(
++        clippy::as_conversions,
++        clippy::cast_precision_loss,
++        reason = "JS number representation for file sizes"
++    )]
++    JsValue::from_f64(val as f64)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use ironrdp::rdpdr::pdu::efs::{
++        CreateDisposition, CreateOptions, DesiredAccess, DeviceCloseRequest, DeviceCreateRequest, DeviceReadRequest,
++        DeviceWriteRequest, FileDispositionInformation, FileEndOfFileInformation, FileRenameInformation,
++        MajorFunction, MinorFunction, ServerDriveQueryDirectoryRequest, ServerDriveQueryInformationRequest,
++        ServerDriveQueryVolumeInformationRequest, SharedAccess,
++    };
++    use ironrdp_core::ReadCursor;
++
++    fn make_io_req(device_id: u32, file_id: u32, completion_id: u32, major: MajorFunction) -> DeviceIoRequest {
++        DeviceIoRequest {
++            device_id,
++            file_id,
++            completion_id,
++            major_function: major,
++            minor_function: MinorFunction::from(0),
++        }
++    }
++
++    fn decode_completion_header(bytes: &[u8]) -> (u16, u16, u32, u32, u32) {
++        assert!(bytes.len() >= 16, "completion shorter than header: {}", bytes.len());
++        let component = u16::from_le_bytes([bytes[0], bytes[1]]);
++        let packet_id = u16::from_le_bytes([bytes[2], bytes[3]]);
++        let device_id = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
++        let completion_id = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
++        let status = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
++        (component, packet_id, device_id, completion_id, status)
++    }
++
++    #[test]
++    fn sanitize_drive_name_cleans_and_truncates() {
++        assert_eq!(sanitize_drive_name("Projects"), "Projects");
++        assert_eq!(sanitize_drive_name("my/bad:name*?. "), "my_bad_name__");
++        assert_eq!(sanitize_drive_name("   \0\n\t...  "), "Share");
++        let long_name = "a".repeat(100);
++        assert_eq!(sanitize_drive_name(&long_name).len(), MAX_DRIVE_NAME_BYTES);
++    }
++
++    #[test]
++    fn create_read_write_close_roundtrip_pdus() {
++        let (tx, mut rx) = mpsc::unbounded();
++        let mut backend = WasmDriveBackend::new(tx);
++        backend.add_drive(10).unwrap();
++
++        // 1. Create
++        let create_req = DeviceCreateRequest {
++            device_io_request: make_io_req(10, 0, 100, MajorFunction::Create),
++            desired_access: DesiredAccess::GENERIC_READ,
++            allocation_size: 0,
++            file_attributes: FileAttributes::FILE_ATTRIBUTE_NORMAL,
++            shared_access: SharedAccess::FILE_SHARE_READ,
++            create_disposition: CreateDisposition::FILE_OPEN,
++            create_options: CreateOptions::empty(),
++            path: "\\hello.txt".to_owned(),
++        };
++        let immediate = backend
++            .handle_drive_io_request(ServerDriveIoRequest::ServerCreateDriveRequest(create_req))
++            .unwrap();
++        assert!(immediate.is_empty(), "drive IRPs complete asynchronously");
++
++        match rx.try_recv().unwrap() {
++            RdpInputEvent::DriveRequest(DriveBackendMessage::Request(DriveRequestPayload::Create {
++                device_id,
++                completion_id,
++                path,
++                ..
++            })) => {
++                assert_eq!(device_id, 10);
++                assert_eq!(completion_id, 100);
++                assert_eq!(path, "\\hello.txt");
++            }
++            other => panic!("unexpected event: {other:?}"),
++        }
++
++        let msg = backend
++            .complete_response(DriveResponse::Create {
++                device_id: 10,
++                completion_id: 100,
++                status: NtStatus::SUCCESS,
++                file_id: 7,
++                information: Information::FILE_OPENED,
++            })
++            .unwrap()
++            .expect("completion emitted");
++        let encoded = msg.encode_unframed_pdu().unwrap();
++        let (comp, pkt, dev, cid, st) = decode_completion_header(&encoded);
++        assert_eq!(comp, 0x4472);
++        assert_eq!(pkt, 0x4943);
++        assert_eq!((dev, cid, st), (10, 100, 0));
++        assert_eq!(u32::from_le_bytes(encoded[16..20].try_into().unwrap()), 7);
++        assert_eq!(encoded[20], Information::FILE_OPENED.bits());
++
++        // 2. Read
++        let read_req = DeviceReadRequest {
++            device_io_request: make_io_req(10, 7, 101, MajorFunction::Read),
++            length: 16,
++            offset: 4,
++        };
++        backend
++            .handle_drive_io_request(ServerDriveIoRequest::DeviceReadRequest(read_req))
++            .unwrap();
++        let _ = rx.try_recv().unwrap();
++
++        let msg = backend
++            .complete_response(DriveResponse::Read {
++                device_id: 10,
++                completion_id: 101,
++                status: NtStatus::SUCCESS,
++                data: b"world".to_vec(),
++            })
++            .unwrap()
++            .expect("read completion");
++        let encoded = msg.encode_unframed_pdu().unwrap();
++        let mut cursor = ReadCursor::new(&encoded[16..]);
++        let decoded = DeviceReadResponse::decode(
++            DeviceIoResponse {
++                device_id: 10,
++                completion_id: 101,
++                io_status: NtStatus::SUCCESS,
++            },
++            &mut cursor,
++        )
++        .unwrap();
++        assert_eq!(decoded.read_data, b"world");
++
++        // 3. Write (read-only rejection -> MEDIA_WRITE_PROTECTED)
++        let write_req = DeviceWriteRequest {
++            device_io_request: make_io_req(10, 7, 102, MajorFunction::Write),
++            offset: 0,
++            write_data: b"abc".to_vec(),
++        };
++        backend
++            .handle_drive_io_request(ServerDriveIoRequest::DeviceWriteRequest(write_req))
++            .unwrap();
++        let _ = rx.try_recv().unwrap();
++
++        let msg = backend
++            .complete_response(DriveResponse::Write {
++                device_id: 10,
++                completion_id: 102,
++                status: NtStatus::from(0xC000_00A2),
++                bytes_written: 3,
++            })
++            .unwrap()
++            .expect("write completion");
++        let encoded = msg.encode_unframed_pdu().unwrap();
++        let (_, _, _, _, st) = decode_completion_header(&encoded);
++        assert_eq!(st, 0xC000_00A2);
++        assert_eq!(
++            u32::from_le_bytes(encoded[16..20].try_into().unwrap()),
++            0,
++            "failed write must report 0 bytes written"
++        );
++
++        // 4. Close
++        let close_req = DeviceCloseRequest {
++            device_io_request: make_io_req(10, 7, 103, MajorFunction::Close),
++        };
++        backend
++            .handle_drive_io_request(ServerDriveIoRequest::DeviceCloseRequest(close_req))
++            .unwrap();
++        let _ = rx.try_recv().unwrap();
++        let msg = backend
++            .complete_response(DriveResponse::Close {
++                device_id: 10,
++                completion_id: 103,
++                status: NtStatus::SUCCESS,
++            })
++            .unwrap()
++            .expect("close completion");
++        let encoded = msg.encode_unframed_pdu().unwrap();
++        assert_eq!(decode_completion_header(&encoded).4, 0);
++    }
++
++    #[test]
++    fn query_directory_encodes_all_four_fscc_classes() {
++        let (tx, mut rx) = mpsc::unbounded();
++        let mut backend = WasmDriveBackend::new(tx);
++
++        for (cid, class) in [
++            (1, FileInformationClassLevel::FILE_DIRECTORY_INFORMATION),
++            (2, FileInformationClassLevel::FILE_FULL_DIRECTORY_INFORMATION),
++            (3, FileInformationClassLevel::FILE_BOTH_DIRECTORY_INFORMATION),
++            (4, FileInformationClassLevel::FILE_NAMES_INFORMATION),
++        ] {
++            let req = ServerDriveQueryDirectoryRequest {
++                device_io_request: DeviceIoRequest {
++                    device_id: 10,
++                    file_id: 1,
++                    completion_id: cid,
++                    major_function: MajorFunction::DirectoryControl,
++                    minor_function: MinorFunction::IRP_MN_QUERY_DIRECTORY,
++                },
++                file_info_class_lvl: class.clone(),
++                initial_query: 1,
++                path: "\\*".to_owned(),
++            };
++            backend
++                .handle_drive_io_request(ServerDriveIoRequest::ServerDriveQueryDirectoryRequest(req))
++                .unwrap();
++            let _ = rx.try_recv().unwrap();
++
++            let msg = backend
++                .complete_response(DriveResponse::QueryDirectory {
++                    device_id: 10,
++                    completion_id: cid,
++                    status: NtStatus::SUCCESS,
++                    information_class: None,
++                    entry: Some(DriveDirectoryEntry {
++                        file_name: "report.pdf".to_owned(),
++                        creation_time: 133_800_000_000_000_000,
++                        last_access_time: 133_800_000_000_000_000,
++                        last_write_time: 133_800_000_000_000_000,
++                        change_time: 133_800_000_000_000_000,
++                        end_of_file: 4096,
++                        allocation_size: 4096,
++                        file_attributes: FileAttributes::FILE_ATTRIBUTE_ARCHIVE.bits(),
++                    }),
++                })
++                .unwrap()
++                .expect("dir completion");
++            let encoded = msg.encode_unframed_pdu().unwrap();
++            let mut cursor = ReadCursor::new(&encoded[16..]);
++            let decoded = ClientDriveQueryDirectoryResponse::decode_for_class(
++                class.clone(),
++                DeviceIoResponse {
++                    device_id: 10,
++                    completion_id: cid,
++                    io_status: NtStatus::SUCCESS,
++                },
++                &mut cursor,
++            )
++            .unwrap();
++            assert!(decoded.buffer.is_some(), "missing buffer for {class}");
++        }
++    }
++
++    #[test]
++    fn query_information_and_volume_and_set_information_encode_cleanly() {
++        let (tx, mut rx) = mpsc::unbounded();
++        let mut backend = WasmDriveBackend::new(tx);
++
++        // QueryInformation Standard
++        let qi_req = ServerDriveQueryInformationRequest {
++            device_io_request: make_io_req(10, 2, 200, MajorFunction::QueryInformation),
++            file_info_class_lvl: FileInformationClassLevel::FILE_STANDARD_INFORMATION,
++        };
++        backend
++            .handle_drive_io_request(ServerDriveIoRequest::ServerDriveQueryInformationRequest(qi_req))
++            .unwrap();
++        let _ = rx.try_recv().unwrap();
++        let msg = backend
++            .complete_response(DriveResponse::QueryInformation {
++                device_id: 10,
++                completion_id: 200,
++                status: NtStatus::SUCCESS,
++                info: Some(DriveFileInfo::Standard(FileStandardInformation {
++                    allocation_size: 8192,
++                    end_of_file: 5000,
++                    number_of_links: 1,
++                    delete_pending: Boolean::False,
++                    directory: Boolean::False,
++                })),
++            })
++            .unwrap()
++            .expect("qi completion");
++        let encoded = msg.encode_unframed_pdu().unwrap();
++        let mut cursor = ReadCursor::new(&encoded[16..]);
++        let decoded = ClientDriveQueryInformationResponse::decode_for_class(
++            FileInformationClassLevel::FILE_STANDARD_INFORMATION,
++            DeviceIoResponse {
++                device_id: 10,
++                completion_id: 200,
++                io_status: NtStatus::SUCCESS,
++            },
++            &mut cursor,
++        )
++        .unwrap();
++        assert!(matches!(decoded.buffer, Some(FileInformationClass::Standard(_))));
++
++        // QueryVolumeInformation Volume
++        let qv_req = ServerDriveQueryVolumeInformationRequest {
++            device_io_request: make_io_req(10, 2, 201, MajorFunction::QueryVolumeInformation),
++            fs_info_class_lvl: FileSystemInformationClassLevel::FILE_FS_VOLUME_INFORMATION,
++        };
++        backend
++            .handle_drive_io_request(ServerDriveIoRequest::ServerDriveQueryVolumeInformationRequest(qv_req))
++            .unwrap();
++        let _ = rx.try_recv().unwrap();
++        let msg = backend
++            .complete_response(DriveResponse::QueryVolumeInformation {
++                device_id: 10,
++                completion_id: 201,
++                status: NtStatus::SUCCESS,
++                info: Some(DriveVolumeInfo::Volume {
++                    creation_time: 133_800_000_000_000_000,
++                    serial_number: 0x1234_5678,
++                    supports_objects: false,
++                    label: "NETCATTY".to_owned(),
++                }),
++            })
++            .unwrap()
++            .expect("qv completion");
++        let encoded = msg.encode_unframed_pdu().unwrap();
++        let mut cursor = ReadCursor::new(&encoded[16..]);
++        let decoded = ClientDriveQueryVolumeInformationResponse::decode_for_class(
++            FileSystemInformationClassLevel::FILE_FS_VOLUME_INFORMATION,
++            DeviceIoResponse {
++                device_id: 10,
++                completion_id: 201,
++                io_status: NtStatus::SUCCESS,
++            },
++            &mut cursor,
++        )
++        .unwrap();
++        assert!(matches!(
++            decoded.buffer,
++            Some(FileSystemInformationClass::FileFsVolumeInformation(_))
++        ));
++
++        // SetInformation Rename / Disposition / EndOfFile echo exact buffer length
++        for (cid, set_buffer) in [
++            (
++                202,
++                FileInformationClass::Rename(FileRenameInformation {
++                    replace_if_exists: Boolean::True,
++                    file_name: "\\new.txt".to_owned(),
++                }),
++            ),
++            (
++                203,
++                FileInformationClass::Disposition(FileDispositionInformation { delete_pending: 1 }),
++            ),
++            (
++                204,
++                FileInformationClass::EndOfFile(FileEndOfFileInformation { end_of_file: 1234 }),
++            ),
++        ] {
++            let expected_len = u32::try_from(set_buffer.size()).unwrap();
++            let si_req = ServerDriveSetInformationRequest {
++                device_io_request: make_io_req(10, 2, cid, MajorFunction::SetInformation),
++                set_buffer,
++            };
++            backend
++                .handle_drive_io_request(ServerDriveIoRequest::ServerDriveSetInformationRequest(si_req))
++                .unwrap();
++            let _ = rx.try_recv().unwrap();
++
++            let msg = backend
++                .complete_response(DriveResponse::SetInformation {
++                    device_id: 10,
++                    completion_id: cid,
++                    status: NtStatus::SUCCESS,
++                })
++                .unwrap()
++                .expect("set_info completion");
++            let encoded = msg.encode_unframed_pdu().unwrap();
++            assert_eq!(u32::from_le_bytes(encoded[16..20].try_into().unwrap()), expected_len);
++        }
++    }
++
++    #[test]
++    fn remove_drive_cancels_pending_irps_and_reset_drops_stale_responses() {
++        let (tx, mut rx) = mpsc::unbounded();
++        let mut backend = WasmDriveBackend::new(tx);
++        backend.add_drive(10).unwrap();
++        backend.add_drive(11).unwrap();
++
++        backend
++            .handle_drive_io_request(ServerDriveIoRequest::DeviceReadRequest(DeviceReadRequest {
++                device_io_request: make_io_req(10, 1, 500, MajorFunction::Read),
++                length: 64,
++                offset: 0,
++            }))
++            .unwrap();
++        backend
++            .handle_drive_io_request(ServerDriveIoRequest::DeviceReadRequest(DeviceReadRequest {
++                device_io_request: make_io_req(11, 2, 501, MajorFunction::Read),
++                length: 64,
++                offset: 0,
++            }))
++            .unwrap();
++        let _ = rx.try_recv().unwrap();
++        let _ = rx.try_recv().unwrap();
++
++        let cancelled = backend.remove_drive(10).unwrap();
++        assert_eq!(cancelled.len(), 1);
++        let encoded = cancelled[0].encode_unframed_pdu().unwrap();
++        let (_, _, dev, cid, st) = decode_completion_header(&encoded);
++        assert_eq!((dev, cid, st), (10, 500, 0xC000_0120));
++
++        // Stale completion for removed drive 10 is ignored
++        assert!(
++            backend
++                .complete_response(DriveResponse::Read {
++                    device_id: 10,
++                    completion_id: 500,
++                    status: NtStatus::SUCCESS,
++                    data: vec![1, 2, 3],
++                })
++                .unwrap()
++                .is_none()
++        );
++
++        // Reset clears remaining pending IRPs and notifies JS
++        backend.reset().unwrap();
++        assert!(matches!(
++            rx.try_recv().unwrap(),
++            RdpInputEvent::DriveRequest(DriveBackendMessage::Reset)
++        ));
++        backend.restore_drive(11).unwrap();
++        assert!(
++            backend
++                .complete_response(DriveResponse::Read {
++                    device_id: 11,
++                    completion_id: 501,
++                    status: NtStatus::SUCCESS,
++                    data: vec![4, 5],
++                })
++                .unwrap()
++                .is_none()
++        );
++    }
++
++    #[test]
++    fn composed_printer_and_device_control_and_flush_lock_work() {
++        use crate::printer::{PrinterBackendMessage, WasmPrinterMessageProxy};
++        use ironrdp::rdpdr::pdu::efs::{
++            DeviceFlushBuffersRequest, LockOperation, RdpLockInfo, ServerDriveLockControlRequest,
++            ServerDriveNotifyChangeDirectoryRequest,
++        };
++
++        let (tx, mut rx) = mpsc::unbounded();
++        let printer = WasmPrinterBackend::new(WasmPrinterMessageProxy::new(tx.clone()));
++        let mut backend = WasmDriveBackend::new(tx).with_printer(printer);
++
++        // Printer create delegates to WasmPrinterBackend synchronously
++        let printer_create = DeviceCreateRequest {
++            device_io_request: make_io_req(2, 0, 1, MajorFunction::Create),
++            desired_access: DesiredAccess::empty(),
++            allocation_size: 0,
++            file_attributes: FileAttributes::empty(),
++            shared_access: SharedAccess::empty(),
++            create_disposition: CreateDisposition::FILE_OPEN,
++            create_options: CreateOptions::empty(),
++            path: String::new(),
++        };
++        let printer_resp = backend
++            .handle_printer_io_request(PrinterIoRequest::Create(printer_create))
++            .unwrap();
++        assert_eq!(printer_resp.len(), 1);
++        assert!(matches!(
++            rx.try_recv().unwrap(),
++            RdpInputEvent::Printer(PrinterBackendMessage::Created { .. })
++        ));
++
++        // Drive device_control with input/output buffers
++        let dc_req = DecodedDeviceControlRequest {
++            request: DeviceControlRequest {
++                header: make_io_req(10, 1, 600, MajorFunction::DeviceControl),
++                output_buffer_length: 64,
++                input_buffer_length: 3,
++                io_control_code: AnyIoCtlCode(0x0009_0028),
++            },
++            input_buffer: vec![9, 8, 7],
++        };
++        assert!(backend.handle_drive_device_control(dc_req).unwrap().is_empty());
++        match rx.try_recv().unwrap() {
++            RdpInputEvent::DriveRequest(DriveBackendMessage::Request(DriveRequestPayload::DeviceControl {
++                io_control_code,
++                input_buffer,
++                ..
++            })) => {
++                assert_eq!(io_control_code, 0x0009_0028);
++                assert_eq!(input_buffer, vec![9, 8, 7]);
++            }
++            other => panic!("unexpected event: {other:?}"),
++        }
++        let dc_msg = backend
++            .complete_response(DriveResponse::DeviceControl {
++                device_id: 10,
++                completion_id: 600,
++                status: NtStatus::SUCCESS,
++                output_buffer: vec![1, 2],
++            })
++            .unwrap()
++            .expect("device_control completion");
++        let dc_encoded = dc_msg.encode_unframed_pdu().unwrap();
++        assert_eq!(decode_completion_header(&dc_encoded).4, 0);
++        assert_eq!(u32::from_le_bytes(dc_encoded[16..20].try_into().unwrap()), 2);
++        assert_eq!(&dc_encoded[20..22], &[1, 2]);
++
++        // Flush, LockControl, NotifyChangeDirectory
++        backend
++            .handle_drive_io_request(ServerDriveIoRequest::DeviceFlushBuffersRequest(
++                DeviceFlushBuffersRequest {
++                    device_io_request: make_io_req(10, 1, 601, MajorFunction::FlushBuffers),
++                },
++            ))
++            .unwrap();
++        let _ = rx.try_recv().unwrap();
++        assert!(
++            backend
++                .complete_response(DriveResponse::Flush {
++                    device_id: 10,
++                    completion_id: 601,
++                    status: NtStatus::SUCCESS,
++                })
++                .unwrap()
++                .is_some()
++        );
++
++        backend
++            .handle_drive_io_request(ServerDriveIoRequest::ServerDriveLockControlRequest(
++                ServerDriveLockControlRequest {
++                    device_io_request: make_io_req(10, 1, 602, MajorFunction::LockControl),
++                    operation: LockOperation::Exclusive,
++                    wait: false,
++                    locks: vec![RdpLockInfo { offset: 0, length: 16 }],
++                },
++            ))
++            .unwrap();
++        let _ = rx.try_recv().unwrap();
++        assert!(
++            backend
++                .complete_response(DriveResponse::LockControl {
++                    device_id: 10,
++                    completion_id: 602,
++                    status: NtStatus::SUCCESS,
++                })
++                .unwrap()
++                .is_some()
++        );
++
++        backend
++            .handle_drive_io_request(ServerDriveIoRequest::ServerDriveNotifyChangeDirectoryRequest(
++                ServerDriveNotifyChangeDirectoryRequest {
++                    device_io_request: DeviceIoRequest {
++                        device_id: 10,
++                        file_id: 1,
++                        completion_id: 603,
++                        major_function: MajorFunction::DirectoryControl,
++                        minor_function: MinorFunction::IRP_MN_NOTIFY_CHANGE_DIRECTORY,
++                    },
++                    watch_tree: 1,
++                    completion_filter: 0x17,
++                },
++            ))
++            .unwrap();
++        let _ = rx.try_recv().unwrap();
++        assert!(
++            backend
++                .complete_response(DriveResponse::NotifyChangeDirectory {
++                    device_id: 10,
++                    completion_id: 603,
++                    status: NtStatus::NOT_SUPPORTED,
++                    buffer: Vec::new(),
++                })
++                .unwrap()
++                .is_some()
++        );
++    }
++}
+diff --git a/crates/ironrdp-web/src/lib.rs b/crates/ironrdp-web/src/lib.rs
+index ac2cbb8..f72c7e6 100644
+--- a/crates/ironrdp-web/src/lib.rs
++++ b/crates/ironrdp-web/src/lib.rs
+@@ -20,6 +20,7 @@ mod camera;
+ mod canvas;
+ mod clipboard;
+ mod cursor;
++mod drive;
+ mod entra;
+ mod error;
+ mod image;
+diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
+index 5a51a91..ba81260 100644
+--- a/crates/ironrdp-web/src/session.rs
++++ b/crates/ironrdp-web/src/session.rs
+@@ -10,6 +10,10 @@ use std::rc::Rc;
+ use crate::canvas::Canvas;
+ use crate::clipboard;
+ use crate::clipboard::{ClipboardData, FileMetadata, WasmClipboard, WasmClipboardBackend, WasmClipboardBackendMessage};
++use crate::drive::{
++    DriveBackendMessage, DriveResponse, WasmDriveBackend, drive_message_to_js, parse_drive_descriptor,
++    parse_drive_device_id, parse_drive_response, parse_drives_array,
++};
+ use crate::error::IronError;
+ use crate::image::extract_partial_image;
+ use crate::input::InputTransaction;
+@@ -31,7 +35,9 @@ use ironrdp::connector::connection_activation::ConnectionActivationState;
+ use ironrdp::connector::credssp::{KdcResolution, KerberosConfig};
+ use ironrdp::connector::{self, ClientConnector, Credentials};
+ use ironrdp::displaycontrol::client::DisplayControlClient;
+-use ironrdp::displaycontrol::pdu::DeviceScaleFactor;
++use ironrdp::displaycontrol::pdu::{
++    DeviceScaleFactor, DisplayControlCapabilities, DisplayControlMonitorLayout, MonitorLayoutEntry, MonitorOrientation,
++};
+ use ironrdp::dvc::DrdynvcClient;
+ use ironrdp::graphics::image_processing::PixelFormat;
+ use ironrdp::pdu::geometry::InclusiveRectangle;
+@@ -46,6 +52,7 @@ use ironrdp::session::{ActiveStageBuilder, ActiveStageOutput, GracefulDisconnect
+ use ironrdp_core::WriteBuf;
+ use ironrdp_egfx::client::{GraphicsPipelineClient, GraphicsPipelineHandler};
+ use ironrdp_futures::{FramedWrite, single_sequence_step_read};
++use ironrdp_svc::SvcProcessorMessages;
+ use rgb::AsPixels as _;
+ use tap::prelude::*;
+ use tracing::{debug, error, info, trace, warn};
+@@ -104,7 +111,12 @@ struct SessionBuilderInner {
+     printer_device_id: Option<u32>,
+     printer_driver_name: Option<String>,
+ 
++    // Setting rdpdr_request_callback activates RDPDR filesystem drive redirection.
++    rdpdr_drives: Option<Vec<(u32, String)>>,
++    rdpdr_request_callback: Option<js_sys::Function>,
++
+     use_display_control: bool,
++    display_control_caps_callback: Option<js_sys::Function>,
+     audio_playback_callback: Option<js_sys::Function>,
+     camera_callback: Option<js_sys::Function>,
+     camera_name: Option<String>,
+@@ -164,7 +176,11 @@ impl Default for SessionBuilderInner {
+             printer_device_id: None,
+             printer_driver_name: None,
+ 
++            rdpdr_drives: None,
++            rdpdr_request_callback: None,
++
+             use_display_control: false,
++            display_control_caps_callback: None,
+             audio_playback_callback: None,
+             camera_callback: None,
+             camera_name: None,
+@@ -351,6 +367,10 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+                 self.0.borrow_mut().entra_assertion_callback = entra_assertion.dyn_into::<js_sys::Function>().ok();
+             };
+             |display_control: bool| { self.0.borrow_mut().use_display_control = display_control };
++            |display_control_caps_callback: JsValue| {
++                self.0.borrow_mut().display_control_caps_callback =
++                    display_control_caps_callback.dyn_into::<js_sys::Function>().ok();
++            };
+             |audio_playback: JsValue| {
+                 // A function receiving the audio (see audio::to_js); anything else turns playback off.
+                 self.0.borrow_mut().audio_playback_callback = audio_playback.dyn_into::<js_sys::Function>().ok();
+@@ -508,6 +528,19 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+                     Some(printer_driver_name)
+                 };
+             };
++            |rdpdr_drives: JsValue| {
++                match parse_drives_array(rdpdr_drives) {
++                    Ok(drives) => {
++                        self.0.borrow_mut().rdpdr_drives = Some(drives);
++                    }
++                    Err(error) => {
++                        warn!(error = iron_remote_desktop::IronError::backtrace(&error), "Invalid rdpdr_drives; ignored");
++                    }
++                }
++            };
++            |rdpdr_request_callback: JsValue| {
++                self.0.borrow_mut().rdpdr_request_callback = rdpdr_request_callback.dyn_into::<js_sys::Function>().ok();
++            };
+         }
+ 
+         self.clone()
+@@ -750,6 +783,12 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+         }
+ 
+         let use_display_control = self.0.borrow().use_display_control;
++        let display_control_caps_callback = self.0.borrow().display_control_caps_callback.clone();
++        let rdpdr_drives = self.0.borrow().rdpdr_drives.clone().unwrap_or_default();
++        let rdpdr_request_callback = self.0.borrow().rdpdr_request_callback.clone();
++        let drive_backend = rdpdr_request_callback
++            .is_some()
++            .then(|| WasmDriveBackend::new(input_events_tx.clone()));
+ 
+         // Camera redirection (RDPECAM) when a callback takes the capture requests.
+         let camera_callback = self.0.borrow().camera_callback.clone();
+@@ -781,8 +820,11 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             printer_device_id,
+             printer_name,
+             printer_driver_name,
++            drive_backend,
++            initial_drives: rdpdr_drives,
+             computer_name: client_name.clone(),
+             use_display_control,
++            display_control_tx: input_events_tx.clone(),
+             audio_backend: audio_playback_callback
+                 .is_some()
+                 .then(|| crate::audio::WasmAudioBackend::new(input_events_tx.clone())),
+@@ -812,6 +854,8 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             camera_callback,
+             camera,
+             monitor_layout_callback,
++            display_control_caps_callback,
++            rdpdr_request_callback,
+ 
+             input_events_rx: RefCell::new(Some(input_events_rx)),
+             rdp_reader: RefCell::new(Some(rdp_reader)),
+@@ -924,6 +968,18 @@ pub(crate) enum RdpInputEvent {
+     /// Printer backend → event loop: a print job finished and its bytes are
+     /// ready for delivery to JS. See [`crate::printer::PrinterBackendMessage`].
+     Printer(crate::printer::PrinterBackendMessage),
++    /// RDPDR drive backend → event loop: a drive IRP (or channel reset) for JS.
++    DriveRequest(DriveBackendMessage),
++    /// JS → event loop: completed RDPDR drive IRP response to transmit.
++    DriveResponse(DriveResponse),
++    /// JS → event loop: dynamically announce a redirected drive.
++    DriveAdd { device_id: u32, name: String },
++    /// JS → event loop: dynamically remove a redirected drive.
++    DriveRemove { device_id: u32 },
++    /// Display Control DVC → event loop: server capabilities received.
++    DisplayControlCaps(DisplayControlCapabilities),
++    /// JS → event loop: multi-monitor layout change via MS-RDPEDISP.
++    MonitorLayout(DisplayControlMonitorLayout),
+     /// RDPSND backend → event loop: audio for the JS callback. See [`crate::audio::AudioMessage`].
+     Audio(crate::audio::AudioMessage),
+     /// Camera backend → event loop: a capture request for the JS callback. See [`crate::camera::CameraMessage`].
+@@ -964,6 +1020,8 @@ pub(crate) struct Session {
+     /// Takes the frames JS pushes with `camera_sample`, when the camera is on.
+     camera: Option<crate::camera::CameraSink>,
+     monitor_layout_callback: Option<js_sys::Function>,
++    display_control_caps_callback: Option<js_sys::Function>,
++    rdpdr_request_callback: Option<js_sys::Function>,
+ 
+     // Consumed when `run` is called
+     input_events_rx: RefCell<Option<mpsc::UnboundedReceiver<RdpInputEvent>>>,
+@@ -1388,6 +1446,104 @@ impl iron_remote_desktop::Session for Session {
+                             }
+                             Vec::new()
+                         }
++                        RdpInputEvent::DriveRequest(message) => {
++                            if let Some(callback) = &self.rdpdr_request_callback {
++                                if let Err(error) = callback.call1(&JsValue::NULL, &drive_message_to_js(message)) {
++                                    warn!(?error, "RDPDR drive request callback failed");
++                                }
++                            } else {
++                                warn!("Drive request received, but no rdpdr_request_callback is configured");
++                            }
++                            Vec::new()
++                        }
++                        RdpInputEvent::DriveResponse(response) => {
++                            if let Some(rdpdr) = active_stage.get_svc_processor_mut::<Rdpdr>() {
++                                if let Some(drive_backend) = rdpdr.downcast_backend_mut::<WasmDriveBackend>() {
++                                    match drive_backend.complete_response(response) {
++                                        Ok(Some(svc_message)) => {
++                                            let frame = active_stage.process_svc_processor_messages(
++                                                SvcProcessorMessages::<Rdpdr>::new(vec![svc_message]),
++                                            )?;
++                                            vec![ActiveStageOutput::ResponseFrame(frame)]
++                                        }
++                                        Ok(None) => Vec::new(),
++                                        Err(error) => {
++                                            warn!(%error, "Failed to encode RDPDR drive response");
++                                            Vec::new()
++                                        }
++                                    }
++                                } else {
++                                    warn!("Drive response received, but WasmDriveBackend is not attached");
++                                    Vec::new()
++                                }
++                            } else {
++                                warn!("Drive response received, but Rdpdr channel is not available");
++                                Vec::new()
++                            }
++                        }
++                        RdpInputEvent::DriveAdd { device_id, name } => {
++                            if let Some(rdpdr) = active_stage.get_svc_processor_mut::<Rdpdr>() {
++                                match rdpdr.add_dynamic_drive(device_id, name) {
++                                    Ok(messages) if !messages.is_empty() => {
++                                        let frame = active_stage.process_svc_processor_messages(
++                                            SvcProcessorMessages::<Rdpdr>::new(messages),
++                                        )?;
++                                        vec![ActiveStageOutput::ResponseFrame(frame)]
++                                    }
++                                    Ok(_) => Vec::new(),
++                                    Err(error) => {
++                                        warn!(device_id, %error, "Failed to add dynamic RDPDR drive");
++                                        Vec::new()
++                                    }
++                                }
++                            } else {
++                                warn!(device_id, "rdpdr_add_drive ignored: Rdpdr channel is not available");
++                                Vec::new()
++                            }
++                        }
++                        RdpInputEvent::DriveRemove { device_id } => {
++                            if let Some(rdpdr) = active_stage.get_svc_processor_mut::<Rdpdr>() {
++                                match rdpdr.remove_drive(device_id) {
++                                    Ok(messages) if !messages.is_empty() => {
++                                        let frame = active_stage.process_svc_processor_messages(
++                                            SvcProcessorMessages::<Rdpdr>::new(messages),
++                                        )?;
++                                        vec![ActiveStageOutput::ResponseFrame(frame)]
++                                    }
++                                    Ok(_) => Vec::new(),
++                                    Err(error) => {
++                                        warn!(device_id, %error, "Failed to remove RDPDR drive");
++                                        Vec::new()
++                                    }
++                                }
++                            } else {
++                                warn!(device_id, "rdpdr_remove_drive ignored: Rdpdr channel is not available");
++                                Vec::new()
++                            }
++                        }
++                        RdpInputEvent::DisplayControlCaps(caps) => {
++                            if let Some(callback) = &self.display_control_caps_callback {
++                                if let Err(error) = callback.call1(&JsValue::NULL, &display_control_caps_to_js(caps)) {
++                                    warn!(?error, "Display control capabilities callback failed");
++                                }
++                            }
++                            Vec::new()
++                        }
++                        RdpInputEvent::MonitorLayout(layout) => {
++                            debug!(monitors = layout.monitors().len(), "Monitor layout event received");
++                            if let Some(response_frame) = active_stage.encode_monitor_layout(&layout) {
++                                match response_frame {
++                                    Ok(frame) => vec![ActiveStageOutput::ResponseFrame(frame)],
++                                    Err(error) => {
++                                        warn!(%error, "Failed to encode monitor layout");
++                                        Vec::new()
++                                    }
++                                }
++                            } else {
++                                debug!("Monitor layout event ignored (Display Control channel not ready)");
++                                Vec::new()
++                            }
++                        }
+                         RdpInputEvent::Audio(message) => {
+                             if let Some(callback) = &self.audio_playback_callback {
+                                 if let Err(error) = callback.call1(&JsValue::NULL, &crate::audio::to_js(message)) {
+@@ -1837,6 +1993,41 @@ impl iron_remote_desktop::Session for Session {
+                 drop(camera_wanted);
+                 return Ok(JsValue::from(self.camera()?.wanted()));
+             };
++            |rdpdr_response: JsValue| {
++                let response = parse_drive_response(rdpdr_response)?;
++                if !matches!(response, DriveResponse::Reset) {
++                    self.input_events_tx
++                        .unbounded_send(RdpInputEvent::DriveResponse(response))
++                        .context("send rdpdr drive response")
++                        .map_err(IronError::from)?;
++                }
++                return Ok(JsValue::NULL);
++            };
++            |rdpdr_add_drive: JsValue| {
++                let (device_id, name) = parse_drive_descriptor(rdpdr_add_drive)?;
++                self.input_events_tx
++                    .unbounded_send(RdpInputEvent::DriveAdd { device_id, name })
++                    .context("send rdpdr_add_drive")
++                    .map_err(IronError::from)?;
++                return Ok(JsValue::NULL);
++            };
++            |rdpdr_remove_drive: JsValue| {
++                let device_id = parse_drive_device_id(rdpdr_remove_drive)?;
++                self.input_events_tx
++                    .unbounded_send(RdpInputEvent::DriveRemove { device_id })
++                    .context("send rdpdr_remove_drive")
++                    .map_err(IronError::from)?;
++                return Ok(JsValue::NULL);
++            };
++            |set_monitor_layout: JsValue| {
++                let specs = parse_display_control_monitor_layout(set_monitor_layout)?;
++                let layout = build_display_control_monitor_layout(&specs).map_err(IronError::from)?;
++                self.input_events_tx
++                    .unbounded_send(RdpInputEvent::MonitorLayout(layout))
++                    .context("send set_monitor_layout")
++                    .map_err(IronError::from)?;
++                return Ok(JsValue::NULL);
++            };
+         }
+ 
+         Err(
+@@ -2018,6 +2209,210 @@ fn parse_file_metadata_array(files: JsValue) -> Result<Vec<FileMetadata>, IronEr
+     Ok(file_list)
+ }
+ 
++/// Normalized monitor specification for MS-RDPEDISP `set_monitor_layout`.
++#[derive(Debug, Clone, PartialEq, Eq)]
++struct MonitorLayoutSpec {
++    left: i32,
++    top: i32,
++    width: u32,
++    height: u32,
++    is_primary: Option<bool>,
++    scale_factor: Option<u32>,
++    physical_width: Option<u32>,
++    physical_height: Option<u32>,
++}
++
++/// Converts a JS scale factor into MS-RDPEDISP desktop scale percentage (`100..=500`).
++///
++/// Accepts either DPR multipliers (`1.0..=5.0`, such as Electron's `display.scaleFactor`)
++/// or explicit percentages (`100..=500`).
++fn normalize_scale_factor_percent(raw: f64) -> Option<u32> {
++    if !raw.is_finite() || raw <= 0.0 {
++        return None;
++    }
++    let pct = if raw <= 5.0 { (raw * 100.0).round() } else { raw.round() };
++    if !(100.0..=500.0).contains(&pct) {
++        return None;
++    }
++    #[expect(
++        clippy::as_conversions,
++        clippy::cast_possible_truncation,
++        clippy::cast_sign_loss,
++        reason = "clamped finite integral scale factor within 100..=500"
++    )]
++    Some(pct as u32)
++}
++
++fn parse_display_control_monitor_layout(value: JsValue) -> Result<Vec<MonitorLayoutSpec>, IronError> {
++    if !js_sys::Array::is_array(&value) {
++        return Err(anyhow::anyhow!("set_monitor_layout expects an array of monitor objects").into());
++    }
++    let arr = js_sys::Array::from(&value);
++    let len = usize::try_from(arr.length()).unwrap_or(0);
++    if len == 0 {
++        return Err(anyhow::anyhow!("set_monitor_layout requires at least one monitor").into());
++    }
++
++    let mut specs = Vec::with_capacity(len);
++    for idx in 0..arr.length() {
++        let obj = into_object(arr.get(idx))?;
++        let left = get_i32(&obj, "left")?;
++        let top = get_i32(&obj, "top")?;
++        let width = get_u32(&obj, "width")?;
++        let height = get_u32(&obj, "height")?;
++
++        let is_primary_val = js_sys::Reflect::get(&obj, &JsValue::from_str("isPrimary"))
++            .map_err(|e| anyhow::anyhow!("get property `isPrimary`: {e:?}"))?;
++        let is_primary = if is_primary_val.is_undefined() || is_primary_val.is_null() {
++            None
++        } else {
++            Some(
++                is_primary_val
++                    .as_bool()
++                    .context("invalid type for property `isPrimary`")?,
++            )
++        };
++
++        let scale_val = js_sys::Reflect::get(&obj, &JsValue::from_str("scaleFactor"))
++            .map_err(|e| anyhow::anyhow!("get property `scaleFactor`: {e:?}"))?;
++        let scale_factor = if scale_val.is_undefined() || scale_val.is_null() {
++            None
++        } else {
++            let f = scale_val
++                .as_f64()
++                .context("invalid type for property `scaleFactor`")?;
++            normalize_scale_factor_percent(f)
++        };
++
++        let physical_width = get_u32_opt(&obj, "physicalWidth")?;
++        let physical_height = get_u32_opt(&obj, "physicalHeight")?;
++
++        specs.push(MonitorLayoutSpec {
++            left,
++            top,
++            width,
++            height,
++            is_primary,
++            scale_factor,
++            physical_width,
++            physical_height,
++        });
++    }
++
++    Ok(specs)
++}
++
++fn build_display_control_monitor_layout(specs: &[MonitorLayoutSpec]) -> anyhow::Result<DisplayControlMonitorLayout> {
++    if specs.is_empty() {
++        anyhow::bail!("monitor layout must contain at least one monitor");
++    }
++
++    let explicit_primaries: Vec<usize> = specs
++        .iter()
++        .enumerate()
++        .filter_map(|(idx, m)| (m.is_primary == Some(true)).then_some(idx))
++        .collect();
++
++    let primary_index = match explicit_primaries.as_slice() {
++        [only] => *only,
++        [] => specs
++            .iter()
++            .position(|m| m.left == 0 && m.top == 0)
++            .unwrap_or(0),
++        _ => anyhow::bail!("monitor layout must have at most one primary monitor"),
++    };
++
++    let origin_left = specs[primary_index].left;
++    let origin_top = specs[primary_index].top;
++
++    let mut entries = Vec::with_capacity(specs.len());
++    for (idx, spec) in specs.iter().enumerate() {
++        let (width, height) = MonitorLayoutEntry::adjust_display_size(spec.width, spec.height);
++        let left = spec
++            .left
++            .checked_sub(origin_left)
++            .context("monitor left coordinate overflow")?;
++        let top = spec
++            .top
++            .checked_sub(origin_top)
++            .context("monitor top coordinate overflow")?;
++
++        let mut entry = if idx == primary_index {
++            MonitorLayoutEntry::new_primary(width, height)?
++        } else {
++            MonitorLayoutEntry::new_secondary(width, height)?
++        };
++        entry = entry.with_position(left, top)?;
++        entry = entry.with_orientation(if width < height {
++            MonitorOrientation::Portrait
++        } else {
++            MonitorOrientation::Landscape
++        });
++
++        if let Some(scale) = spec.scale_factor {
++            let desktop_scale = MonitorLayoutEntry::adjust_desktop_scale_factor(scale);
++            entry = entry
++                .with_desktop_scale_factor(desktop_scale)?
++                .with_device_scale_factor(DeviceScaleFactor::from_desktop_scale_factor(desktop_scale));
++        }
++
++        if let (Some(pw), Some(ph)) = (spec.physical_width, spec.physical_height) {
++            if (10..=10_000).contains(&pw) && (10..=10_000).contains(&ph) {
++                entry = entry.with_physical_dimensions(pw, ph)?;
++            }
++        }
++
++        entries.push(entry);
++    }
++
++    Ok(DisplayControlMonitorLayout::new(&entries)?)
++}
++
++/// Decodes the three raw u32 fields (`MaxNumMonitors`, `MaxMonitorAreaFactorA`, `MaxMonitorAreaFactorB`)
++/// and total `max_monitor_area` from [`DisplayControlCapabilities`].
++fn decode_display_control_caps(caps: DisplayControlCapabilities) -> (u32, u32, u32, u64) {
++    let encoded = ironrdp_core::encode_vec(&caps).unwrap_or_default();
++    if encoded.len() >= 12 {
++        let max_num = u32::from_le_bytes([encoded[0], encoded[1], encoded[2], encoded[3]]);
++        let factor_a = u32::from_le_bytes([encoded[4], encoded[5], encoded[6], encoded[7]]);
++        let factor_b = u32::from_le_bytes([encoded[8], encoded[9], encoded[10], encoded[11]]);
++        (max_num, factor_a, factor_b, caps.max_monitor_area())
++    } else {
++        (caps.max_num_monitors(), 0, 0, caps.max_monitor_area())
++    }
++}
++
++fn display_control_caps_to_js(caps: DisplayControlCapabilities) -> JsValue {
++    let (max_num_monitors, factor_a, factor_b, max_monitor_area) = decode_display_control_caps(caps);
++    let obj = js_sys::Object::new();
++    let _ = js_sys::Reflect::set(
++        &obj,
++        &JsValue::from_str("maxNumMonitors"),
++        &JsValue::from(max_num_monitors),
++    );
++    let _ = js_sys::Reflect::set(
++        &obj,
++        &JsValue::from_str("maxMonitorAreaFactorA"),
++        &JsValue::from(factor_a),
++    );
++    let _ = js_sys::Reflect::set(
++        &obj,
++        &JsValue::from_str("maxMonitorAreaFactorB"),
++        &JsValue::from(factor_b),
++    );
++    #[expect(
++        clippy::as_conversions,
++        clippy::cast_precision_loss,
++        reason = "max_monitor_area fits well within IEEE-754 exact integer range (<= 2^39)"
++    )]
++    let _ = js_sys::Reflect::set(
++        &obj,
++        &JsValue::from_str("maxMonitorArea"),
++        &JsValue::from_f64(max_monitor_area as f64),
++    );
++    obj.into()
++}
++
+ /// Routes a caller-supplied `load_balance_info` string to the appropriate X.224
+ /// negotiation field:
+ /// - `Cookie: msts=<token>` or `msts=<token>` -> `config.request_data = Some(NegoRequestData::routing_token(<token>))`
+@@ -2181,10 +2576,13 @@ struct ConnectParams {
+     printer_device_id: u32,
+     printer_name: String,
+     printer_driver_name: String,
++    drive_backend: Option<WasmDriveBackend>,
++    initial_drives: Vec<(u32, String)>,
+     /// Matches the `client_name` in the connector config; used as the
+     /// `computer_name` when constructing the `Rdpdr` processor.
+     computer_name: String,
+     use_display_control: bool,
++    display_control_tx: mpsc::UnboundedSender<RdpInputEvent>,
+     audio_backend: Option<crate::audio::WasmAudioBackend>,
+     camera_channels: Option<crate::camera::CameraChannels>,
+     legacy_graphics: bool,
+@@ -2225,6 +2623,10 @@ fn macos_major_version_from_user_agent(user_agent: &str) -> Option<u32> {
+ struct NoopGraphicsPipelineHandler;
+ impl GraphicsPipelineHandler for NoopGraphicsPipelineHandler {}
+ 
++#[expect(
++    clippy::too_many_arguments,
++    reason = "channel setup combines independent audio, printer, and drive redirection options"
++)]
+ fn attach_audio_and_printer_channels(
+     connector: &mut ClientConnector,
+     audio_backend: Option<crate::audio::WasmAudioBackend>,
+@@ -2232,18 +2634,23 @@ fn attach_audio_and_printer_channels(
+     printer_device_id: u32,
+     printer_name: String,
+     printer_driver_name: String,
++    drive_backend: Option<WasmDriveBackend>,
++    initial_drives: Vec<(u32, String)>,
+     computer_name: String,
+ ) {
+     // UNTESTED: Live Windows/GNOME servers must deliver PCM to the registered callback.
+     // Channel tests cover local advertisement and negotiation; play a remote sound in the
+     // browser when changing this setup to check server interoperability and callback delivery.
+     let audio = audio_backend.is_some();
++    let has_rdpdr_device = printer_backend.is_some() || drive_backend.is_some();
++
+     if let Some(audio_backend) = audio_backend {
+         connector.attach_static_channel(Rdpsnd::new(Box::new(audio_backend)));
+         // Windows servers require RDPDR to be advertised before sending RDPSND traffic
+-        // (MS-RDPEA Appendix A<1>); without a printer, advertise it without any devices.
++        // (MS-RDPEA Appendix A<1>); without a printer or drive backend, advertise it
++        // without any devices.
+         // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpea/deaaab30-d4d6-473e-ac56-3f76c4f6fb24#Appendix_A_1
+-        if printer_backend.is_none() {
++        if !has_rdpdr_device {
+             connector.attach_static_channel(Rdpdr::new(
+                 Box::new(ironrdp::rdpdr::NoopRdpdrBackend),
+                 computer_name.clone(),
+@@ -2251,7 +2658,41 @@ fn attach_audio_and_printer_channels(
+         }
+     }
+ 
+-    if let Some(printer_backend) = printer_backend {
++    if let Some(mut drive_backend) = drive_backend {
++        // Windows servers only speak on RDPDR when RDPSND is advertised too
++        // (MS-RDPEFS Appendix A<1>). Without audio playback, the no-op RDPSND
++        // processor satisfies that channel dependency.
++        if !audio {
++            connector.attach_static_channel(Rdpsnd::new(Box::new(NoopRdpsndBackend)));
++        }
++
++        let has_printer = printer_backend.is_some();
++        if let Some(printer_backend) = printer_backend {
++            drive_backend = drive_backend.with_printer(printer_backend);
++        }
++
++        let drives_opt = if initial_drives.is_empty() {
++            None
++        } else {
++            Some(initial_drives.clone())
++        };
++        let mut rdpdr = Rdpdr::new(Box::new(drive_backend), computer_name).with_drives(drives_opt);
++
++        if has_printer {
++            let effective_printer_id = if initial_drives.iter().any(|(id, _)| *id == printer_device_id) {
++                // Avoid device_id collision with a redirected drive.
++                (1u32..u32::MAX)
++                    .rev()
++                    .find(|candidate| !initial_drives.iter().any(|(id, _)| id == candidate))
++                    .unwrap_or(printer_device_id)
++            } else {
++                printer_device_id
++            };
++            rdpdr = rdpdr.with_printer_driver(effective_printer_id, printer_name, printer_driver_name);
++        }
++
++        connector.attach_static_channel(rdpdr);
++    } else if let Some(printer_backend) = printer_backend {
+         // Windows servers only speak on RDPDR when RDPSND is advertised too
+         // (MS-RDPEFS Appendix A<1>). Without audio playback, the no-op RDPSND
+         // processor satisfies that channel dependency.
+@@ -2284,8 +2725,11 @@ async fn connect(
+         printer_device_id,
+         printer_name,
+         printer_driver_name,
++        drive_backend,
++        initial_drives,
+         computer_name,
+         use_display_control,
++        display_control_tx,
+         audio_backend,
+         camera_channels,
+         legacy_graphics,
+@@ -2317,6 +2761,8 @@ async fn connect(
+         printer_device_id,
+         printer_name,
+         printer_driver_name,
++        drive_backend,
++        initial_drives,
+         computer_name,
+     );
+ 
+@@ -2330,7 +2776,10 @@ async fn connect(
+         ));
+     }
+     if use_display_control {
+-        dynamic_channels = dynamic_channels.with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
++        dynamic_channels = dynamic_channels.with_dynamic_channel(DisplayControlClient::new(move |caps| {
++            let _ = display_control_tx.unbounded_send(RdpInputEvent::DisplayControlCaps(caps));
++            Ok(Vec::new())
++        }));
+     }
+     if let Some((enumeration, device)) = camera_channels {
+         dynamic_channels = dynamic_channels.with_dynamic_channel(enumeration).with_listener(device);
+@@ -2723,6 +3172,15 @@ mod tests {
+     }
+ 
+     fn audio_test_connector(audio: bool, printer: bool) -> ClientConnector {
++        redirection_test_connector(audio, printer, false, Vec::new())
++    }
++
++    fn redirection_test_connector(
++        audio: bool,
++        printer: bool,
++        drive: bool,
++        initial_drives: Vec<(u32, String)>,
++    ) -> ClientConnector {
+         let (tx, _rx) = mpsc::unbounded();
+         let mut connector = ClientConnector::new(
+             connector_config(
+@@ -2741,6 +3199,8 @@ mod tests {
+             7,
+             "Test printer".to_owned(),
+             DEFAULT_PRINTER_DRIVER_NAME.to_owned(),
++            drive.then(|| WasmDriveBackend::new(tx)),
++            initial_drives,
+             "ironrdp-web-test".to_owned(),
+         );
+         connector
+@@ -3498,6 +3958,137 @@ mod tests {
+         assert_eq!(cfg_empty.request_data, None);
+     }
+ 
++    #[test]
++    fn drive_only_attaches_noop_audio_and_drive_rdpdr() {
++        let mut connector = redirection_test_connector(false, false, true, vec![(10, "Docs".to_owned())]);
++        assert_audio_and_device_channels(&connector);
++        let rdpdr = connector
++            .get_static_channel_processor::<Rdpdr>()
++            .expect("RDPDR attached");
++        assert!(rdpdr.downcast_backend::<WasmDriveBackend>().is_some());
++        assert!(rdpdr.drive_hotplug_available());
++        assert_eq!(negotiate_audio_formats(&mut connector), []);
++    }
++
++    #[test]
++    fn drive_audio_and_printer_compose_cleanly() {
++        let mut connector = redirection_test_connector(true, true, true, vec![(7, "Projects".to_owned())]);
++        assert_audio_and_device_channels(&connector);
++        let rdpdr = connector
++            .get_static_channel_processor::<Rdpdr>()
++            .expect("RDPDR attached");
++        assert!(rdpdr.downcast_backend::<WasmDriveBackend>().is_some());
++        assert!(rdpdr.drive_hotplug_available());
++        assert_eq!(negotiate_audio_formats(&mut connector), [audio_test_format()]);
++    }
++
++    #[test]
++    fn decode_display_control_caps_extracts_all_fields() {
++        let caps = DisplayControlCapabilities::new(4, 3840, 2160).expect("valid display control caps");
++        let (max_num, factor_a, factor_b, max_area) = decode_display_control_caps(caps);
++        assert_eq!(max_num, 4);
++        assert_eq!(factor_a, 3840);
++        assert_eq!(factor_b, 2160);
++        assert_eq!(max_area, 4u64 * 3840 * 2160);
++    }
++
++    #[test]
++    fn build_display_control_monitor_layout_validates_and_normalizes() {
++        // Multi-monitor side-by-side with DPR scale factors and non-zero primary origin shifted to (0, 0).
++        let layout = build_display_control_monitor_layout(&[
++            MonitorLayoutSpec {
++                left: 100,
++                top: 50,
++                width: 1921, // odd width adjusted down to 1920
++                height: 1080,
++                is_primary: Some(true),
++                scale_factor: normalize_scale_factor_percent(1.5),
++                physical_width: Some(527),
++                physical_height: Some(296),
++            },
++            MonitorLayoutSpec {
++                left: 2020, // 100 + 1920 -> shifted to 1920
++                top: 50,
++                width: 1280,
++                height: 1024,
++                is_primary: Some(false),
++                scale_factor: normalize_scale_factor_percent(200.0),
++                physical_width: None,
++                physical_height: None,
++            },
++        ])
++        .expect("valid dual-monitor layout");
++
++        assert_eq!(layout.monitors().len(), 2);
++        assert!(layout.monitors()[0].is_primary());
++        assert_eq!(layout.monitors()[0].position(), Some((0, 0)));
++        assert_eq!(layout.monitors()[0].dimensions(), (1920, 1080));
++        assert_eq!(layout.monitors()[0].desktop_scale_factor(), Some(150));
++        assert_eq!(layout.monitors()[0].physical_dimensions(), Some((527, 296)));
++
++        assert!(!layout.monitors()[1].is_primary());
++        assert_eq!(layout.monitors()[1].position(), Some((1920, 0)));
++        assert_eq!(layout.monitors()[1].dimensions(), (1280, 1024));
++        assert_eq!(layout.monitors()[1].desktop_scale_factor(), Some(200));
++
++        // Rejects empty list
++        assert!(build_display_control_monitor_layout(&[]).is_err());
++
++        // Rejects overlapping monitors
++        assert!(
++            build_display_control_monitor_layout(&[
++                MonitorLayoutSpec {
++                    left: 0,
++                    top: 0,
++                    width: 1920,
++                    height: 1080,
++                    is_primary: Some(true),
++                    scale_factor: None,
++                    physical_width: None,
++                    physical_height: None,
++                },
++                MonitorLayoutSpec {
++                    left: 500,
++                    top: 0,
++                    width: 1920,
++                    height: 1080,
++                    is_primary: Some(false),
++                    scale_factor: None,
++                    physical_width: None,
++                    physical_height: None,
++                },
++            ])
++            .is_err()
++        );
++
++        // Rejects disconnected monitors
++        assert!(
++            build_display_control_monitor_layout(&[
++                MonitorLayoutSpec {
++                    left: 0,
++                    top: 0,
++                    width: 1920,
++                    height: 1080,
++                    is_primary: Some(true),
++                    scale_factor: None,
++                    physical_width: None,
++                    physical_height: None,
++                },
++                MonitorLayoutSpec {
++                    left: 3000,
++                    top: 0,
++                    width: 1920,
++                    height: 1080,
++                    is_primary: Some(false),
++                    scale_factor: None,
++                    physical_width: None,
++                    physical_height: None,
++                },
++            ])
++            .is_err()
++        );
++    }
++
+     #[cfg(target_arch = "wasm32")]
+     #[wasm_bindgen_test::wasm_bindgen_test]
+     fn the_camera_h264_extension_sets_the_flag() {

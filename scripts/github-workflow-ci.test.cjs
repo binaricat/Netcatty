@@ -72,17 +72,13 @@ test("PR validation runs once per commit and includes a production build", () =>
   assert.match(testWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main/);
   assert.doesNotMatch(testWorkflow, /branches:\s*\n\s*- "\*\*"/);
   assert.match(testWorkflow, /name: lint-and-test\s*\n\s*runs-on: ubuntu-latest\s*\n\s*timeout-minutes: 20/);
-  assert.match(testWorkflow, /sudo apt-get install -y fish xvfb/);
-  assert.match(
-    testWorkflow,
-    /- name: Test terminal keyword highlight performance\s*\n\s*env:\s*\n\s*NETCATTY_TERMINAL_PERF_SHOW_WINDOW: "1"\s*\n\s*# GitHub-hosted runners do not configure Electron's SUID sandbox helper\.\s*\n\s*run: xvfb-run -a \.\/node_modules\/\.bin\/electron --no-sandbox scripts\/xterm-keyword-highlight-performance\.live\.test\.cjs/,
-  );
-  assert.match(
-    buildWorkflow,
-    /- name: Test macOS Option column selection\s*\n\s*if: matrix\.name == 'macos'\s*\n\s*run: npm run test:xterm-macos-selection/,
-  );
+  assert.match(testWorkflow, /- name: Lint\s*\n\s*run: npm run lint/);
+  assert.match(testWorkflow, /- name: Test\s*\n\s*run: npm test/);
   assert.match(testWorkflow, /- name: Build\s*\n\s*run: npm run build/);
   assert.doesNotMatch(testWorkflow, /\n  mosh-windows-conpty:/);
+  assert.doesNotMatch(testWorkflow, /\n  windows-fido:/);
+  assert.doesNotMatch(testWorkflow, /\n  windows-broadcast-ssh:/);
+  assert.doesNotMatch(testWorkflow, /xvfb-run/);
 });
 
 test("package release concurrency is isolated per tag", () => {
@@ -116,7 +112,6 @@ test("package validation avoids duplicate branch runs and scopes PR builds", () 
     "scripts/beforePackCursorSdk.cjs",
     "scripts/nodePtyConptyPatch.cjs",
     "scripts/patch-xterm-macos-column-selection.cjs",
-    "scripts/xterm-macos-column-selection.live.test.cjs",
     "scripts/linux/**",
     "skills/**",
   ]) {
@@ -164,15 +159,21 @@ test("package validation avoids duplicate branch runs and scopes PR builds", () 
   }
 });
 
-test("Windows packaging reuses its dependency install for the ConPTY smoke test", () => {
+test("packaging matrix caches Electron downloads and omits slow feature-specific live tests", () => {
   const packageMatrix = buildWorkflow.match(/\n  build:\n[\s\S]*?(?=\n  build-linux-x64:)/);
   assert.ok(packageMatrix, "build matrix job must exist before build-linux-x64");
-  assert.match(packageMatrix[0], /Compile ConPTY test helpers/);
-  assert.match(packageMatrix[0], /Test Mosh handshake through ConPTY/);
-  assert.match(packageMatrix[0], /if: matrix\.name == 'windows'/);
   assert.match(packageMatrix[0], /Restore Electron download cache/);
   assert.match(packageMatrix[0], /actions\/cache@v6/);
-  assert.match(packageMatrix[0], /node electron\/bridges\/terminalBridge\.moshConpty\.integration\.cjs/);
+  for (const removedStep of [
+    /Compile ConPTY test helpers/,
+    /Test Mosh handshake through ConPTY/,
+    /serial-named-pipe\.live\.test\.cjs/,
+    /test:xterm-macos-selection/,
+    /test-packaged-ssh-ciphers\.cjs/,
+    /test:tray-panel-layout/,
+  ]) {
+    assert.doesNotMatch(buildWorkflow, removedStep);
+  }
 });
 
 test("package downloads use bounded retries and reusable caches", () => {

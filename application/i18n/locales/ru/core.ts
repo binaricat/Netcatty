@@ -71,6 +71,7 @@ export const ruCoreMessages: Messages = {
   'common.apply': 'Применить',
   'common.use': 'Использовать',
   'common.useGlobal': 'Использовать глобальное',
+  'common.useGroup': 'Использовать настройки группы',
   'common.saveChanges': 'Сохранить изменения',
   'common.advanced': 'Дополнительно',
   'common.left': 'Слева',

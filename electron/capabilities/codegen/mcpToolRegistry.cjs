@@ -11,6 +11,7 @@ const SESSION_CLOSE_TOOLS = new Set(["session_close"]);
 const CONTEXT_TOOLS = new Set(["get_environment"]);
 const ATTACHMENT_LIST_TOOLS = new Set(["list_attachments"]);
 const ATTACHMENT_READ_TOOLS = new Set(["read_attachment"]);
+const REMOTE_DESKTOP_READ_SCREEN_TOOLS = new Set(["remote_desktop_read_screen"]);
 const SFTP_WRITE_TOOLS = new Set([
   "sftp_write_file",
   "sftp_mkdir",
@@ -226,7 +227,29 @@ function createToolHandler(toolDef, deps) {
       return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
     }
 
-    if (policy?.write) {
+    if (REMOTE_DESKTOP_READ_SCREEN_TOOLS.has(mcpTool)) {
+      const result = await rpcCall(rpcMethod, { ...scopeParams, ...args });
+      if (!result || typeof result !== "object" || result.ok === false) {
+        return {
+          content: [{ type: "text", text: formatRpcError(result) }],
+          isError: true,
+        };
+      }
+      const { base64Data, ...meta } = result;
+      const content = [{ type: "text", text: JSON.stringify(meta, null, 2) }];
+      if (typeof base64Data === "string" && base64Data.length > 0) {
+        content.push({
+          type: "image",
+          data: base64Data,
+          mimeType: typeof result.mediaType === "string" && result.mediaType ? result.mediaType : "image/jpeg",
+        });
+      }
+      return { content };
+    }
+
+    // Writes that must stay available in observer mode (stops) declare it in the
+    // catalog; the bridge enforces the same policy again.
+    if (policy?.write && !policy.bypassesObserverBlock) {
       const guardErr = guardWriteOperation("", { skipBlocklist: true });
       if (guardErr) {
         return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };

@@ -165,6 +165,12 @@ function createWorkerAiExecHandler({
 
     const meta = sessionMeta || {};
     const { sessionProtocol, isNetworkDevice } = isNetworkDeviceSession(session, meta);
+    if (sessionProtocol === "vnc" || sessionProtocol === "rdp") {
+      return {
+        ok: false,
+        error: `Remote desktop (${sessionProtocol.toUpperCase()}) sessions do not support terminal command execution.`,
+      };
+    }
     const timeoutMs = Number.isFinite(commandTimeoutMs) ? commandTimeoutMs : 60000;
 
     if ((session.protocol === "local" || session.type === "local") && session.shellKind === "unknown") {
@@ -308,6 +314,10 @@ function createWorkerAiJobStartHandler({
       commandTimeoutMs,
       sessionMeta,
       commandBlocklist,
+      // terminal_start_bulk validates every target before starting any job: run every
+      // deterministic check below, then stop without creating a job or touching the PTY.
+      precheck,
+      probe,
     } = payload;
     if (!sessionId || !command) {
       return { ok: false, error: "sessionId and command are required" };
@@ -333,6 +343,12 @@ function createWorkerAiJobStartHandler({
 
     const meta = sessionMeta || {};
     const { sessionProtocol, isNetworkDevice } = isNetworkDeviceSession(session, meta);
+    if (sessionProtocol === "vnc" || sessionProtocol === "rdp") {
+      return {
+        ok: false,
+        error: `Remote desktop (${sessionProtocol.toUpperCase()}) sessions do not support terminal command execution.`,
+      };
+    }
     if (isNetworkDevice || sessionProtocol === "serial") {
       return {
         ok: false,
@@ -346,6 +362,27 @@ function createWorkerAiJobStartHandler({
         ok: false,
         error: "Background execution requires a writable PTY-backed terminal session.",
       };
+    }
+
+    if (precheck === true) {
+      // A precheck with probe:false must not open any channel to the host: use the
+      // shell kind only if it is already known, otherwise the shell-independent patterns.
+      const noProbe = probe === false;
+      if (!noProbe) {
+        try {
+          await ensureSessionShellKind(session);
+        } catch (err) {
+          return { ok: false, error: err?.message || String(err) };
+        }
+      }
+      const knownKind = resolveSessionBlocklistShellKind(session);
+      const safety = noProbe && !knownKind
+        ? checkBlocklistCommonOnly(command, commandBlocklist)
+        : checkBlocklistForShell(command, knownKind, commandBlocklist);
+      if (safety.blocked) {
+        return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+      }
+      return { ok: true };
     }
 
     const jobId = createWorkerBackgroundJobId();

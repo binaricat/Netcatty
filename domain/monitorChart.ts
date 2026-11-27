@@ -1,6 +1,6 @@
 import type { MonitorPoint } from "./monitorRuntime";
 
-export type MonitorTrendField = "cpu" | "memory" | "rx" | "tx";
+export type MonitorTrendField = "cpu" | "memory" | "rx" | "tx" | "latencyMs";
 
 /** Keep extrema within each two-pixel column; hit testing still uses raw samples. */
 export function buildMonitorTrendGeometry(
@@ -8,8 +8,11 @@ export function buildMonitorTrendGeometry(
 ) {
   const start = end - range * 60000;
   const visible = points.filter((p) => p.at >= start && p.at <= end);
-  const max = field === "cpu" || field === "memory" ? 100
-    : Math.max(1, ...visible.map((p) => Number.isFinite(p[field]) ? p[field]! : 0));
+  const max = field === "cpu" || field === "memory"
+    ? 100
+    : field === "latencyMs"
+      ? Math.max(10, ...visible.map((p) => Number.isFinite(p[field]) ? p[field]! : 0))
+      : Math.max(1, ...visible.map((p) => Number.isFinite(p[field]) ? p[field]! : 0));
   const runs: MonitorPoint[][] = [];
   let run: MonitorPoint[] = [];
   for (const p of visible) {

@@ -2,11 +2,57 @@ import React, { useCallback, useMemo } from "react";
 
 import { compareHostAddresses } from "../../domain/hostAddressSort";
 import { upsertKnownHost } from "../../domain/knownHosts";
+import {
+  hasCompanionRdp,
+  hasCompanionVnc,
+  isRdpProtocol,
+  isVncProtocol,
+} from "../../domain/remoteDesktop";
 import { sortByVaultOrder, sortVaultStringsByOrder } from "../../domain/vaultOrder";
 import { matchesHostSearchQuery, matchesSearchQuery } from "../../domain/searchMatcher";
 import type { GroupConfig, GroupNode, Host, KnownHost } from "../../types";
 import KnownHostsManager from "../KnownHostsManager";
 import type { SortMode } from "../ui/sort-dropdown";
+
+const PROTO_TOKEN_RE = /(?:^|\s)proto:([a-z0-9:_-]+)(?=\s|$)/gi;
+
+export function matchesVaultHostSearch(host: Host, rawSearchTerm: string): boolean {
+  const searchTerm = rawSearchTerm.trim();
+  if (!searchTerm) return true;
+
+  const protoTokens: string[] = [];
+  const remainder = searchTerm
+    .replace(PROTO_TOKEN_RE, (_match, proto: string) => {
+      protoTokens.push(proto.toLowerCase());
+      return " ";
+    })
+    .trim();
+
+  for (const token of protoTokens) {
+    if (token === "rdp") {
+      if (!isRdpProtocol(host.protocol) && !hasCompanionRdp(host)) return false;
+    } else if (token === "vnc") {
+      if (!isVncProtocol(host.protocol) && !hasCompanionVnc(host)) return false;
+    } else if (token === "ssh") {
+      const p = (host.protocol || "ssh").toLowerCase();
+      if (p !== "ssh") return false;
+    } else if (token === "telnet") {
+      if (host.protocol !== "telnet" && !host.telnetEnabled) return false;
+    } else if (token === "mosh") {
+      if (host.protocol !== "mosh" && !host.moshEnabled) return false;
+    } else if (token === "et") {
+      if (host.protocol !== "et" && !host.etEnabled) return false;
+    } else {
+      if ((host.protocol || "ssh").toLowerCase() !== token) return false;
+    }
+  }
+
+  if (!remainder) return true;
+  return (
+    matchesHostSearchQuery(remainder, host) ||
+    matchesSearchQuery(remainder, host.username, host.notes)
+  );
+}
 
 interface UseVaultHostCollectionsOptions {
   customGroups: string[];
@@ -89,11 +135,8 @@ export function useVaultHostCollections({
   const hasSelectedTags = selectedTags.length > 0;
 
   const hostMatchesSearchAndTags = useCallback((host: Host): boolean => {
-    if (searchTerm) {
-      const matchesSearch =
-        matchesHostSearchQuery(searchTerm, host) ||
-        matchesSearchQuery(searchTerm, host.username, host.notes);
-      if (!matchesSearch) return false;
+    if (searchTerm && !matchesVaultHostSearch(host, searchTerm)) {
+      return false;
     }
     if (hasSelectedTags && !host.tags?.some((tag) => selectedTagSet.has(tag))) {
       return false;

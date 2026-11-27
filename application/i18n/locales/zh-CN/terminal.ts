@@ -14,6 +14,7 @@ export const zhCNTerminalMessages: Messages = {
   'terminal.directory.unavailable': '此会话暂不支持目录导航。',
   'terminal.directory.integrationUnavailable': 'PowerShell 目录集成未就绪，启动参数或执行策略可能阻止了加载。',
   'terminal.directory.cmdIntegrationUnavailable': '正在等待原 CMD 会话报告当前目录。',
+  'terminal.directory.gitBashIntegrationUnavailable': '正在等待原 Git Bash 会话中的可访问目录。',
   'terminal.directory.nonFilesystem': '当前 PowerShell 位置不是文件系统目录。',
   'terminal.directory.accessDenied': '没有权限列出此目录。',
   'terminal.directory.busy': '请等待终端回到空命令提示符。',
@@ -190,6 +191,10 @@ export const zhCNTerminalMessages: Messages = {
   'settings.sftp.defaultViewMode.listDesc': '以平面列表显示当前目录的文件',
   'settings.sftp.defaultViewMode.tree': '树形视图',
   'settings.sftp.defaultViewMode.treeDesc': '以层级树形结构显示文件',
+  'settings.sftp.treeFolderDoubleClick': '树形视图双击文件夹',
+  'settings.sftp.treeFolderDoubleClick.desc': '选择在 SFTP 树形视图中双击文件夹时的操作。点击左侧箭头始终在原处展开或折叠。',
+  'settings.sftp.treeFolderDoubleClick.navigate': '进入目录',
+  'settings.sftp.treeFolderDoubleClick.expand': '原地展开／折叠',
 
   'sftp.autoSync.success': '文件已同步到远程：{fileName}',
   'sftp.autoSync.error': '同步文件失败：{error}',

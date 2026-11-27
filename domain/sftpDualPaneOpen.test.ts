@@ -21,13 +21,21 @@ const tab = (
   ...options,
 });
 
-test("canOpenDualPaneSftp matches the SFTP host picker: not serial, not plugin", () => {
+test("canOpenDualPaneSftp matches the SFTP host picker: not serial, not plugin, not standalone vnc/rdp", () => {
   assert.equal(canOpenDualPaneSftp({}), true);
   assert.equal(canOpenDualPaneSftp({ protocol: "ssh" }), true);
   assert.equal(canOpenDualPaneSftp({ protocol: "mosh" }), true);
   assert.equal(canOpenDualPaneSftp({ protocol: "telnet" }), true);
   assert.equal(canOpenDualPaneSftp({ protocol: "serial" }), false);
+  assert.equal(canOpenDualPaneSftp({ protocol: "local" }), false);
+  assert.equal(canOpenDualPaneSftp({ protocol: "vnc" }), false);
+  assert.equal(canOpenDualPaneSftp({ protocol: "rdp" }), false);
   assert.equal(canOpenDualPaneSftp({ protocol: "plugin:example.provider.ssh" }), false);
+  // SSH host with companion remote desktop remains SFTP-capable
+  assert.equal(
+    canOpenDualPaneSftp({ protocol: "ssh", rdpConfig: { enabled: true }, vncConfig: { enabled: true } } as { protocol: string }),
+    true,
+  );
 });
 
 test("planDualPaneSftpOpen connects local left and host right on empty panes", () => {

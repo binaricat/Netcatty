@@ -610,7 +610,7 @@ function bindPortForwardChannels({
         openBoundedForwardOutCallback(
           conn,
           bindAddress,
-          localPort,
+          server.address()?.port ?? localPort,
           remoteHost,
           remotePort,
           (err, stream) => {
@@ -634,7 +634,8 @@ function bindPortForwardChannels({
       });
 
       server.listen(localPort, bindAddress, () => {
-        console.log(`[PortForward] Local forwarding active: ${bindAddress}:${localPort} -> ${remoteHost}:${remotePort}`);
+        const assignedPort = server.address()?.port ?? localPort;
+        console.log(`[PortForward] Local forwarding active: ${bindAddress}:${assignedPort} -> ${remoteHost}:${remotePort}`);
         try {
           // User may have cancelled while listen was pending (shared transport
           // path). Do not resurrect a stopped tunnel or leave the port open.
@@ -646,6 +647,7 @@ function bindPortForwardChannels({
             return;
           }
           tunnelState.type = "local";
+          tunnelState.localPort = assignedPort;
           tunnelState.conn = conn;
           tunnelState.server = server;
           tunnelState.chainConnections = chainConnections;
@@ -659,7 +661,7 @@ function bindPortForwardChannels({
           portForwardingTunnels.set(tunnelId, tunnelState);
           sendStatus?.("active");
           settled = true;
-          resolve({ tunnelId, success: true });
+          resolve({ tunnelId, success: true, localPort: assignedPort });
         } catch (regErr) {
           try { server.close(); } catch { /* ignore */ }
           fail(regErr);

@@ -6,13 +6,16 @@ import {
     Terminal,
     Trash2,
     Usb,
+    Video,
 } from "lucide-react";
 import React, { memo, useCallback, useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { resolveHostIconAppearance } from "../domain/hostIcon";
+import { isRdpProtocol, isVncProtocol } from "../domain/remoteDesktop";
 import { cn } from "../lib/utils";
 import { ConnectionLog, Host } from "../types";
 import { DistroAvatar } from "./DistroAvatar";
+import { RdpProtocolIcon, VncProtocolIcon } from "./icons/RemoteDesktopIcons";
 import { ScrollArea } from "./ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
@@ -23,6 +26,34 @@ interface ConnectionLogsManagerProps {
     onDelete: (id: string) => void;
     onClearUnsaved: () => void;
     onOpenLogView: (log: ConnectionLog) => void;
+}
+
+export function formatRecordingDuration(durationMs?: number): string {
+    if (!durationMs || !Number.isFinite(durationMs) || durationMs <= 0) {
+        return "00:00";
+    }
+    const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const mm = String(minutes).padStart(2, "0");
+    const ss = String(seconds).padStart(2, "0");
+    return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+export function formatRecordingBytes(bytes?: number): string {
+    if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let size = bytes;
+    let unitIdx = 0;
+    while (size >= 1024 && unitIdx < units.length - 1) {
+        size /= 1024;
+        unitIdx += 1;
+    }
+    const formatted = unitIdx === 0
+        ? String(Math.round(size))
+        : String(parseFloat(size.toFixed(size >= 10 ? 1 : 2)));
+    return `${formatted} ${units[unitIdx]}`;
 }
 
 // Format date for display
@@ -68,6 +99,9 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
     const { t, resolvedLocale } = useI18n();
     const isLocal = log.protocol === "local" || log.hostname === "localhost";
     const isSerial = log.protocol === "serial";
+    const isRdp = isRdpProtocol(log.protocol);
+    const isVnc = isVncProtocol(log.protocol);
+    const isRemoteDesktop = isRdp || isVnc;
     const customHostIcon = resolveHostIconAppearance({
         iconMode: log.hostIconMode,
         iconId: log.hostIconId,
@@ -75,7 +109,9 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
         iconColor: log.hostIconColor,
         iconColorCustom: log.hostIconColorCustom,
     });
-    const hasPersistedHostIcon = !isLocal && !isSerial && (!!log.hostDistro || !!customHostIcon);
+    const hasPersistedHostIcon = !isLocal && !isSerial && !isRemoteDesktop && (!!log.hostDistro || !!customHostIcon);
+    const recordingSizeText = formatRecordingBytes(log.recordingBytes);
+    const recordingDurationText = formatRecordingDuration(log.recordingDurationMs);
 
     return (
         <div
@@ -121,19 +157,55 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
                 ) : (
                     <div className={cn(
                         "h-9 w-9 rounded-xl flex items-center justify-center shrink-0",
-                        isSerial
-                            ? "bg-amber-600 text-white dark:bg-amber-400 dark:text-slate-950"
-                            : isLocal
-                                ? "bg-slate-600 text-white dark:bg-slate-300 dark:text-slate-950"
-                                : "bg-primary text-primary-foreground"
+                        isRdp
+                            ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                            : isVnc
+                                ? "bg-teal-500/15 text-teal-600 dark:text-teal-400"
+                                : isSerial
+                                    ? "bg-amber-600 text-white dark:bg-amber-400 dark:text-slate-950"
+                                    : isLocal
+                                        ? "bg-slate-600 text-white dark:bg-slate-300 dark:text-slate-950"
+                                        : "bg-primary text-primary-foreground"
                     )}>
-                        {isSerial ? <Usb size={17} /> : isLocal ? <Terminal size={17} /> : <Server size={17} />}
+                        {isRdp ? (
+                            <RdpProtocolIcon size={17} />
+                        ) : isVnc ? (
+                            <VncProtocolIcon size={17} />
+                        ) : isSerial ? (
+                            <Usb size={17} />
+                        ) : isLocal ? (
+                            <Terminal size={17} />
+                        ) : (
+                            <Server size={17} />
+                        )}
                     </div>
                 )}
-                <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{isLocal ? t("logs.localTerminal") : log.hostLabel}</div>
+                <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <div className="text-sm font-medium truncate">
+                            {isLocal ? t("logs.localTerminal") : log.hostLabel}
+                        </div>
+                        {log.recordingId && (
+                            <span
+                                data-recording-badge={log.recordingId}
+                                className="inline-flex items-center gap-1 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-primary shrink-0"
+                            >
+                                <Video size={12} />
+                                <span>
+                                    {recordingDurationText}
+                                    {recordingSizeText ? ` · ${recordingSizeText}` : ""}
+                                </span>
+                            </span>
+                        )}
+                    </div>
                     <div className="text-xs text-muted-foreground truncate">
-                        {isLocal ? "local" : isSerial ? `serial, ${log.hostname}` : `${log.protocol}, ${log.username}`}
+                        {isLocal
+                            ? "local"
+                            : isSerial
+                                ? `serial, ${log.hostname}`
+                                : log.username
+                                    ? `${log.protocol}, ${log.username}`
+                                    : `${log.protocol}, ${log.hostname}`}
                     </div>
                 </div>
             </div>

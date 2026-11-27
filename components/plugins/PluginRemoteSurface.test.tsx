@@ -647,3 +647,60 @@ test('PluginDataGrid FK jump, hiddenColumns, keyboard shortcuts, and PluginErCan
     Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   }
 });
+
+test('RemoteImageElement renders a transparent placeholder while loading and never shows a broken img', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'ShadowRoot']) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: key === 'window' ? dom.window : dom.window[key as keyof typeof dom.window] });
+  }
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, writable: true, value: true });
+
+  const shadows: ShadowRoot[] = [];
+  const nativeAttach = dom.window.Element.prototype.attachShadow;
+  dom.window.Element.prototype.attachShadow = function (options) {
+    const s = nativeAttach.call(this, options);
+    shadows.push(s as unknown as ShadowRoot);
+    return s;
+  };
+
+  const { act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { PluginRemoteSurface } = await import('./PluginRemoteSurface');
+
+  let resolveImage!: (url: string) => void;
+  const loadImage = () => new Promise<string>((resolve) => { resolveImage = resolve; });
+  const root = createRoot(document.getElementById('root')!);
+  try {
+    await act(async () => {
+      root.render(
+        <PluginRemoteSurface
+          tree={{ children: [{ id: 'img1', type: 1, element: 'img', attributes: { src: 'asset:assets/icons/pg.png', alt: 'PostgreSQL' }, children: [] }] }}
+          css=""
+          loadImage={loadImage}
+          onEvent={() => {}}
+        />,
+      );
+    });
+    const img = shadows[0]?.querySelector('img');
+    assert.ok(img, 'img element rendered');
+    assert.equal(img!.getAttribute('data-plugin-image-loading'), 'true');
+    assert.match(img!.getAttribute('src') ?? '', /^data:image\/gif;base64,/);
+    assert.equal(img!.getAttribute('alt'), '', 'alt text hidden while placeholder loads');
+
+    const resolvedUrl = 'data:image/png;base64,iVBORw0KGgo=';
+    await act(async () => {
+      resolveImage(resolvedUrl);
+      await Promise.resolve();
+    });
+    assert.equal(img!.getAttribute('data-plugin-image-loading'), null);
+    assert.equal(img!.getAttribute('src'), resolvedUrl);
+    assert.equal(img!.getAttribute('alt'), 'PostgreSQL');
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key); }
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});

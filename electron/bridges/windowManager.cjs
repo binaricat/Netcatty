@@ -1249,6 +1249,20 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
     setTerminalKeyboardFocusForWindow(win, payload?.focused === true);
   });
 
+  ipcMain.on("netcatty:remote-desktop:set-keyboard-grab", (event, payload) => {
+    const { setRemoteDesktopKeyboardGrabForWindow } = require("./windowManager/remoteDesktopKeyboardGrab.cjs");
+    const win = getWindowForIpcEvent(event);
+    setRemoteDesktopKeyboardGrabForWindow(win, payload?.active === true);
+  });
+
+  ipcMain.handle("netcatty:remote-desktop:set-keyboard-grab", (event, payload) => {
+    const { setRemoteDesktopKeyboardGrabForWindow } = require("./windowManager/remoteDesktopKeyboardGrab.cjs");
+    const win = getWindowForIpcEvent(event);
+    const active = payload?.active === true;
+    const applied = setRemoteDesktopKeyboardGrabForWindow(win, active);
+    return { success: applied, active: applied && active };
+  });
+
   ipcMain.handle("netcatty:window:setTitle", (event, title) => {
     const win = getWindowForIpcEvent(event);
     if (!win || win.isDestroyed()) return false;

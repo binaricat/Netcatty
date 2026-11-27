@@ -11,6 +11,7 @@ const { listMcpTools } = require("../capabilities/codegen/toolSurfaces.cjs");
 const {
   CORE_MCP_TOOL_NAMES,
   DEFERRED_MCP_TOOLSETS,
+  LOADABLE_MCP_TOOLSET_NAMES,
   MCP_TOOL_LOADER_NAME,
   buildProgressiveMcpCatalog,
   registerProgressiveMcpTools,
@@ -73,6 +74,11 @@ test("progressive MCP catalog assigns every non-core catalog tool exactly once",
   assert.doesNotThrow(() => buildProgressiveMcpCatalog());
 });
 
+test("remote desktop screen reading is deferred rather than core", () => {
+  assert.deepEqual(DEFERRED_MCP_TOOLSETS.remote_desktop, ["remote_desktop_read_screen"]);
+  assert.equal(CORE_MCP_TOOL_NAMES.includes("remote_desktop_read_screen"), false);
+});
+
 test("progressive MCP registration initially exposes exactly 15 core tools", () => {
   const server = createFakeServer();
   const result = registerProgressiveMcpTools(server, createDeps());
@@ -115,6 +121,7 @@ test("loading all makes every catalog MCP tool available", async () => {
   assert.equal(result.loadedCatalogToolCount, catalogNames.length);
   assert.equal(result.visibleToolCount, catalogNames.length + 1);
   assert.equal(result.remainingCatalogToolCount, 0);
+  assert.equal(server.handlers.has("remote_desktop_read_screen"), true);
   assert.deepEqual(
     new Set(server.registrations),
     new Set([MCP_TOOL_LOADER_NAME, ...catalogNames]),
@@ -152,5 +159,20 @@ test("MCP clients receive the updated tool list without reconnecting", async () 
     assert.equal(updated.tools.some(tool => tool.name === "read_attachment"), true);
   } finally {
     await client.close();
+  }
+});
+
+test("the loader description names every toolset", () => {
+  const server = createFakeServer();
+  let description = "";
+  const register = server.tool.bind(server);
+  server.tool = (name, desc, ...rest) => {
+    if (name === MCP_TOOL_LOADER_NAME) description = desc;
+    return register(name, desc, ...rest);
+  };
+  registerProgressiveMcpTools(server, createDeps());
+  assert.ok(description, "loader registered");
+  for (const toolset of LOADABLE_MCP_TOOLSET_NAMES) {
+    assert.match(description, new RegExp(`\\b${toolset}\\b`), toolset);
   }
 });

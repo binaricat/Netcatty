@@ -84,6 +84,7 @@ test('session actions register and unregister', () => {
     createLocalTerminal: noop,
     createSerialSession: noop,
     connectToHost: noop,
+    connectToHostRemoteDesktop: noop,
     updateSessionStatus: noop,
     updateSessionFontSize: noop,
     clearSessionFontSizeOverride: noop,

@@ -77,7 +77,12 @@ test("terminal_execute_bulk is hidden until its toolset is loaded, then works ov
     assert.match(loader.description, /terminal_bulk/);
 
     const loaded = JSON.parse((await client.callTool({ name: "load_netcatty_tools", arguments: { toolset: "terminal_bulk" } })).content[0].text);
-    assert.deepEqual(loaded.newlyLoaded, ["terminal_execute_bulk"]);
+    assert.deepEqual(loaded.newlyLoaded, [
+      "terminal_execute_bulk",
+      "terminal_start_bulk",
+      "terminal_poll_bulk",
+      "terminal_stop_bulk",
+    ]);
 
     const tool = (await client.listTools()).tools.find((entry) => entry.name === "terminal_execute_bulk");
     assert.ok(tool, "visible after loading");

@@ -64,7 +64,8 @@ import { PersistentSidePanelPortal, SidePanelMountedContent } from './terminalLa
 import { usePluginTerminalSidebar } from '../../application/state/usePluginTerminalSidebar';
 import { PluginTerminalSidebarPageHost } from '../plugins/PluginTerminalSidebar';
 import { PluginContributionIcon } from '../plugins/PluginContributionIcon';
-import { getPaneMagnificationShortcutLabel, resolveMagnifiedChromeBorderWidth } from '../../domain/paneMagnification';
+import { getPaneMagnificationShortcutLabel } from '../../domain/paneMagnification';
+import { isRemoteDesktopProtocol } from '../../domain/remoteDesktop';
 
 const MemoizedSidePanelMountedContent = memo(
   SidePanelMountedContent,
@@ -168,7 +169,7 @@ function SidePanelPaneHost({
           <span className="text-[11px] font-medium truncate flex-1">{label}</span>
           <button
             type="button"
-            className="h-5 w-5 grid place-items-center rounded-sm opacity-70 hover:opacity-100 hover:bg-white/10"
+            className="h-5 w-5 shrink-0 grid place-items-center rounded-sm opacity-70 hover:opacity-100 hover:bg-white/10"
             aria-label={`${closePaneLabel}: ${label}`}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => {
@@ -674,17 +675,17 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
     magnifiedPane,
   } = ctx;
 
-  // Live theme for chrome when panel is open and not follow-app — stable memo
+  // Live theme & focused session metadata when panel is open — stable memo
   // no longer receives focus-driven resolvedPreviewTheme via ctx.
-  const subscribeLiveTheme = isSidePanelOpenForCurrentTab && !followAppTerminalTheme;
+  const subscribeLivePanel = isSidePanelOpenForCurrentTab;
   const liveSnapshot = useSyncExternalStore(
-    (listener) => subscribeSidePanelLiveSnapshot(subscribeLiveTheme, listener),
-    () => getSidePanelLiveSnapshot(subscribeLiveTheme),
-    () => getSidePanelLiveSnapshot(subscribeLiveTheme),
+    (listener) => subscribeSidePanelLiveSnapshot(subscribeLivePanel, listener),
+    () => getSidePanelLiveSnapshot(subscribeLivePanel),
+    () => getSidePanelLiveSnapshot(subscribeLivePanel),
   );
   const resolvedPreviewTheme = followAppTerminalTheme
     ? null
-    : (subscribeLiveTheme
+    : (subscribeLivePanel
       ? (liveSnapshot.resolvedPreviewTheme ?? ctxResolvedPreviewTheme)
       : ctxResolvedPreviewTheme);
 
@@ -1079,19 +1080,33 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
     setDragOverSidePanelTab(null);
   }, [dragOverSidePanelTab]);
 
-  const sidePanelTabItems = useMemo<SidePanelTabItem[]>(() => [
-    { id: 'sftp' as const, label: t('terminal.layer.sftp'), icon: <FolderTree size={15} />, onClick: handleToggleSftpFromBar },
-    { id: 'browser' as const, label: t('terminal.browser.title'), icon: <Globe2 size={15} />, onClick: handleOpenBrowser },
-    { id: 'scripts' as const, label: t('terminal.layer.scripts'), icon: <Play size={15} />, onClick: handleOpenScripts },
-    { id: 'history' as const, label: t('terminal.layer.history'), icon: <History size={15} />, onClick: handleOpenHistory },
-    { id: 'theme' as const, label: t('terminal.layer.theme'), icon: <Palette size={15} />, onClick: handleOpenTheme },
-    { id: 'system' as const, label: t('terminal.layer.system'), icon: <Activity size={15} />, onClick: handleOpenSystem },
-    { id: 'notes' as const, label: t('terminal.layer.notes'), icon: <NotebookText size={15} />, onClick: handleOpenNotes },
-    { id: 'ai' as const, label: t('terminal.layer.aiChat'), icon: <MessageSquare size={15} />, onClick: handleOpenAI },
-    ...pluginSidebar.pages.map((page) => ({ id: page.tool, label: `${page.title} · ${page.pluginName}`,
-      icon: <PluginContributionIcon pluginId={page.pluginId} icon={page.icon} size={15} />,
-      onClick: () => handleSwitchSidePanelTab?.(page.tool) })),
-  ], [
+  const focusedSession = useMemo(() => {
+    const sessionsList = (ctx.sessions ?? []) as Array<{ id: string; protocol?: string; remoteDesktopCompanion?: boolean }>;
+    const targetId = liveSnapshot.focusedSessionId ?? activeTabId;
+    return sessionsList.find((session) => session.id === targetId) ?? null;
+  }, [activeTabId, ctx.sessions, liveSnapshot.focusedSessionId]);
+  const isFocusedRemoteDesktop = isRemoteDesktopProtocol(focusedSession?.protocol);
+  const canUseSftpOnRemoteDesktop = Boolean(focusedSession?.remoteDesktopCompanion);
+
+  const sidePanelTabItems = useMemo<SidePanelTabItem[]>(() => {
+    const allItems: SidePanelTabItem[] = [
+      { id: 'sftp' as const, label: t('terminal.layer.sftp'), icon: <FolderTree size={15} />, onClick: handleToggleSftpFromBar },
+      { id: 'browser' as const, label: t('terminal.browser.title'), icon: <Globe2 size={15} />, onClick: handleOpenBrowser },
+      { id: 'scripts' as const, label: t('terminal.layer.scripts'), icon: <Play size={15} />, onClick: handleOpenScripts },
+      { id: 'history' as const, label: t('terminal.layer.history'), icon: <History size={15} />, onClick: handleOpenHistory },
+      { id: 'theme' as const, label: t('terminal.layer.theme'), icon: <Palette size={15} />, onClick: handleOpenTheme },
+      { id: 'system' as const, label: t('terminal.layer.system'), icon: <Activity size={15} />, onClick: handleOpenSystem },
+      { id: 'notes' as const, label: t('terminal.layer.notes'), icon: <NotebookText size={15} />, onClick: handleOpenNotes },
+      { id: 'ai' as const, label: t('terminal.layer.aiChat'), icon: <MessageSquare size={15} />, onClick: handleOpenAI },
+      ...pluginSidebar.pages.map((page) => ({ id: page.tool, label: `${page.title} · ${page.pluginName}`,
+        icon: <PluginContributionIcon pluginId={page.pluginId} icon={page.icon} size={15} />,
+        onClick: () => handleSwitchSidePanelTab?.(page.tool) })),
+    ];
+    if (!isFocusedRemoteDesktop) return allItems;
+    // Exclude terminal-only side panels on VNC/RDP tabs; keep AI, Notes, and SSH companion SFTP.
+    return allItems.filter((item) => item.id === 'ai' || item.id === 'notes' || (canUseSftpOnRemoteDesktop && item.id === 'sftp'));
+  }, [
+    canUseSftpOnRemoteDesktop,
     handleOpenAI,
     handleOpenHistory,
     handleOpenNotes,
@@ -1100,6 +1115,7 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
     handleOpenSystem,
     handleOpenTheme,
     handleToggleSftpFromBar,
+    isFocusedRemoteDesktop,
     t,
     handleSwitchSidePanelTab,
     pluginSidebar.pages,
@@ -1567,12 +1583,10 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
           data-section="pane-magnification-backdrop"
         />
         <div
-          className="absolute inset-3 flex flex-col overflow-hidden rounded-md border bg-background shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+          className="absolute inset-3 flex flex-col overflow-hidden rounded-md bg-background shadow-2xl animate-in fade-in zoom-in-95 duration-150"
           style={{
-            borderColor: sidePanelTheme.accent,
-            borderWidth: resolveMagnifiedChromeBorderWidth(
-              typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1),
-            ),
+            outline: `1px solid ${sidePanelTheme.accent}`,
+            outlineOffset: -1,
             backgroundColor: sidePanelTheme.termBg,
             color: sidePanelTheme.termFg,
           }}

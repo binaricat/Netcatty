@@ -37,7 +37,7 @@ function labelPart(sessionId, label) {
  * @param {{ command?: unknown, sessionIds?: unknown, tailLines?: unknown }} params
  * @returns {{ ok: true, command: string, sessionIds: string[], tailLines: number } | { ok: false, error: string }}
  */
-function parseBulkExecParams(params = {}) {
+function parseBulkExecParams(params = {}, { singleTool = "terminal_execute" } = {}) {
   const command = params?.command;
   if (typeof command !== "string" || !command.trim()) {
     return { ok: false, error: "Invalid command" };
@@ -56,7 +56,7 @@ function parseBulkExecParams(params = {}) {
     return { ok: false, error: shapeError };
   }
   if (rawIds.length < MIN_BULK_TARGETS) {
-    return { ok: false, error: `${shapeError}. Use terminal_execute to run a command on a single session` };
+    return { ok: false, error: `${shapeError}. Use ${singleTool} to run a command on a single session` };
   }
   if (rawIds.length > MAX_BULK_TARGETS) {
     return { ok: false, error: shapeError };
@@ -116,6 +116,7 @@ const NOT_SENT_PATTERNS = [
   /^Network device session has no writable PTY stream/,
   /^Serial file transfer is already in progress/,
   /^AI execution is not supported/,
+  /^Remote desktop \((?:VNC|RDP)\) sessions /,
   /^Another Netcatty command is already running/,
 ];
 const TIMEOUT_PATTERN = /timed out/i;
@@ -203,6 +204,18 @@ function tailText(text, tailLines, maxChars) {
 }
 
 /**
+ * Split one group's character budget between stdout and stderr. stderr keeps up to a
+ * quarter when it needs it; whatever one stream does not use goes to the other (on
+ * interactive terminals stderr is part of stdout, so stdout usually gets it all).
+ * @returns {{ stdoutChars: number, stderrChars: number }}
+ */
+function splitGroupBudget(stdoutLength, stderrLength, total) {
+  let stderrChars = Math.min(stderrLength, Math.floor(total * 0.25));
+  if (stdoutLength < total - stderrChars) stderrChars = Math.min(stderrLength, total - stdoutLength);
+  return { stdoutChars: total - stderrChars, stderrChars };
+}
+
+/**
  * Group identical per-host results (compared on the full raw output, before
  * truncation) and build the public payload.
  *
@@ -240,10 +253,15 @@ function groupBulkResults(entries, options = {}) {
   const groups = [];
   for (const { normalized, hosts } of groupsByKey.values()) {
     // One budget per group, shared by both streams, so the response stays under the cap.
-    const stdoutChars = Math.floor(perGroupChars * 0.75);
-    const out = tailText(normalized.stdout, tailLines, stdoutChars);
-    const err = tailText(normalized.stderr, tailLines, perGroupChars - stdoutChars);
-    const omittedLines = out.omittedLines + err.omittedLines;
+    // Apply tailLines first, so only text that can still be shown competes for the budget.
+    const outLines = tailText(normalized.stdout, tailLines, Infinity);
+    const errLines = tailText(normalized.stderr, tailLines, Infinity);
+    const { stdoutChars, stderrChars } = splitGroupBudget(outLines.text.length, errLines.text.length, perGroupChars);
+    const outCut = tailText(outLines.text, Infinity, stdoutChars);
+    const errCut = tailText(errLines.text, Infinity, stderrChars);
+    const out = { text: outCut.text, truncated: outLines.truncated || outCut.truncated };
+    const err = { text: errCut.text, truncated: errLines.truncated || errCut.truncated };
+    const omittedLines = outLines.omittedLines + outCut.omittedLines + errLines.omittedLines + errCut.omittedLines;
     const group = {
       hosts,
       status: normalized.status,
@@ -268,9 +286,11 @@ function groupBulkResults(entries, options = {}) {
 }
 
 /**
- * @param {object} deps injected by mcpServerBridge (keeps this module testable)
+ * Local, side-effect-free target checks shared by the bulk tools, in the same order
+ * as a single command: scope, closing, busy, pending claim, existence, connected.
+ * @param {object} deps the same deps the bulk handlers receive
  */
-function createExecBulkHandler(deps) {
+function createBulkTargetGuards(deps) {
   const {
     getSessions,
     getSessionMeta,
@@ -278,22 +298,6 @@ function createExecBulkHandler(deps) {
     closingTerminalSessions,
     getSessionBusyError,
     pendingSessionWriteApprovals,
-    getActiveChatExecution,
-    beginChatExecution,
-    isChatSessionCancelled,
-    preflightMainExec,
-    preflightWorkerExec,
-    execOnSession,
-    requestApproval,
-    sessionIdleManager,
-    getCommandTimeoutMs,
-    getLivePermission,
-    cancelExecsForChat,
-    USER_DENIED_MESSAGE,
-    CHAT_SESSION_CANCELLED_MESSAGE,
-    debugLog = () => {},
-    setTimeoutFn = setTimeout,
-    clearTimeoutFn = clearTimeout,
   } = deps;
 
   function resolveLabel(sessionId, chatSessionId) {
@@ -315,14 +319,49 @@ function createExecBulkHandler(deps) {
     if (includePendingWrite && pendingSessionWriteApprovals.has(sessionId)) {
       return fail("Session already has another command request awaiting approval or startup. Wait for it to finish before starting a new command.");
     }
-    const hasMainSession = Boolean(getSessions()?.get?.(sessionId));
+    const mainSession = getSessions()?.get?.(sessionId);
+    const hasMainSession = Boolean(mainSession);
     const meta = getSessionMeta(sessionId, ctx.chatSessionId);
+    const sessionProtocol = String(mainSession?.protocol || mainSession?.type || meta?.protocol || "").toLowerCase();
+    if (sessionProtocol === "vnc" || sessionProtocol === "rdp") {
+      return fail(`Remote desktop (${sessionProtocol.toUpperCase()}) sessions do not support terminal command execution.`);
+    }
     if (!hasMainSession && !meta) return fail("Session not found");
     // A live main-process session is connected by definition; its metadata snapshot
     // can be stale. Only worker-hosted sessions rely on the metadata flag.
     if (!hasMainSession && meta.connected === false) return fail(`Session "${sessionId}" is not connected.`);
     return null;
   }
+
+  return { resolveLabel, checkTargetSync };
+}
+
+/**
+ * @param {object} deps injected by mcpServerBridge (keeps this module testable)
+ */
+function createExecBulkHandler(deps) {
+  const {
+    getSessions,
+    pendingSessionWriteApprovals,
+    getActiveChatExecution,
+    beginChatExecution,
+    isChatSessionCancelled,
+    preflightMainExec,
+    preflightWorkerExec,
+    execOnSession,
+    requestApproval,
+    sessionIdleManager,
+    getCommandTimeoutMs,
+    getLivePermission,
+    cancelExecsForChat,
+    USER_DENIED_MESSAGE,
+    CHAT_SESSION_CANCELLED_MESSAGE,
+    debugLog = () => {},
+    setTimeoutFn = setTimeout,
+    clearTimeoutFn = clearTimeout,
+  } = deps;
+
+  const { resolveLabel, checkTargetSync } = createBulkTargetGuards(deps);
 
   /**
    * Transport + command-safety checks. With probe:false nothing may touch the remote host
@@ -572,9 +611,12 @@ module.exports = {
   MAX_TAIL_LINES,
   MIN_BULK_TARGETS,
   classifyHostResult,
+  createBulkTargetGuards,
   createExecBulkHandler,
   formatPreflightFailure,
   groupBulkResults,
+  labelPart,
   parseBulkExecParams,
+  splitGroupBudget,
   tailText,
 };

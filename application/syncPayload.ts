@@ -109,6 +109,7 @@ import {
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
   STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE,
+  STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR,
   STORAGE_KEY_SFTP_GLOBAL_BOOKMARKS,
   STORAGE_KEY_CUSTOM_THEMES,
   STORAGE_KEY_SHOW_RECENT_HOSTS,
@@ -149,6 +150,7 @@ import {
 import { mergeAiSessionLists, mergeSyncPayloads, stripAiSessionDeviceState, stripAiSessionPayloadForSync } from '../domain/syncMerge';
 import { isTerminalSidePanelAutoOpenTab } from '../domain/terminalSidePanelAutoOpen';
 import { normalizeAiToolOutputMaxChars } from '../domain/aiToolOutputLimit';
+import { isSftpTreeFolderDoubleClickBehavior } from '../domain/sftpTreeFolderDoubleClick';
 import { prepareRestoredPayloadConvergentWrites } from './convergentSyncReplica';
 
 // ---------------------------------------------------------------------------
@@ -345,6 +347,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
   STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE,
+  STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR,
   STORAGE_KEY_SFTP_GLOBAL_BOOKMARKS,
   STORAGE_KEY_SHOW_RECENT_HOSTS,
   STORAGE_KEY_HOST_CLICK_BEHAVIOR,
@@ -576,6 +579,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (followTerminalCwd === 'true' || followTerminalCwd === 'false') settings.sftpFollowTerminalCwd = followTerminalCwd === 'true';
   const defaultViewMode = localStorageAdapter.readString(STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE);
   if (defaultViewMode === 'list' || defaultViewMode === 'tree') settings.sftpDefaultViewMode = defaultViewMode;
+  const treeDblClick = localStorageAdapter.readString(STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR);
+  if (isSftpTreeFolderDoubleClickBehavior(treeDblClick)) settings.sftpTreeDoubleClickBehavior = treeDblClick;
 
   // SFTP Bookmarks (global only - local bookmarks are device-specific)
   const globalBookmarks = localStorageAdapter.read<SftpBookmark[]>(STORAGE_KEY_SFTP_GLOBAL_BOOKMARKS);
@@ -894,6 +899,12 @@ async function applySyncableSettings(
   if (settings.sftpFollowTerminalCwd != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD, String(settings.sftpFollowTerminalCwd));
   if (settings.sftpDefaultViewMode != null) {
     localStorageAdapter.writeString(STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE, settings.sftpDefaultViewMode);
+  }
+  if (isSftpTreeFolderDoubleClickBehavior(settings.sftpTreeDoubleClickBehavior)) {
+    localStorageAdapter.writeString(
+      STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR,
+      settings.sftpTreeDoubleClickBehavior,
+    );
   }
 
   // SFTP Bookmarks (global only)

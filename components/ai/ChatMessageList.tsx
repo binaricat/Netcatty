@@ -30,6 +30,8 @@ import {
   VaultArtifactNavigationProvider,
   type VaultArtifactNavSection,
 } from './toolArtifacts/VaultArtifactNavigationContext';
+import { parseRemoteDesktopToolArtifact } from './toolArtifacts/remoteDesktopToolArtifact';
+import { RemoteDesktopArtifactToolResult } from './toolArtifacts/RemoteDesktopArtifactToolResult';
 import { parseTerminalToolArtifact } from './toolArtifacts/terminalToolArtifact';
 import { TerminalArtifactToolResult } from './toolArtifacts/TerminalArtifactToolResult';
 import {
@@ -63,6 +65,7 @@ import {
 } from '../../infrastructure/ai/shared/codebuddyElicitations';
 import {
   buildGrantsFromApproval,
+  isFreshApprovalOnlyCapability,
   resolveCapabilityId,
 } from '../../infrastructure/ai/harness/permissionGrants';
 import {
@@ -278,6 +281,12 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
       return;
     }
     const capabilityId = request.capabilityId ?? resolveCapabilityId(request.toolName);
+    if (isFreshApprovalOnlyCapability(capabilityId)) {
+      resolveApproval(toolCallId, true);
+      setPendingApprovals(prev => { const m = new Map(prev); m.delete(toolCallId); return m; });
+      setResolvedApprovals(prev => new Map(prev).set(toolCallId, true));
+      return;
+    }
     const persistGrants = buildGrantsFromApproval(capabilityId, request.args, request.chatSessionId);
     resolveApproval(toolCallId, { approved: true, persistGrants });
     setPendingApprovals(prev => { const m = new Map(prev); m.delete(toolCallId); return m; });
@@ -536,6 +545,8 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
         : resolved === false
           ? "denied" as const
           : undefined;
+    const effectiveCapabilityId = pendingRequest?.capabilityId ?? resolveCapabilityId(toolCall.name);
+    const allowAlways = pendingRequest?.allowSession !== false && !isFreshApprovalOnlyCapability(effectiveCapabilityId);
     return [(
       <div key={toolCall.id} className="px-2 py-1.5">
         <ToolCall
@@ -546,12 +557,12 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
           approvalStatus={approvalStatus}
           approvalId={isPending ? toolCall.id : undefined}
           onApproveOnce={() => handleApproveOnce(toolCall.id)}
-          onAlwaysAllow={() => handleAlwaysAllow(toolCall.id, pendingRequest ?? {
+          onAlwaysAllow={allowAlways ? () => handleAlwaysAllow(toolCall.id, pendingRequest ?? {
             toolCallId: toolCall.id,
             toolName: toolCall.name,
             args: toolCall.arguments ?? {},
             chatSessionId: activeSessionId ?? undefined,
-          })}
+          }) : undefined}
           onReject={() => handleReject(toolCall.id)}
         />
       </div>
@@ -610,6 +621,25 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
 
             const renderToolResultItem = (item: typeof toolResults[number]) => {
               const artifactToolName = item.artifactToolName ?? item.name;
+              const remoteDesktopArtifact = parseRemoteDesktopToolArtifact(
+                artifactToolName,
+                item.content,
+                item.args,
+                item.isError,
+              );
+              if (remoteDesktopArtifact) {
+                return (
+                  <RemoteDesktopArtifactToolResult
+                    key={item.toolCallId}
+                    artifact={remoteDesktopArtifact}
+                    toolName={artifactToolName}
+                    args={item.args}
+                    result={item.content}
+                    isError={item.isError}
+                    onOpenImagePreview={openPreview}
+                  />
+                );
+              }
               const terminalArtifact = parseTerminalToolArtifact(artifactToolName, item.content);
               if (terminalArtifact) {
                 return (
@@ -898,7 +928,12 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                     approvalStatus={'pending'}
                     approvalId={id}
                     onApproveOnce={() => handleApproveOnce(id)}
-                    onAlwaysAllow={() => handleAlwaysAllow(id, req)}
+                    onAlwaysAllow={
+                      req.allowSession === false
+                      || isFreshApprovalOnlyCapability(req.capabilityId ?? resolveCapabilityId(req.toolName))
+                        ? undefined
+                        : () => handleAlwaysAllow(id, req)
+                    }
                     onReject={() => handleReject(id)}
                   />
                 </div>

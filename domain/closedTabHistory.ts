@@ -1,13 +1,16 @@
 import type {
   Host,
   PluginConnectionConfig,
+  RdpConfig,
   SerialConfig,
   TerminalSession,
+  VncConfig,
   Workspace,
   WorkspaceNode,
   WorkspaceViewMode,
 } from "./models";
 import { isPluginHostProtocol, sanitizePluginConnection } from "./pluginConnection";
+import { sanitizeRdpConfig, sanitizeVncConfig } from "./remoteDesktop";
 import { cloneWorkspaceTree, collectSessionIds } from "./workspace";
 
 export const DEFAULT_CLOSED_TAB_HISTORY_LIMIT = 20;
@@ -33,6 +36,9 @@ export interface ClosedTerminalSessionSnapshot {
   shellType?: TerminalSession["shellType"];
   charset?: string;
   serialConfig?: SerialConfig;
+  vncConfig?: VncConfig;
+  rdpConfig?: RdpConfig;
+  remoteDesktopCompanion?: boolean;
   localShell?: string;
   localShellArgs?: string[];
   localShellName?: string;
@@ -107,6 +113,8 @@ const sanitizeProtocol = (
     || value === "et"
     || value === "local"
     || value === "serial"
+    || value === "vnc"
+    || value === "rdp"
   ) {
     return value;
   }
@@ -172,6 +180,8 @@ export function createClosedSessionSnapshot(
   const protocol = sanitizeProtocol(session.protocol);
   const pluginConnection = sanitizePluginConnection(session.pluginConnection, protocol);
   const serialConfig = cloneSerialConfig(session.serialConfig);
+  const vncConfig = sanitizeVncConfig(session.vncConfig);
+  const rdpConfig = sanitizeRdpConfig(session.rdpConfig);
   const resolvedCwd = options?.lastCwd?.trim() || session.lastCwd?.trim() || undefined;
 
   return {
@@ -188,6 +198,9 @@ export function createClosedSessionSnapshot(
     ...(session.shellType ? { shellType: session.shellType } : {}),
     ...(session.charset ? { charset: session.charset } : {}),
     ...(serialConfig ? { serialConfig } : {}),
+    ...(vncConfig ? { vncConfig } : {}),
+    ...(rdpConfig ? { rdpConfig } : {}),
+    ...(session.remoteDesktopCompanion === true ? { remoteDesktopCompanion: true } : {}),
     ...(session.localShell !== undefined ? { localShell: session.localShell } : {}),
     ...(session.localShellArgs ? { localShellArgs: [...session.localShellArgs] } : {}),
     ...(session.localShellName !== undefined ? { localShellName: session.localShellName } : {}),
@@ -435,6 +448,9 @@ const materializeSessionSnapshot = (
     ...(snapshot.shellType ? { shellType: snapshot.shellType } : {}),
     ...(snapshot.charset ? { charset: snapshot.charset } : {}),
     ...(snapshot.serialConfig ? { serialConfig: cloneSerialConfig(snapshot.serialConfig) } : {}),
+    ...(snapshot.vncConfig ? { vncConfig: sanitizeVncConfig(snapshot.vncConfig) } : {}),
+    ...(snapshot.rdpConfig ? { rdpConfig: sanitizeRdpConfig(snapshot.rdpConfig) } : {}),
+    ...(snapshot.remoteDesktopCompanion === true ? { remoteDesktopCompanion: true } : {}),
     ...(snapshot.localShell !== undefined ? { localShell: snapshot.localShell } : {}),
     ...(snapshot.localShellArgs ? { localShellArgs: [...snapshot.localShellArgs] } : {}),
     ...(snapshot.localShellName !== undefined ? { localShellName: snapshot.localShellName } : {}),

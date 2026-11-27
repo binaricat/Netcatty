@@ -2,6 +2,33 @@ import type { MonitorPanel } from "./monitorPanels";
 export type MonitorStats = NonNullable<
   Awaited<ReturnType<NonNullable<NetcattyBridge["getServerStats"]>>>["stats"]
 > & { networkReady?: boolean };
+
+export type MonitorRemoteDesktopProtocol = "rdp" | "vnc";
+
+export type MonitorRemoteDesktopProbeOptions = {
+  protocol: MonitorRemoteDesktopProtocol;
+  hostname: string;
+  port: number;
+  proxy?: NetcattySSHOptions["proxy"];
+  jumpHosts?: NetcattyJumpHost[];
+  tunnelViaHostSsh?: boolean;
+  tunnelTargetHost?: string;
+  bannerCheck?: boolean;
+  timeoutMs?: number;
+};
+
+export type MonitorRemoteDesktopProbeResult = {
+  protocol: MonitorRemoteDesktopProtocol;
+  port: number;
+  reachable: boolean;
+  rttMs: number | null;
+  bannerVerified: boolean;
+  bannerDetail?: string;
+  error?: string;
+  checkedAt: number;
+  tunnelViaHostSsh?: boolean;
+};
+
 export type MonitorPoint = {
   at: number;
   cpu: number | null;
@@ -9,13 +36,16 @@ export type MonitorPoint = {
   disk: number | null;
   rx: number | null;
   tx: number | null;
+  latencyMs?: number | null;
 };
 export type MonitorHostState = {
   historyId: string;
+  mode?: "ssh" | "probe";
   status:
     | "queued"
     | "connecting"
     | "live"
+    | "offline"
     | "login"
     | "error"
     | "unsupported"
@@ -26,6 +56,10 @@ export type MonitorHostState = {
   statsAt?: number;
   /** Omitted by incremental replies when the receiver already has this sample. */
   stats?: MonitorStats | null;
+  /** Latest probe reading for standalone RDP/VNC hosts. */
+  probe?: MonitorRemoteDesktopProbeResult | null;
+  /** Latest companion RDP/VNC reachability probes attached to an SSH host. */
+  companionProbes?: Partial<Record<MonitorRemoteDesktopProtocol, MonitorRemoteDesktopProbeResult>>;
   points: MonitorPoint[];
 };
 export type MonitorSnapshot = {
@@ -69,8 +103,19 @@ export function mergeMonitorSnapshotHistory(previous: MonitorSnapshot, next: Mon
       const points = added.length || (retained[0] && next.takenAt - retained[0].at > 30 * 60000)
         ? [...retained, ...added].filter((point) => next.takenAt - point.at <= 30 * 60000).slice(-1800)
         : retained;
-      return [id, { ...host, stats: host.stats === undefined ? previous.hosts[id]?.stats : host.stats,
-        points }];
+      const prevHost = previous.hosts[id];
+      return [id, {
+        ...host,
+        ...(host.mode ?? prevHost?.mode ? { mode: host.mode ?? prevHost?.mode } : {}),
+        stats: host.stats === undefined ? prevHost?.stats : host.stats,
+        ...(host.probe !== undefined || prevHost?.probe !== undefined
+          ? { probe: host.probe === undefined ? prevHost?.probe : host.probe }
+          : {}),
+        ...(host.companionProbes !== undefined || prevHost?.companionProbes !== undefined
+          ? { companionProbes: host.companionProbes === undefined ? prevHost?.companionProbes : host.companionProbes }
+          : {}),
+        points,
+      }];
     })),
   };
 }
@@ -101,7 +146,9 @@ export function monitorStateSince(state: MonitorHostState | undefined, startedAt
     ...state,
     at: fresh ? state.at : 0,
     stats: fresh ? state.stats : null,
-    status: !fresh && state.status === "live" ? "queued" : state.status,
+    ...(state.probe !== undefined ? { probe: fresh ? state.probe : null } : {}),
+    ...(state.companionProbes !== undefined ? { companionProbes: fresh ? state.companionProbes : undefined } : {}),
+    status: !fresh && (state.status === "live" || state.status === "offline") ? "queued" : state.status,
     points: pointsSince(state.points, startedAt),
   };
 }
@@ -111,7 +158,10 @@ export type MonitorPanelDemand = {
   interval: MonitorPanel["interval"];
   hosts: {
     id: string;
+    kind?: "ssh" | "probe";
     options?: NetcattySSHOptions;
+    probe?: MonitorRemoteDesktopProbeOptions;
+    companionProbes?: MonitorRemoteDesktopProbeOptions[];
     status?: "login" | "error";
   }[];
 };

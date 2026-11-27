@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   Plug,
 } from "lucide-react";
+import { RdpFileBadgeIcon } from "../icons/RemoteDesktopIcons";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import type { VaultImportFileEncoding } from "../../application/state/vaultImportFile";
 import type { VaultImportOptions } from "../../application/state/vaultImportOptions";
@@ -41,7 +42,7 @@ import {
 type ImportOption = {
   format: VaultImportFormat;
   label: string;
-  iconSrc: string;
+  iconSrc?: string;
   accept: string;
 };
 
@@ -63,6 +64,11 @@ const OPTIONS: ImportOption[] = [
     label: "CSV",
     iconSrc: "/import/csv.png",
     accept: ".csv,.txt",
+  },
+  {
+    format: "rdp",
+    label: "RDP (.rdp)",
+    accept: ".rdp",
   },
   {
     format: "securecrt",
@@ -1017,21 +1023,31 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                         onClick={() => handleFormatClick(opt)}
                       >
                         <div className="h-16 flex items-center justify-center">
-                          <img
-                            src={opt.iconSrc}
-                            alt=""
-                            className={cn(
-                              "max-h-12 w-14 object-contain",
-                              opt.format === "mobaxterm" && "w-16",
-                            )}
-                          />
+                          {opt.format === "rdp" ? (
+                            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-500/8 ring-1 ring-blue-500/15 transition-transform duration-150 group-hover:scale-105">
+                              <RdpFileBadgeIcon size={44} />
+                            </div>
+                          ) : (
+                            <img
+                              src={opt.iconSrc}
+                              alt=""
+                              className={cn(
+                                "max-h-12 w-14 object-contain",
+                                opt.format === "mobaxterm" && "w-16",
+                              )}
+                            />
+                          )}
                         </div>
                         <div className="text-sm font-medium text-foreground">
-                          {opt.label}
+                          {opt.format === "rdp" ? t("vault.import.rdp.label") : opt.label}
                         </div>
                       </button>
                     ))}
                   </div>
+
+                  <p className="text-center text-xs text-muted-foreground">
+                    {t("vault.import.remoteDesktopTip")}
+                  </p>
 
                   {pluginImporter.pluginProviders.length > 0 && (
                     <>

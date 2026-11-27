@@ -1,5 +1,5 @@
 import React, { type Dispatch, type SetStateAction } from 'react';
-import { History, Plus, Undo2 } from 'lucide-react';
+import { History, Plus, Undo2, X } from 'lucide-react';
 import type { AIPermissionMode, AISession, ChatMessage, DiscoveredAgent, ExternalAgentConfig, AgentModelPreset, ProviderConfig, UploadedFile } from '../infrastructure/ai/types';
 import type { Host, VaultNote } from '../types';
 import type { UserSkillOption } from './ai/userSkillsState';
@@ -26,6 +26,7 @@ type TerminalSessionSummary = {
   hostname: string;
   label: string;
   connected: boolean;
+  protocol?: string;
 };
 
 interface AIChatPanelContentProps {
@@ -56,6 +57,7 @@ interface AIChatPanelContentProps {
   inputValue: string;
   setInputValue: (value: string) => void;
   handleSend: (textOverride?: string) => void;
+  handleSendQuickPrompt?: (promptText: string) => void;
   handleCompact: () => void;
   /** Rename a chat by id (history drawer edit affordance). Panel action, never agent content. */
   onRenameSession?: (sessionId: string, title: string) => void;
@@ -87,6 +89,8 @@ interface AIChatPanelContentProps {
   providerDisplayName?: string;
   modelDisplayName?: string;
   modelCatalogWarning?: string;
+  /** Whether the composer warning banner itself was dismissed (picker still sees raw warning). */
+  modelCatalogWarningDismissed?: boolean;
   /** Live SDK model catalog is loading (no built-in presets to show yet). */
   modelCatalogLoading?: boolean;
   /** Provenance of the active model list, rendered as the picker status chip. */
@@ -95,6 +99,8 @@ interface AIChatPanelContentProps {
   modelCatalogFetchedAt?: string;
   /** Retry a failed SDK model catalog load from the warning banner. */
   handleModelCatalogRetry?: () => void;
+  /** Dismiss the warning banner for this agent config until a clean catalog re-arms it. */
+  handleModelCatalogDismiss?: () => void;
   handleModelPickerOpen?: () => void;
   agentModelPresets: AgentModelPreset[];
   /** Suppress the composer picker's "use custom model" action (locked model). */
@@ -158,6 +164,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   inputValue,
   setInputValue,
   handleSend,
+  handleSendQuickPrompt,
   handleCompact,
   onRenameSession,
   onRenameActiveChat,
@@ -174,6 +181,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   handleSteer,
   handleStop,
   handleModelCatalogRetry,
+  handleModelCatalogDismiss,
   handleModelPickerOpen,
   canSteer,
   isSteering,
@@ -183,6 +191,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   providerDisplayName,
   modelDisplayName,
   modelCatalogWarning,
+  modelCatalogWarningDismissed = false,
   modelCatalogLoading = false,
   modelCatalogSource,
   modelCatalogFetchedAt,
@@ -223,6 +232,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
       hostname: session.hostname,
       label: session.label,
       connected: session.connected,
+      protocol: session.protocol,
     })),
     [terminalSessions],
   );
@@ -421,7 +431,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   <div role="status" className="mx-3 mb-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-4 text-amber-600 dark:text-amber-400">
                     {steerWarning}
                   </div>
-                ) : modelCatalogWarning ? (
+                ) : modelCatalogWarning && !modelCatalogWarningDismissed ? (
                   <div role="status" className="mx-3 mb-1.5 flex items-center gap-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-4 text-amber-600 dark:text-amber-400">
                     <span className="min-w-0 flex-1">{modelCatalogWarning}</span>
                     {handleModelCatalogRetry && (
@@ -430,6 +440,17 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                         className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-amber-600 underline-offset-2 transition-colors hover:bg-amber-500/10 hover:text-amber-500 hover:underline cursor-pointer dark:text-amber-400 dark:hover:text-amber-300"
                       >
                         {t('ai.chat.modelCatalogRetry')}
+                      </button>
+                    )}
+                    {handleModelCatalogDismiss && (
+                      <button
+                        type="button"
+                        aria-label={t('common.close')}
+                        title={t('common.close')}
+                        onClick={handleModelCatalogDismiss}
+                        className="shrink-0 rounded p-0.5 text-amber-600/70 transition-colors hover:bg-amber-500/10 hover:text-amber-600 cursor-pointer dark:text-amber-400/70 dark:hover:text-amber-300"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
                     )}
                   </div>
@@ -443,6 +464,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   value={inputValue}
                   onChange={setInputValue}
                   onSend={handleSend}
+                  onSendQuickPrompt={handleSendQuickPrompt}
                   onCompact={handleCompact}
                   onRenameSession={onRenameActiveChat}
                   onListChats={onListChats}

@@ -1,12 +1,166 @@
 import React, { useState } from "react";
 import { createPortal } from "react-dom";
+import { CheckCircle2, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import type { Host, SSHKey } from "../../types";
+import type { RemoteDesktopProbeResult } from "../../domain/hostConnectionTest";
+import { formatHostPort } from "../../domain/host";
+import { cn } from "../../lib/utils";
+import { RdpProtocolIcon, VncProtocolIcon } from "../icons/RemoteDesktopIcons";
+import { getProtocolBadgeClass } from "../protocolVisuals";
+import { trustKnownRemoteDesktopCert } from "../remoteDesktop/knownRemoteDesktopCerts";
+import { Button } from "../ui/button";
 import { TerminalConnectionDialog } from "../terminal/TerminalConnectionDialog";
 import type { TerminalAuthMethod } from "../terminal/TerminalAuthDialog";
 import type { useHostConnectionTest } from "../../application/state/useHostConnectionTest";
 
 type HostConnectionTest = ReturnType<typeof useHostConnectionTest>;
+
+const RDP_SECURITY_LABELS: Record<NonNullable<RemoteDesktopProbeResult["rdpSecurity"]>, string> = {
+  nla: "NLA / CredSSP",
+  "nla-ext": "NLA / CredSSP Extended",
+  tls: "TLS",
+  rdstls: "RDSTLS",
+  rdp: "Standard RDP",
+};
+
+const RemoteDesktopProbeSummaryCard: React.FC<{
+  probe: RemoteDesktopProbeResult;
+  certHost: string;
+  onTrusted: () => void;
+}> = ({ probe, certHost, onTrusted }) => {
+  const isRdp = probe.protocol === "rdp";
+  const cert = probe.cert;
+
+  const handleTrust = () => {
+    if (!cert) return;
+    const info = {
+      fingerprintSha256: cert.fingerprintSha256,
+      ...(cert.subject ? { subject: cert.subject } : {}),
+      ...(cert.issuer ? { issuer: cert.issuer } : {}),
+      ...(cert.validFrom ? { validFrom: cert.validFrom } : {}),
+      ...(cert.validTo ? { validTo: cert.validTo } : {}),
+    } as Parameters<typeof trustKnownRemoteDesktopCert>[3];
+    trustKnownRemoteDesktopCert(probe.protocol, certHost, probe.port, info);
+    onTrusted();
+  };
+
+  return (
+    <div
+      data-testid="remote-desktop-probe-summary"
+      className="rounded-lg border border-border/50 bg-background/50 p-3 space-y-2.5 text-xs"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+              getProtocolBadgeClass(probe.protocol),
+            )}
+          >
+            {isRdp ? <RdpProtocolIcon size={11} /> : <VncProtocolIcon size={11} />}
+            {probe.protocol.toUpperCase()}
+          </span>
+          <span className="font-mono text-[11px] text-muted-foreground truncate">
+            {formatHostPort(probe.host, probe.port)}
+          </span>
+        </div>
+        {probe.rttMs != null && (
+          <span
+            data-testid="remote-desktop-probe-rtt"
+            className="shrink-0 rounded-md bg-emerald-500/15 px-2 py-0.5 font-mono text-[11px] font-medium text-emerald-600 dark:text-emerald-400 tabular-nums"
+          >
+            {probe.rttMs} ms
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-1.5 text-[11px]">
+        {isRdp && probe.rdpSecurity && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">Security</span>
+            <span className="font-medium text-foreground">
+              {RDP_SECURITY_LABELS[probe.rdpSecurity] ?? probe.rdpSecurity}
+            </span>
+          </div>
+        )}
+        {!isRdp && probe.rfbVersion && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">RFB Banner</span>
+            <span className="font-mono font-medium text-foreground">{probe.rfbVersion}</span>
+          </div>
+        )}
+        {!isRdp && probe.vncSecurityTypes && probe.vncSecurityTypes.length > 0 && (
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-muted-foreground shrink-0">Security Types</span>
+            <div className="flex flex-wrap justify-end gap-1">
+              {probe.vncSecurityTypes.map((sec) => (
+                <span
+                  key={`${sec.id}-${sec.name}`}
+                  className="rounded border border-border/60 bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-foreground"
+                >
+                  {sec.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {(probe.tlsVersion || probe.tlsCipher) && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">TLS</span>
+            <span className="font-mono text-[10px] text-foreground truncate">
+              {[probe.tlsVersion, probe.tlsCipher].filter(Boolean).join(" · ")}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {cert && (
+        <div className="rounded-md border border-border/50 bg-muted/30 p-2 space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-medium text-muted-foreground">SHA-256 Certificate</span>
+            {cert.trustStatus === "trusted" ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                <ShieldCheck size={12} /> Trusted
+              </span>
+            ) : cert.trustStatus === "changed" ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-destructive">
+                <ShieldAlert size={12} /> Changed
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                <ShieldQuestion size={12} /> First Seen
+              </span>
+            )}
+          </div>
+          <div className="font-mono text-[10px] leading-4 text-foreground break-all select-all">
+            {cert.fingerprintSha256}
+          </div>
+          {(cert.subject || cert.issuer) && (
+            <div className="text-[10px] text-muted-foreground truncate">
+              {cert.subject || cert.issuer}
+            </div>
+          )}
+          {(cert.trustStatus === "first-seen" || cert.trustStatus === "changed") && (
+            <div className="pt-1 flex justify-end">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-6 px-2.5 text-[10px] gap-1"
+                data-testid="remote-desktop-trust-fingerprint"
+                onClick={handleTrust}
+              >
+                <CheckCircle2 size={11} />
+                Trust Fingerprint
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export interface HostConnectionTestDialogProps {
   open: boolean;
@@ -100,6 +254,16 @@ export const HostConnectionTestDialog: React.FC<HostConnectionTestDialogProps> =
         showLogs={showLogs}
         _setShowLogs={setShowLogs}
         keys={keys}
+        protocolOverride={state.activeProtocol !== "ssh" ? state.activeProtocol : undefined}
+        summaryContent={
+          state.probeResult && state.probeResult.ok ? (
+            <RemoteDesktopProbeSummaryCard
+              probe={state.probeResult}
+              certHost={host.hostname || state.probeResult.host}
+              onTrusted={test.markProbeCertTrusted}
+            />
+          ) : undefined
+        }
         authProps={{
           authMethod,
           setAuthMethod,

@@ -1,10 +1,11 @@
 "use strict";
 
 const path = require("node:path");
-const { createHash } = require("node:crypto");
+const fs = require("node:fs/promises");
+const { createHash, randomUUID } = require("node:crypto");
 
 const { readContainedFile } = require("./pluginProtocol.cjs");
-const { createIsolatedContributionIconRasterizer } = require("./contributionIconRasterizer.cjs");
+const { createPooledContributionIconRasterizer } = require("./contributionIconRasterizer.cjs");
 
 const MAX_ICON_SOURCE_BYTES = 512 * 1024;
 const MAX_ICON_PNG_BYTES = 512 * 1024;
@@ -182,15 +183,62 @@ class PluginContributionIconService {
   constructor(options) {
     this.database = options.database;
     this.packageStore = options.packageStore;
-    const rasterizeIcon = options.rasterizeIcon ?? createIsolatedContributionIconRasterizer({
-      BrowserWindow: options.BrowserWindow,
-    });
-    this.rasterizeIcon = createBoundedIconRasterizer(rasterizeIcon, {
+    this.ownsRasterizer = typeof options.rasterizeIcon !== "function";
+    this.pooledRasterizer = this.ownsRasterizer
+      ? createPooledContributionIconRasterizer({ BrowserWindow: options.BrowserWindow })
+      : options.rasterizeIcon;
+    this.rasterizeIcon = createBoundedIconRasterizer(this.pooledRasterizer, {
       maxConcurrent: options.maxConcurrentRasterizations,
       maxQueued: options.maxQueuedRasterizations,
     });
+    this.cacheDir = typeof options.cacheDir === "string" && options.cacheDir.length > 0 ? options.cacheDir : null;
+    this.cacheDirReady = null;
     this.cache = new Map();
     this.pending = new Map();
+  }
+
+  dispose() {
+    if (this.ownsRasterizer) this.pooledRasterizer?.dispose?.();
+    this.cache.clear();
+    this.pending.clear();
+  }
+
+  #diskCachePath(plugin, packagePath, brand) {
+    if (!this.cacheDir || !plugin?.id || !plugin?.activeVersion || !plugin?.archiveSha256) return null;
+    const digest = createHash("sha256")
+      .update(JSON.stringify(["contrib-v1", brand ? "brand" : "contrib", plugin.id, plugin.activeVersion, plugin.archiveSha256, packagePath, MAX_ICON_EDGE]))
+      .digest("hex");
+    return path.join(this.cacheDir, `${digest}.png`);
+  }
+
+  async #readDiskCachedIcon(plugin, packagePath, brand) {
+    const filePath = this.#diskCachePath(plugin, packagePath, brand);
+    if (!filePath) return null;
+    try {
+      const png = await fs.readFile(filePath);
+      if (!png.length || png.length > MAX_ICON_PNG_BYTES) return null;
+      inspectContributionIconSource(png, ".png", MAX_ICON_EDGE);
+      return `data:image/png;base64,${png.toString("base64")}`;
+    } catch {
+      return null;
+    }
+  }
+
+  async #writeDiskCachedIcon(plugin, packagePath, brand, png) {
+    const filePath = this.#diskCachePath(plugin, packagePath, brand);
+    if (!filePath) return;
+    try {
+      this.cacheDirReady ??= fs.mkdir(this.cacheDir, { recursive: true, mode: 0o700 });
+      await this.cacheDirReady;
+      const tempPath = path.join(this.cacheDir, `.tmp-${randomUUID()}.png`);
+      try {
+        await fs.writeFile(tempPath, png, { mode: 0o600 });
+        await fs.rename(tempPath, filePath);
+      } catch (error) {
+        await fs.unlink(tempPath).catch(() => {});
+        throw error;
+      }
+    } catch { /* best-effort disk cache */ }
   }
 
   async resolve(payload) {
@@ -245,10 +293,11 @@ class PluginContributionIconService {
   }
 
   async #resolveUncached({ pluginId, plugin, icon, cacheKey }) {
-    const packageRoot = await this.packageStore.preparePackageRoot(plugin);
+    const useSingleFileVerify = typeof this.packageStore.readVerifiedPackageFile === "function";
+    const packageRoot = useSingleFileVerify ? null : await this.packageStore.preparePackageRoot(plugin);
     const result = Object.freeze({
-      light: await this.#readIcon(packageRoot, icon.light),
-      ...(icon.dark ? { dark: await this.#readIcon(packageRoot, icon.dark) } : {}),
+      light: await this.#readIcon(plugin, packageRoot, icon.light),
+      ...(icon.dark ? { dark: await this.#readIcon(plugin, packageRoot, icon.dark) } : {}),
     });
     const current = this.database.getActivePlugin(pluginId);
     if (!current?.enabled || current.runtime?.quarantinedAt != null
@@ -274,9 +323,10 @@ class PluginContributionIconService {
     if (this.cache.has(key)) return this.cache.get(key);
     if (this.pending.has(key)) return this.pending.get(key);
     const pending = (async () => {
-      const root = await this.packageStore.preparePackageRoot(plugin);
-      const result = { light: await this.#readIcon(root, icon.light, true),
-        ...(icon.dark ? { dark: await this.#readIcon(root, icon.dark, true) } : {}) };
+      const useSingleFileVerify = typeof this.packageStore.readVerifiedPackageFile === "function";
+      const root = useSingleFileVerify ? null : await this.packageStore.preparePackageRoot(plugin);
+      const result = { light: await this.#readIcon(plugin, root, icon.light, true),
+        ...(icon.dark ? { dark: await this.#readIcon(plugin, root, icon.dark, true) } : {}) };
       const current = this.database.getActivePlugin(pluginId);
       if (!current || current.runtime?.quarantinedAt != null || identity !== JSON.stringify([current.activeVersion, current.archiveSha256, current.manifest?.icon])) {
         throw new Error("Plugin brand icon ownership changed while loading");
@@ -289,9 +339,13 @@ class PluginContributionIconService {
     return pending;
   }
 
-  async #readIcon(packageRoot, packagePath, brand = false) {
+  async #readIcon(plugin, packageRoot, packagePath, brand = false) {
+    const diskHit = await this.#readDiskCachedIcon(plugin, packagePath, brand);
+    if (diskHit) return diskHit;
     const segments = packagePath.split("/");
-    const file = await readContainedFile(packageRoot, segments);
+    const file = typeof this.packageStore.readVerifiedPackageFile === "function"
+      ? await this.packageStore.readVerifiedPackageFile(plugin, segments, MAX_ICON_SOURCE_BYTES)
+      : await readContainedFile(packageRoot, segments);
     if (file.body.byteLength > MAX_ICON_SOURCE_BYTES) throw new Error("Plugin contribution icon is too large");
     const extension = path.extname(file.filePath).toLowerCase();
     const inspected = brand
@@ -304,6 +358,7 @@ class PluginContributionIconService {
     });
     if (!png.length || png.length > MAX_ICON_PNG_BYTES) throw new Error("Plugin contribution icon output is too large");
     inspectContributionIconSource(png, ".png", MAX_ICON_EDGE);
+    void this.#writeDiskCachedIcon(plugin, packagePath, brand, png);
     return `data:image/png;base64,${png.toString("base64")}`;
   }
 }

@@ -171,7 +171,7 @@ test('buildVaultHostFromDraft rejects an unsupported protocol instead of using S
 
   assert.equal(built.ok, false);
   if (built.ok) return;
-  assert.match(built.error, /ssh, telnet, or local/i);
+  assert.match(built.error, /ssh, telnet, local, rdp, or vnc/i);
 });
 
 test('buildVaultHostFromDraft rejects hostnames containing internal whitespace', () => {
@@ -2005,4 +2005,64 @@ test('new SSH hosts explicitly use standard interactive input', () => {
   const created = buildVaultHostFromDraft({ hostname: 'localhost', username: 'user' });
   assert.equal(created.ok, true);
   if (created.ok) assert.equal(created.host.sshInputCompatibility, false);
+});
+
+test('buildVaultHostFromDraft creates standalone RDP and VNC hosts with proper defaults and allows SSH jump chains', () => {
+  const rdpBuilt = buildVaultHostFromDraft({
+    hostname: '10.0.0.50',
+    protocol: 'rdp',
+    password: 'secret',
+  });
+  assert.equal(rdpBuilt.ok, true);
+  if (!rdpBuilt.ok) return;
+  assert.equal(rdpBuilt.host.protocol, 'rdp');
+  assert.equal(rdpBuilt.host.port, 3389);
+  assert.equal(rdpBuilt.host.os, 'windows');
+  assert.equal(rdpBuilt.host.username, '');
+  assert.deepEqual(rdpBuilt.host.tags, []);
+  assert.equal(rdpBuilt.host.authMethod, 'password');
+
+  const vncBuilt = buildVaultHostFromDraft({
+    hostname: '10.0.0.51',
+    protocol: 'vnc',
+    password: 'vnc-secret',
+  });
+  assert.equal(vncBuilt.ok, true);
+  if (!vncBuilt.ok) return;
+  assert.equal(vncBuilt.host.protocol, 'vnc');
+  assert.equal(vncBuilt.host.port, 5900);
+  assert.equal(vncBuilt.host.username, '');
+  assert.equal(vncBuilt.host.authMethod, 'password');
+
+  const jumpHost: Host = {
+    id: 'jump-1',
+    label: 'Bastion',
+    hostname: 'bastion.example.com',
+    port: 22,
+    username: 'ops',
+    protocol: 'ssh',
+    tags: [],
+    os: 'linux',
+  };
+
+  // RDP host can use an SSH jump host in hostChain
+  const rdpWithJump = applyVaultHostUpdate(
+    [jumpHost, rdpBuilt.host],
+    [],
+    rdpBuilt.host.id,
+    { jumpHostIds: [jumpHost.id] },
+  );
+  assert.equal(rdpWithJump.ok, true);
+  if (rdpWithJump.ok) {
+    assert.deepEqual(rdpWithJump.updatedHost.hostChain, { hostIds: [jumpHost.id] });
+  }
+
+  // RDP/VNC hosts cannot serve as jump hosts themselves
+  const sshUsingRdpJump = applyVaultHostUpdate(
+    [jumpHost, rdpBuilt.host],
+    [],
+    jumpHost.id,
+    { jumpHostIds: [rdpBuilt.host.id] },
+  );
+  assert.equal(sshUsingRdpJump.ok, false);
 });

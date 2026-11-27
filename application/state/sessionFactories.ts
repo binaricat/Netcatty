@@ -1,4 +1,12 @@
 import type { Host, SerialConfig, TerminalSession } from "../../domain/models";
+import {
+  DEFAULT_RDP_PORT,
+  DEFAULT_VNC_PORT,
+  isRemoteDesktopProtocol,
+  sanitizeRdpConfig,
+  sanitizeVncConfig,
+  type RemoteDesktopProtocol,
+} from "../../domain/remoteDesktop";
 import { classifyLocalShellType } from "../../lib/localShell";
 
 export interface LocalTerminalOptions {
@@ -121,6 +129,30 @@ export const createHostTerminalSession = (
     };
   }
 
+  if (isRemoteDesktopProtocol(host.protocol)) {
+    const protocol = host.protocol;
+    const sanitizedRdp = protocol === "rdp" ? sanitizeRdpConfig(host.rdpConfig) : undefined;
+    const sanitizedVnc = protocol === "vnc" ? sanitizeVncConfig(host.vncConfig) : undefined;
+    const defaultPort = protocol === "rdp" ? DEFAULT_RDP_PORT : DEFAULT_VNC_PORT;
+    const resolvedPort =
+      (protocol === "rdp" ? sanitizedRdp?.port : sanitizedVnc?.port)
+      ?? host.port
+      ?? defaultPort;
+    return {
+      id: sessionId,
+      hostId: host.id,
+      hostLabel: host.label || host.hostname,
+      hostname: host.hostname,
+      username: host.username ?? "",
+      status: "connecting",
+      protocol,
+      port: resolvedPort,
+      ...(sanitizedRdp ? { rdpConfig: sanitizedRdp } : {}),
+      ...(sanitizedVnc ? { vncConfig: sanitizedVnc } : {}),
+      ...(host.ephemeral ? { ephemeralHost: true } : {}),
+    };
+  }
+
   return {
     id: sessionId,
     hostId: host.id,
@@ -162,6 +194,39 @@ export const createHostTerminalSession = (
     } : {}),
     ...(host.ephemeral ? { ephemeralHost: true } : {}),
     ...(host.autoOpenSftpPanel ? { autoOpenSidePanel: "sftp" as const } : {}),
+  };
+};
+
+export const createRemoteDesktopSession = (
+  sessionId: string,
+  host: Host,
+  protocol: RemoteDesktopProtocol,
+  options?: { workspaceId?: string },
+): TerminalSession => {
+  const isCompanion = host.protocol !== protocol;
+  const sanitizedRdp = protocol === "rdp" ? sanitizeRdpConfig(host.rdpConfig) : undefined;
+  const sanitizedVnc = protocol === "vnc" ? sanitizeVncConfig(host.vncConfig) : undefined;
+  const defaultPort = protocol === "rdp" ? DEFAULT_RDP_PORT : DEFAULT_VNC_PORT;
+  const resolvedPort = isCompanion
+    ? ((protocol === "rdp" ? sanitizedRdp?.port : sanitizedVnc?.port) ?? defaultPort)
+    : ((protocol === "rdp" ? sanitizedRdp?.port : sanitizedVnc?.port) ?? host.port ?? defaultPort);
+  const baseLabel = host.label || host.hostname;
+  const hostLabel = isCompanion ? `${baseLabel} (${protocol.toUpperCase()})` : baseLabel;
+
+  return {
+    id: sessionId,
+    hostId: host.id,
+    hostLabel,
+    hostname: host.hostname,
+    username: (protocol === "rdp" ? sanitizedRdp?.username : sanitizedVnc?.username) ?? host.username ?? "",
+    status: "connecting",
+    protocol,
+    port: resolvedPort,
+    ...(sanitizedRdp ? { rdpConfig: sanitizedRdp } : {}),
+    ...(sanitizedVnc ? { vncConfig: sanitizedVnc } : {}),
+    ...(isCompanion ? { remoteDesktopCompanion: true } : {}),
+    ...(host.ephemeral ? { ephemeralHost: true } : {}),
+    ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {}),
   };
 };
 

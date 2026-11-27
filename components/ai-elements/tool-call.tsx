@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { HTMLAttributes } from 'react';
 import { cn } from '../../lib/utils';
-import { Check, ChevronDown, ChevronRight, CheckCircle2, Copy, Loader2, ShieldAlert, X, XCircle, Slash } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CheckCircle2, Copy, Loader2, Monitor, MousePointerClick, ShieldAlert, X, XCircle, Slash } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cancelApprovalTimeout } from '../../infrastructure/ai/shared/approvalGate';
+import { extractRemoteDesktopPendingLabel } from '../ai/toolArtifacts/remoteDesktopToolArtifact';
 
 export const MAX_TOOL_COMMAND_TOOLTIP_CHARS = 240;
 /** Collapsed approval command block max height (px). Full text remains scrollable. */
@@ -466,6 +467,7 @@ export const ToolCall = ({
   ) : null;
 
   const headerCommand = reviewCommand ?? liveDisplayCommand;
+  const remoteDesktopPending = !headerCommand ? extractRemoteDesktopPendingLabel(name, args) : null;
 
   return (
     <div
@@ -504,6 +506,13 @@ export const ToolCall = ({
               {truncateToolCommandTooltip(headerCommand)}
             </TooltipContent>
           </Tooltip>
+        ) : remoteDesktopPending ? (
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-foreground/80 truncate">
+            {remoteDesktopPending.kind === 'screen'
+              ? <Monitor size={12} className="shrink-0 text-sky-400" />
+              : <MousePointerClick size={12} className="shrink-0 text-violet-400" />}
+            <span className="truncate font-medium">{remoteDesktopPending.label}</span>
+          </span>
         ) : (
           <span className="font-mono text-muted-foreground/70 truncate">{name}</span>
         )}

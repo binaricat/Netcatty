@@ -12,8 +12,18 @@ import {
 } from '../application/state/resolveTerminalSessionExitIntent';
 import { upsertKnownHost } from '../domain/knownHosts';
 import { isPluginHostProtocol, sanitizePluginConnection } from '../domain/pluginConnection';
+import {
+  isRemoteDesktopProtocol,
+  sanitizeRdpConfig,
+  sanitizeVncConfig,
+  type RemoteDesktopProtocol,
+} from '../domain/remoteDesktop';
 import type { ResolveDefaultLocalShellContext } from '../domain/localShellHost';
-import { resolveTerminalChainHosts, resolveTerminalSessionHost } from '../domain/terminalHostResolution';
+import {
+  resolveEffectiveTerminalHost,
+  resolveTerminalChainHosts,
+  resolveTerminalSessionHost,
+} from '../domain/terminalHostResolution';
 import type { TerminalPopupPayload } from '../domain/systemManager/types';
 import type { GroupConfig, Host, ProxyProfile, TerminalTheme } from '../domain/models';
 import type { KnownHost } from '../types';
@@ -25,6 +35,7 @@ import type { AppLockGateRenderContext } from './AppLockGate';
 import { PluginAuthenticationHost } from './plugins/PluginAuthenticationHost';
 
 const Terminal = lazy(() => import('./Terminal'));
+const LazyRemoteDesktopPane = lazy(() => import('./remoteDesktop/RemoteDesktopPane'));
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 const POPUP_STARTUP_REVEAL_EXTRA_DELAY_MS = 900;
@@ -193,6 +204,7 @@ function resolveHostProtocolFromSourceSession(
   if (
     source.protocol === 'local' ||
     source.protocol === 'telnet' ||
+    isRemoteDesktopProtocol(source.protocol) ||
     isPluginHostProtocol(source.protocol) ||
     (attachExistingSession && source.protocol === 'serial')
   ) {
@@ -206,26 +218,75 @@ function applySourceSessionConnectionOverrides(
   source: TerminalPopupPayload['sourceSession'],
   attachExistingSession: boolean,
 ): Host {
+  // Companion RDP/VNC sessions tunnel over the underlying SSH host; preserve
+  // the host's primary protocol, SSH port, and SSH credentials while merging
+  // sanitized companion desktop config from the source session.
+  if (source.remoteDesktopCompanion === true && isRemoteDesktopProtocol(source.protocol)) {
+    const companionProtocol = source.protocol;
+    const mergedRdp = companionProtocol === 'rdp'
+      ? sanitizeRdpConfig({
+          ...(host.rdpConfig ?? {}),
+          ...(source.rdpConfig ?? {}),
+          ...(source.port ? { port: source.port } : {}),
+        })
+      : undefined;
+    const mergedVnc = companionProtocol === 'vnc'
+      ? sanitizeVncConfig({
+          ...(host.vncConfig ?? {}),
+          ...(source.vncConfig ?? {}),
+          ...(source.port ? { port: source.port } : {}),
+        })
+      : undefined;
+    const baseProtocol = isRemoteDesktopProtocol(host.protocol) ? 'ssh' : (host.protocol ?? 'ssh');
+    return {
+      ...host,
+      protocol: baseProtocol,
+      ...(mergedRdp ? { rdpConfig: mergedRdp } : {}),
+      ...(mergedVnc ? { vncConfig: mergedVnc } : {}),
+    };
+  }
+
   const protocol = resolveHostProtocolFromSourceSession(source, attachExistingSession);
   const pluginConnection = isPluginHostProtocol(protocol)
     ? sanitizePluginConnection(source.pluginConnection, protocol)
       ?? sanitizePluginConnection(host.pluginConnection, protocol)
     : undefined;
+  const rdpConfig = protocol === 'rdp'
+    ? (sanitizeRdpConfig(source.rdpConfig) ?? sanitizeRdpConfig(host.rdpConfig))
+    : undefined;
+  const vncConfig = protocol === 'vnc'
+    ? (sanitizeVncConfig(source.vncConfig) ?? sanitizeVncConfig(host.vncConfig))
+    : undefined;
   const { pluginConnection: _pluginConnection, ...baseHost } = host;
   return {
     ...baseHost,
     hostname: source.hostname || host.hostname,
-    username: source.username || host.username,
+    username: source.username ?? host.username,
     port: source.port ?? (protocol === 'local' ? undefined : host.port),
     protocol,
     moshEnabled: source.moshEnabled === true,
     etEnabled: source.etEnabled === true,
     charset: source.charset ?? host.charset,
     ...(pluginConnection ? { pluginConnection } : {}),
+    ...(rdpConfig ? { rdpConfig } : {}),
+    ...(vncConfig ? { vncConfig } : {}),
     ...(protocol === 'serial' && source.serialConfig
       ? { serialConfig: source.serialConfig }
       : {}),
   };
+}
+
+export function resolveTerminalPopupRemoteDesktopProtocol(
+  config: Pick<TerminalPopupPayload, 'sourceSession'> | null | undefined,
+  host: Pick<Host, 'protocol'> | null | undefined,
+): RemoteDesktopProtocol | null {
+  if (isRemoteDesktopProtocol(config?.sourceSession?.protocol)) {
+    return config.sourceSession.protocol;
+  }
+  if (isRemoteDesktopProtocol(host?.protocol)) {
+    return host.protocol;
+  }
+  return null;
 }
 
 export function resolveTerminalPopupHost(
@@ -238,8 +299,25 @@ export function resolveTerminalPopupHost(
     defaultLocalShell?: ResolveDefaultLocalShellContext;
   } = {},
 ): Host {
+  const source = config.sourceSession;
+  if (source.remoteDesktopCompanion === true && isRemoteDesktopProtocol(source.protocol)) {
+    const vaultHost = hosts.find((candidate) => candidate.id === source.hostId);
+    if (vaultHost) {
+      const effectiveVaultHost = resolveEffectiveTerminalHost({
+        host: vaultHost,
+        groupConfigs: options.groupConfigs ?? [],
+        proxyProfiles: options.proxyProfiles ?? [],
+        defaultLocalShell: options.defaultLocalShell,
+      });
+      return applySourceSessionConnectionOverrides(
+        effectiveVaultHost,
+        source,
+        Boolean(config.attachSessionId),
+      );
+    }
+  }
   const resolvedHost = resolveTerminalSessionHost({
-    session: config.sourceSession,
+    session: source,
     hosts,
     groupConfigs: options.groupConfigs ?? [],
     proxyProfiles: options.proxyProfiles ?? [],
@@ -248,7 +326,7 @@ export function resolveTerminalPopupHost(
   });
   return applySourceSessionConnectionOverrides(
     resolvedHost,
-    config.sourceSession,
+    source,
     Boolean(config.attachSessionId),
   );
 }
@@ -394,6 +472,11 @@ function TerminalPopupPageInner({
     return resolveTerminalPopupReuseId(config);
   }, [config]);
 
+  const remoteDesktopProtocol = useMemo(
+    () => resolveTerminalPopupRemoteDesktopProtocol(config, host),
+    [config, host],
+  );
+
   // Defer *first* backend start while app-locked so startup commands/credentials
   // do not run behind the overlay. Once a session has started, keep it mounted
   // across re-locks so the popup is not torn down mid-session (Codex P2).
@@ -466,6 +549,25 @@ function TerminalPopupPageInner({
           closeLabel={t('common.close')}
           onClose={() => void handleClose()}
         />
+      ) : remoteDesktopProtocol ? (
+        <div className="relative flex-1 min-h-0 flex flex-col bg-black">
+          <Suspense fallback={<TerminalPopupBlank />}>
+            <LazyRemoteDesktopPane
+              sessionId={sessionId}
+              protocol={remoteDesktopProtocol}
+              host={host}
+              chainHosts={chainHosts}
+              keys={keys}
+              identities={identities}
+              knownHosts={effectiveKnownHosts}
+              isVisible
+              isFocused
+              onCloseSession={() => {
+                void handleClose();
+              }}
+            />
+          </Suspense>
+        </div>
       ) : (
         <div className="relative flex-1 min-h-0 flex flex-col bg-[color:var(--terminal-popup-bg)]">
           <Suspense fallback={<TerminalPopupBlank />}>

@@ -1,7 +1,9 @@
 import React, { useEffect, useId, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
+  CheckCircle2,
   Clock3,
   Copy,
   Cpu,
@@ -14,6 +16,7 @@ import {
   Pencil,
   Play,
   Plus,
+  RefreshCw,
   Server,
   Square,
   Terminal,
@@ -34,10 +37,20 @@ import {
   monitorStateSince,
   type MonitorHostState,
   type MonitorPoint,
+  type MonitorRemoteDesktopProbeResult,
+  type MonitorRemoteDesktopProtocol,
 } from "../../domain/monitorRuntime";
 import type { Host } from "../../domain/models";
-import { buildMonitorTrendGeometry, findMonitorChartPoint } from "../../domain/monitorChart";
+import { formatHostPort } from "../../domain/host";
+import { isRemoteDesktopProtocol } from "../../domain/remoteDesktop";
+import {
+  buildMonitorTrendGeometry,
+  findMonitorChartPoint,
+  type MonitorTrendField,
+} from "../../domain/monitorChart";
 import { cn } from "../../lib/utils";
+import { RdpProtocolIcon, VncProtocolIcon } from "../icons/RemoteDesktopIcons";
+import { getProtocolBadgeClass } from "../protocolVisuals";
 import { Button } from "../ui/button";
 import { ContextMenuItem } from "../ui/context-menu";
 import { Input } from "../ui/input";
@@ -93,6 +106,50 @@ const monitorAsideHeaderClass =
   "relative h-14 py-0 border-b-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px after:origin-bottom after:[transform:scaleY(.5)] after:bg-border/40 after:content-['']";
 const monitorAsideClass = "border-border/30 shadow-[-12px_0_24px_hsl(var(--foreground)/0.04)]";
 
+const isProbeHost = (host?: Host, state?: MonitorHostState): boolean =>
+  state?.mode === "probe" || isRemoteDesktopProtocol(host?.protocol);
+
+const getProbeProtocol = (
+  host?: Host,
+  state?: MonitorHostState,
+): MonitorRemoteDesktopProtocol | null => {
+  if (state?.probe?.protocol === "rdp" || state?.probe?.protocol === "vnc") {
+    return state.probe.protocol;
+  }
+  if (isRemoteDesktopProtocol(host?.protocol)) return host.protocol;
+  return null;
+};
+
+const getProbePort = (
+  host?: Host,
+  state?: MonitorHostState,
+  proto?: MonitorRemoteDesktopProtocol | null,
+): number => {
+  if (typeof state?.probe?.port === "number" && state.probe.port > 0) {
+    return state.probe.port;
+  }
+  const p = proto ?? getProbeProtocol(host, state);
+  if (p === "rdp") return host?.rdpConfig?.port || host?.port || 3389;
+  if (p === "vnc") return host?.vncConfig?.port || host?.port || 5900;
+  return host?.port || 22;
+};
+
+const summarizeRttStats = (points: MonitorPoint[]) => {
+  const values = points
+    .map((p) => p.latencyMs)
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0);
+  if (values.length === 0) return null;
+  let min = values[0];
+  let max = values[0];
+  let sum = 0;
+  for (const v of values) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+    sum += v;
+  }
+  return { min: Math.round(min), avg: Math.round(sum / values.length), max: Math.round(max) };
+};
+
 /** Sparse lines: never bridge a missing sample or invent history before monitoring started. */
 export const MonitorTrend = React.memo(function MonitorTrend({
   points,
@@ -104,7 +161,7 @@ export const MonitorTrend = React.memo(function MonitorTrend({
   className,
 }: {
   points: MonitorPoint[];
-  field: "cpu" | "memory" | "rx" | "tx";
+  field: MonitorTrendField;
   range: number;
   interval: number;
   clock: number;
@@ -184,7 +241,13 @@ export const MonitorTrend = React.memo(function MonitorTrend({
       </svg>
       {hovered && hoveredValue != null && (
         <div role="tooltip" className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 whitespace-nowrap rounded-md border border-border/40 bg-popover px-2 py-1.5 text-[10px] text-popover-foreground shadow-md">
-          <div className="font-medium">{label} · {field === "cpu" || field === "memory" ? `${hoveredValue.toFixed(2)}%` : rate(hoveredValue)}</div>
+          <div className="font-medium">
+            {label} · {field === "cpu" || field === "memory"
+              ? `${hoveredValue.toFixed(2)}%`
+              : field === "latencyMs"
+                ? `${Math.round(hoveredValue)} ms`
+                : rate(hoveredValue)}
+          </div>
           <time dateTime={new Date(hovered.at).toISOString()} className="text-muted-foreground">
             {new Date(hovered.at).toLocaleTimeString(resolvedLocale, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
           </time>
@@ -369,43 +432,84 @@ export function MonitorPanels({
       setDropTarget(null);
     },
   });
-  const status = (host: Host | undefined, state?: MonitorHostState) =>
-    !host
-      ? "missing"
-      : !running
-        ? "stopped"
-        : state?.status === "live" &&
-            Date.now() - state.at >
-              Math.max(
-                5000,
-                (panel?.interval ?? DEFAULT_MONITOR_INTERVAL) * 2500,
-              )
-          ? "stale"
-          : (state?.status ?? "queued");
-  const stateBadge = (host: Host | undefined, state?: MonitorHostState) => (
-    <span
-      className={cn(
-        "inline-flex min-w-0 max-w-full items-center gap-1.5 whitespace-nowrap text-[10px] shrink-0 font-medium",
-        status(host, state) === "live"
-          ? "text-emerald-700 dark:text-emerald-400"
-          : ["error", "disconnected", "missing"].includes(status(host, state))
-            ? "text-destructive"
-            : ["login", "stale", "unsupported", "limit"].includes(
-                  status(host, state),
-                )
-              ? "text-amber-700 dark:text-amber-400"
-              : "text-muted-foreground",
-      )}
-    >
+  const status = (host: Host | undefined, state?: MonitorHostState) => {
+    if (!host) return "missing";
+    if (!running) return "stopped";
+    const effectiveInterval = isProbeHost(host, state)
+      ? Math.max(panel?.interval ?? DEFAULT_MONITOR_INTERVAL, 5)
+      : (panel?.interval ?? DEFAULT_MONITOR_INTERVAL);
+    if (
+      state?.status === "live" &&
+      Date.now() - state.at > Math.max(5000, effectiveInterval * 2500)
+    ) {
+      return "stale";
+    }
+    return state?.status ?? "queued";
+  };
+  const stateBadge = (host: Host | undefined, state?: MonitorHostState) => {
+    const st = status(host, state);
+    const probeMode = isProbeHost(host, state);
+    const labelKey = probeMode && st === "live"
+      ? "monitor.status.online"
+      : `monitor.status.${st}`;
+    return (
       <span
-        aria-hidden="true"
-        className="h-1.5 w-1.5 rounded-full bg-current"
-      />
-      <span className="truncate">
-        {t(`monitor.status.${status(host, state)}`)}
+        data-monitor-status={st}
+        className={cn(
+          "inline-flex min-w-0 max-w-full items-center gap-1.5 whitespace-nowrap text-[10px] shrink-0 font-medium",
+          st === "live"
+            ? "text-emerald-700 dark:text-emerald-400"
+            : ["error", "disconnected", "missing", "offline"].includes(st)
+              ? "text-destructive"
+              : ["login", "stale", "unsupported", "limit"].includes(st)
+                ? "text-amber-700 dark:text-amber-400"
+                : "text-muted-foreground",
+        )}
+      >
+        <span
+          aria-hidden="true"
+          className="h-1.5 w-1.5 rounded-full bg-current"
+        />
+        <span className="truncate">
+          {t(labelKey)}
+        </span>
       </span>
-    </span>
-  );
+    );
+  };
+  const renderCompanionPills = (
+    companionProbes?: Partial<Record<MonitorRemoteDesktopProtocol, MonitorRemoteDesktopProbeResult>>,
+  ) => {
+    if (!companionProbes) return null;
+    const items = (["rdp", "vnc"] as const)
+      .map((proto) => companionProbes[proto])
+      .filter((item): item is MonitorRemoteDesktopProbeResult => Boolean(item));
+    if (items.length === 0) return null;
+    return (
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-monitor-companion-pills>
+        {items.map((item) => (
+          <span
+            key={item.protocol}
+            data-monitor-companion-pill={item.protocol}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+              item.reachable
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "border-destructive/30 bg-destructive/10 text-destructive",
+            )}
+          >
+            {item.protocol === "rdp" ? <RdpProtocolIcon size={10} /> : <VncProtocolIcon size={10} />}
+            <span>{item.protocol.toUpperCase()} :{item.port}</span>
+            <span>·</span>
+            <span>
+              {item.reachable
+                ? (item.rttMs != null ? `${Math.round(item.rttMs)} ms` : t("monitor.status.online"))
+                : t("monitor.status.offline")}
+            </span>
+          </span>
+        ))}
+      </div>
+    );
+  };
   const renderMetrics = (
     state: MonitorHostState | undefined,
     large = false,
@@ -466,7 +570,10 @@ export function MonitorPanels({
   };
   const hostDetail = hosts.find((h) => h.id === detail);
   const detailState = detail && panel ? monitorStateSince(runtime.hosts[detail], runtime.startedAt[panel.id]) : undefined;
-  const detailAvailable = status(hostDetail, detailState) === "live";
+  const detailIsProbe = isProbeHost(hostDetail, detailState);
+  const detailAvailable = detailIsProbe
+    ? ["live", "offline"].includes(status(hostDetail, detailState))
+    : status(hostDetail, detailState) === "live";
   useEffect(() => {
     if (detail && !detailAvailable) setDetail(null);
   }, [detail, detailAvailable]);
@@ -693,18 +800,34 @@ export function MonitorPanels({
                     pinnedId={
                       dragging?.panelId === panel.id ? dragging.hostId : undefined
                     }
-                    renderMenu={({ id, host, state }) => (
-                      <>
-                        <ContextMenuItem disabled={!host} onSelect={() => host && onConnect(host)}>
-                          {t("monitor.openTerminal")}
-                        </ContextMenuItem>
-                        {host && running && ["login", "error", "disconnected"].includes(status(host, state)) && (
-                          <ContextMenuItem data-monitor-retry={id} onSelect={() => setRecovery({hostId: id, username: host.username ?? "", password: ""})}>
-                            {t("monitor.retry")}
+                    renderMenu={({ id, host, state }) => {
+                      const probeMode = isProbeHost(host, state);
+                      const probeProto = getProbeProtocol(host, state);
+                      const connectLabel = probeMode && probeProto
+                        ? t("monitor.openRemoteDesktop", { protocol: probeProto.toUpperCase() })
+                        : t("monitor.openTerminal");
+                      const hostStatus = status(host, state);
+                      return (
+                        <>
+                          <ContextMenuItem disabled={!host} onSelect={() => host && onConnect(host)}>
+                            {connectLabel}
                           </ContextMenuItem>
-                        )}
-                      </>
-                    )}
+                          {host && running && probeMode && (
+                            <ContextMenuItem
+                              data-monitor-retry={id}
+                              onSelect={() => monitorActions.retry(id)}
+                            >
+                              {t("monitor.checkNow")}
+                            </ContextMenuItem>
+                          )}
+                          {host && running && !probeMode && ["login", "error", "disconnected"].includes(hostStatus) && (
+                            <ContextMenuItem data-monitor-retry={id} onSelect={() => setRecovery({hostId: id, username: host.username ?? "", password: ""})}>
+                              {t("monitor.retry")}
+                            </ContextMenuItem>
+                          )}
+                        </>
+                      );
+                    }}
                     rowProps={({ id, host, state }) => ({
                       ...dragProps(id),
                       className: cn(
@@ -716,24 +839,38 @@ export function MonitorPanels({
                         status(host, state) !== "live" && "text-muted-foreground opacity-50",
                       ),
                     })}
-                    renderCard={({ id, host, state }) => (
+                    renderCard={({ id, host, state }) => {
+                      const probeMode = isProbeHost(host, state);
+                      const probeProto = getProbeProtocol(host, state);
+                      const probePort = getProbePort(host, state, probeProto);
+                      const hostStatus = status(host, state);
+                      const canOpenDetail = probeMode
+                        ? ["live", "offline"].includes(hostStatus)
+                        : hostStatus === "live";
+                      const connectLabel = probeMode && probeProto
+                        ? t("monitor.openRemoteDesktop", { protocol: probeProto.toUpperCase() })
+                        : t("monitor.openTerminal");
+                      const probe = state?.probe;
+
+                      return (
                       <article
                         {...dragProps(id)}
+                        data-monitor-card-mode={probeMode ? "probe" : "ssh"}
                         className={cn(
                           "relative h-full min-w-0 overflow-hidden rounded-xl bg-card/70 shadow-sm shadow-black/[0.02] transition-colors hover:bg-card",
                           dragging?.panelId === panel.id &&
                             dragging.hostId === id &&
                             "cursor-grabbing opacity-40",
                           dropTarget === id && "bg-accent",
-                          status(host, state) !== "live" && "opacity-50",
+                          hostStatus !== "live" && !(probeMode && hostStatus === "offline") && "opacity-50",
                         )}
                       >
                         <button
                           type="button"
                           className="flex h-full w-full min-w-0 cursor-default flex-col p-4 text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary"
-                          aria-disabled={status(host, state) !== "live"}
+                          aria-disabled={!canOpenDetail}
                           onClick={() => {
-                            if (status(host, state) !== "live") return;
+                            if (!canOpenDetail) return;
                             setEditor(null);
                             setDetail(id);
                           }}
@@ -752,16 +889,34 @@ export function MonitorPanels({
                               />
                             )}
                             <div className="min-w-0 flex-1">
-                              <h3 className="truncate text-sm font-semibold text-foreground">
-                                {host?.label ?? t("monitor.missingHost")}
-                              </h3>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <h3 className="truncate text-sm font-semibold text-foreground">
+                                  {host?.label ?? t("monitor.missingHost")}
+                                </h3>
+                                {probeMode && probeProto && (
+                                  <span
+                                    className={cn(
+                                      "inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold uppercase leading-4",
+                                      getProtocolBadgeClass(probeProto),
+                                    )}
+                                  >
+                                    {probeProto === "rdp" ? <RdpProtocolIcon size={9} /> : <VncProtocolIcon size={9} />}
+                                    {probeProto}
+                                  </span>
+                                )}
+                              </div>
                               <p className="truncate text-xs text-muted-foreground">
-                                {host?.hostname ?? id}
+                                {host
+                                  ? (probeMode ? formatHostPort(host.hostname, probePort) : host.hostname)
+                                  : id}
                               </p>
                             </div>
                           </div>
                           <div className="mb-2 flex h-5 w-full min-w-0 items-center gap-2">
-                            <MonitorHostLatency value={state?.stats?.latencyMs} responseValue={state?.stats?.responseLatencyMs} />
+                            <MonitorHostLatency
+                              value={probeMode ? probe?.rttMs : state?.stats?.latencyMs}
+                              responseValue={probeMode ? null : state?.stats?.responseLatencyMs}
+                            />
                             <div className="min-w-0 flex-1">
                               <MonitorHostTags tags={host?.tags} />
                             </div>
@@ -769,10 +924,69 @@ export function MonitorPanels({
                               {stateBadge(host, state)}
                             </div>
                           </div>
+                          {probeMode ? (
+                            <div className="flex w-full min-w-0 flex-1 flex-col justify-between py-1" data-monitor-probe-body>
+                              <div className="space-y-2">
+                                <div className="flex items-baseline justify-between gap-2">
+                                  <div
+                                    data-monitor-probe-rtt
+                                    className={cn(
+                                      "text-2xl font-semibold leading-tight tabular-nums",
+                                      hostStatus === "offline" ? "text-destructive" : "text-foreground",
+                                    )}
+                                  >
+                                    {hostStatus === "offline"
+                                      ? t("monitor.status.offline")
+                                      : probe?.reachable && probe.rttMs != null
+                                        ? `${Math.round(probe.rttMs)} ms`
+                                        : "--"}
+                                  </div>
+                                  <span className="truncate font-mono text-[11px] text-muted-foreground">
+                                    TCP :{probePort}
+                                  </span>
+                                </div>
+                                <div className="flex min-h-5 items-center gap-1.5 text-[11px]">
+                                  {probe?.reachable ? (
+                                    probe.bannerVerified ? (
+                                      <span className="inline-flex min-w-0 items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                                        <CheckCircle2 size={12} className="shrink-0" />
+                                        <span className="truncate">{probe.bannerDetail || t("monitor.bannerVerified")}</span>
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex min-w-0 items-center gap-1 text-amber-700 dark:text-amber-400">
+                                        <AlertTriangle size={12} className="shrink-0" />
+                                        <span className="truncate">{t("monitor.bannerUnverified")}</span>
+                                      </span>
+                                    )
+                                  ) : probe?.error ? (
+                                    <span className="truncate text-destructive">{probe.error}</span>
+                                  ) : (
+                                    <span className="truncate text-muted-foreground">{t("monitor.reachabilityOnly")}</span>
+                                  )}
+                                </div>
+                              </div>
+                              {panel && (
+                                <div className="mt-2">
+                                  <div className="mb-1 text-[10px] text-muted-foreground">
+                                    {t("monitor.latencyTrend")}
+                                  </div>
+                                  <MonitorTrend
+                                    clock={Math.floor(runtime.takenAt / 5000)}
+                                    points={state?.points ?? emptyMonitorPoints}
+                                    field="latencyMs"
+                                    range={panel.range}
+                                    interval={Math.max(panel.interval, 5)}
+                                    label={t("monitor.latencyTrend")}
+                                    className="h-24 text-sky-600 dark:text-sky-400"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          ) : (
                           <div
                             className={cn(
                               "w-full min-w-0",
-                              status(host, state) !== "live" && "opacity-60",
+                              hostStatus !== "live" && "opacity-60",
                             )}
                           >
                             {renderMetrics(state)}
@@ -810,7 +1024,9 @@ export function MonitorPanels({
                                 )}
                               </span>
                             </div>
+                            {renderCompanionPills(state?.companionProbes)}
                           </div>
+                          )}
                           <div className="mt-auto flex w-full min-w-0 items-center gap-2 pt-2 text-[10px] text-muted-foreground">
                             <div className="min-w-0 flex-1">
                               <MonitorHostNotes notes={host?.notes} />
@@ -832,31 +1048,57 @@ export function MonitorPanels({
                                 size="icon"
                                 className="h-7 w-7 text-muted-foreground"
                                 data-monitor-terminal={id}
-                                aria-label={`${t("monitor.openTerminal")}: ${host?.label ?? t("monitor.missingHost")}`}
+                                aria-label={`${connectLabel}: ${host?.label ?? t("monitor.missingHost")}`}
                                 disabled={!host}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   if (host) onConnect(host);
                                 }}
                               >
-                                <Terminal size={14} />
+                                {probeMode && probeProto === "rdp" ? (
+                                  <RdpProtocolIcon size={14} />
+                                ) : probeMode && probeProto === "vnc" ? (
+                                  <VncProtocolIcon size={14} />
+                                ) : (
+                                  <Terminal size={14} />
+                                )}
                               </Button>
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent side="top">{t("monitor.openTerminal")}</TooltipContent>
+                          <TooltipContent side="top">{connectLabel}</TooltipContent>
                         </Tooltip>
                       </article>
-                    )}
+                      );
+                    }}
                     renderCells={({ id, host, state }, visibleColumns) => {
+                      const probeMode = isProbeHost(host, state);
+                      const probeProto = getProbeProtocol(host, state);
+                      const probePort = getProbePort(host, state, probeProto);
+                      const hostStatus = status(host, state);
+                      const canOpenDetail = probeMode
+                        ? ["live", "offline"].includes(hostStatus)
+                        : hostStatus === "live";
+                      const connectLabel = probeMode && probeProto
+                        ? t("monitor.openRemoteDesktop", { protocol: probeProto.toUpperCase() })
+                        : t("monitor.openTerminal");
                       const diskLayout = diskGroups.layoutFor(id, state?.stats);
+                      const probeNaCell = (
+                        <span
+                          data-monitor-probe-na="true"
+                          title={t("monitor.reachabilityOnly")}
+                          className="text-muted-foreground/60"
+                        >
+                          —
+                        </span>
+                      );
                       return ({
                       host: (<td>
                           <button
                             type="button"
                             className="flex w-full min-w-0 items-center gap-2.5 text-left aria-disabled:no-underline hover:underline"
-                            aria-disabled={status(host, state) !== "live"}
+                            aria-disabled={!canOpenDetail}
                             onClick={() => {
-                              if (status(host, state) !== "live") return;
+                              if (!canOpenDetail) return;
                               setEditor(null);
                               setDetail(id);
                             }}
@@ -874,17 +1116,35 @@ export function MonitorPanels({
                               />
                             )}
                             <div className="min-w-0">
-                              <div className="truncate font-medium">
-                                {host?.label ?? t("monitor.missingHost")}
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="truncate font-medium">
+                                  {host?.label ?? t("monitor.missingHost")}
+                                </span>
+                                {probeMode && probeProto && (
+                                  <span
+                                    className={cn(
+                                      "inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1 py-0 text-[9px] font-semibold uppercase leading-4",
+                                      getProtocolBadgeClass(probeProto),
+                                    )}
+                                  >
+                                    {probeProto === "rdp" ? <RdpProtocolIcon size={9} /> : <VncProtocolIcon size={9} />}
+                                    {probeProto}
+                                  </span>
+                                )}
                               </div>
                               <div className="truncate text-[10px] text-muted-foreground">
-                                {host?.hostname ?? id}
+                                {host
+                                  ? (probeMode ? formatHostPort(host.hostname, probePort) : host.hostname)
+                                  : id}
                               </div>
                             </div>
                           </button>
                         </td>),
                       latency: (<td>
-                          <MonitorHostLatency value={state?.stats?.latencyMs} responseValue={state?.stats?.responseLatencyMs} />
+                          <MonitorHostLatency
+                            value={probeMode ? state?.probe?.rttMs : state?.stats?.latencyMs}
+                            responseValue={probeMode ? null : state?.stats?.responseLatencyMs}
+                          />
                         </td>),
                       tags: (<td>
                           <MonitorHostTags tags={host?.tags} />
@@ -895,76 +1155,95 @@ export function MonitorPanels({
                           </div>
                         </td>),
                       cpu: (<td className="tabular-nums">
-                          <ResourceBar
-                            className="w-full"
-                            label=""
-                            value={state?.stats?.cpu}
-                          />
+                          {probeMode ? probeNaCell : (
+                            <ResourceBar
+                              className="w-full"
+                              label=""
+                              value={state?.stats?.cpu}
+                            />
+                          )}
                         </td>),
                       memory: (<td className="tabular-nums">
-                          <ResourceBar
-                            className="w-full"
-                            label=""
-                            value={
-                              state?.stats?.memTotal &&
-                              state.stats.memUsed != null
-                                ? (state.stats.memUsed / state.stats.memTotal) *
-                                  100
-                                : null
-                            }
-                          />
+                          {probeMode ? probeNaCell : (
+                            <ResourceBar
+                              className="w-full"
+                              label=""
+                              value={
+                                state?.stats?.memTotal &&
+                                state.stats.memUsed != null
+                                  ? (state.stats.memUsed / state.stats.memTotal) *
+                                    100
+                                  : null
+                              }
+                            />
+                          )}
                         </td>),
-                      disks: (<td className={diskLayout.rows.length === 1 && diskLayout.rows[0].kind === "disk" && diskLayout.rows[0].disk.mountPoint === "/" ? undefined : "!items-start"}>
-                          <div className="w-full min-w-0">
-                            <MonitorDiskUsage stats={state?.stats} listLayout={diskLayout} onToggleSystem={() => diskGroups.toggle(id)} />
-                          </div>
+                      disks: (<td className={!probeMode && diskLayout.rows.length === 1 && diskLayout.rows[0].kind === "disk" && diskLayout.rows[0].disk.mountPoint === "/" ? undefined : "!items-start"}>
+                          {probeMode ? probeNaCell : (
+                            <div className="w-full min-w-0">
+                              <MonitorDiskUsage stats={state?.stats} listLayout={diskLayout} onToggleSystem={() => diskGroups.toggle(id)} />
+                            </div>
+                          )}
                         </td>),
                       diskIo: (<td data-monitor-cell="diskIo" className="!items-start">
-                          <MonitorDiskIo stats={state?.stats} listLayout={diskLayout}
-                            showSystemToggle={!visibleColumns.includes("disks")}
-                            onToggleSystem={() => diskGroups.toggle(id)} />
+                          {probeMode ? probeNaCell : (
+                            <MonitorDiskIo stats={state?.stats} listLayout={diskLayout}
+                              showSystemToggle={!visibleColumns.includes("disks")}
+                              onToggleSystem={() => diskGroups.toggle(id)} />
+                          )}
                         </td>),
                       network: (<td
                           data-monitor-cell="network"
                           className="tabular-nums whitespace-nowrap"
                         >
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <ArrowDown
-                                size={13}
-                                className="shrink-0 text-sky-600 dark:text-sky-400"
-                              />
-                              <span className="sr-only">
-                                {t("monitor.download")}:{" "}
-                              </span>
-                              {rate(
-                                state?.stats?.networkReady
-                                  ? state.stats.netRxSpeed
-                                  : null,
-                              )}
+                          {probeMode ? probeNaCell : (
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <ArrowDown
+                                  size={13}
+                                  className="shrink-0 text-sky-600 dark:text-sky-400"
+                                />
+                                <span className="sr-only">
+                                  {t("monitor.download")}:{" "}
+                                </span>
+                                {rate(
+                                  state?.stats?.networkReady
+                                    ? state.stats.netRxSpeed
+                                    : null,
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <ArrowUp
+                                  size={13}
+                                  className="shrink-0 text-violet-600 dark:text-violet-400"
+                                />
+                                <span className="sr-only">
+                                  {t("monitor.upload")}:{" "}
+                                </span>
+                                {rate(
+                                  state?.stats?.networkReady
+                                    ? state.stats.netTxSpeed
+                                    : null,
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <ArrowUp
-                                size={13}
-                                className="shrink-0 text-violet-600 dark:text-violet-400"
-                              />
-                              <span className="sr-only">
-                                {t("monitor.upload")}:{" "}
-                              </span>
-                              {rate(
-                                state?.stats?.networkReady
-                                  ? state.stats.netTxSpeed
-                                  : null,
-                              )}
-                            </div>
-                          </div>
+                          )}
                         </td>),
                       updated: (<td className="whitespace-nowrap tabular-nums">
                           {state?.at
                             ? new Date(state.at).toLocaleTimeString()
                             : "--"}
                         </td>),
-                      status: (<td>{stateBadge(host, state)}</td>),
+                      status: (<td>
+                          <div className="flex flex-col gap-0.5 min-w-0">
+                            {stateBadge(host, state)}
+                            {probeMode && state?.probe?.bannerDetail && state.probe.reachable && (
+                              <span className="truncate text-[10px] text-muted-foreground">
+                                {state.probe.bannerDetail}
+                              </span>
+                            )}
+                          </div>
+                        </td>),
                       terminal: (<td className="sticky right-0 z-10 justify-center !bg-background before:pointer-events-none before:absolute before:inset-0 before:rounded-r-xl before:bg-card/70 group-hover:before:bg-card">
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -975,18 +1254,24 @@ export function MonitorPanels({
                                   size="icon"
                                   className="h-7 w-7 text-muted-foreground"
                                   data-monitor-terminal={id}
-                                  aria-label={`${t("monitor.openTerminal")}: ${host?.label ?? t("monitor.missingHost")}`}
+                                  aria-label={`${connectLabel}: ${host?.label ?? t("monitor.missingHost")}`}
                                   disabled={!host}
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     if (host) onConnect(host);
                                   }}
                                 >
-                                  <Terminal size={14} />
+                                  {probeMode && probeProto === "rdp" ? (
+                                    <RdpProtocolIcon size={14} />
+                                  ) : probeMode && probeProto === "vnc" ? (
+                                    <VncProtocolIcon size={14} />
+                                  ) : (
+                                    <Terminal size={14} />
+                                  )}
                                 </Button>
                               </span>
                             </TooltipTrigger>
-                            <TooltipContent side="top">{t("monitor.openTerminal")}</TooltipContent>
+                            <TooltipContent side="top">{connectLabel}</TooltipContent>
                           </Tooltip>
                         </td>)
                     });
@@ -1163,13 +1448,25 @@ export function MonitorPanels({
             className={monitorAsideClass}
           />
         )}
-        {detail && detailAvailable && (
+        {detail && detailAvailable && (() => {
+          const detailProto = getProbeProtocol(hostDetail, detailState);
+          const detailPort = getProbePort(hostDetail, detailState, detailProto);
+          const detailRttSummary = detailIsProbe
+            ? summarizeRttStats(detailState?.points ?? emptyMonitorPoints)
+            : null;
+          const detailConnectLabel = detailIsProbe && detailProto
+            ? t("monitor.openRemoteDesktop", { protocol: detailProto.toUpperCase() })
+            : t("monitor.openTerminal");
+          const companionItems = (["rdp", "vnc"] as const)
+            .map((proto) => detailState?.companionProbes?.[proto])
+            .filter((item): item is MonitorRemoteDesktopProbeResult => Boolean(item));
+          return (
           <AsidePanel
             dataSection="vault-monitor-detail"
             open
             onClose={() => setDetail(null)}
             title={hostDetail?.label ?? t("monitor.missingHost")}
-            subtitle={hostDetail?.hostname}
+            subtitle={hostDetail ? (detailIsProbe ? formatHostPort(hostDetail.hostname, detailPort) : hostDetail.hostname) : undefined}
             layout="inline"
             resizable
             resizeAriaLabel={t("vault.panel.resizeWidth")}
@@ -1181,11 +1478,129 @@ export function MonitorPanels({
               <div className="flex items-center gap-3">
                 {hostDetail && <DistroAvatar host={hostDetail} fallback={hostDetail.label} size="lg" />}
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1 truncate text-xs text-muted-foreground">{hostDetail?.hostname ?? detail}</div>
+                  <div className="mb-1 flex items-center gap-1.5 min-w-0">
+                    <span className="truncate text-xs text-muted-foreground">
+                      {hostDetail ? (detailIsProbe ? formatHostPort(hostDetail.hostname, detailPort) : hostDetail.hostname) : detail}
+                    </span>
+                    {detailIsProbe && detailProto && (
+                      <span
+                        className={cn(
+                          "inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold uppercase leading-4",
+                          getProtocolBadgeClass(detailProto),
+                        )}
+                      >
+                        {detailProto === "rdp" ? <RdpProtocolIcon size={10} /> : <VncProtocolIcon size={10} />}
+                        {detailProto}
+                      </span>
+                    )}
+                  </div>
                   {stateBadge(hostDetail, detailState)}
                 </div>
               </div>
+              {detailIsProbe ? (
+                <div className="space-y-4" data-monitor-probe-detail>
+                  <div className="grid grid-cols-2 gap-3 rounded-lg border border-border/50 bg-muted/20 p-3">
+                    <div>
+                      <div className="text-[11px] text-muted-foreground">{t("monitor.latency")}</div>
+                      <div className={cn(
+                        "mt-1 text-xl font-semibold tabular-nums",
+                        status(hostDetail, detailState) === "offline" ? "text-destructive" : "text-foreground",
+                      )}>
+                        {status(hostDetail, detailState) === "offline"
+                          ? t("monitor.status.offline")
+                          : detailState?.probe?.rttMs != null
+                            ? `${Math.round(detailState.probe.rttMs)} ms`
+                            : "--"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-muted-foreground">{t("monitor.rttStats")}</div>
+                      <div className="mt-1 text-xs font-medium tabular-nums text-foreground">
+                        {detailRttSummary
+                          ? `${detailRttSummary.min} / ${detailRttSummary.avg} / ${detailRttSummary.max} ms`
+                          : "--"}
+                      </div>
+                    </div>
+                  </div>
+                  {panel && (
+                    <div className="space-y-1.5">
+                      <h3 className="text-sm font-medium">{t("monitor.latencyTrend")}</h3>
+                      <MonitorTrend
+                        clock={Math.floor(runtime.takenAt / 5000)}
+                        points={detailState?.points ?? emptyMonitorPoints}
+                        field="latencyMs"
+                        range={panel.range}
+                        interval={Math.max(panel.interval, 5)}
+                        label={t("monitor.latencyTrend")}
+                        className="h-24 text-sky-600 dark:text-sky-400"
+                      />
+                    </div>
+                  )}
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">{t("monitor.status")}</span>
+                      <span>
+                        {detailState?.probe?.reachable
+                          ? (detailState.probe.bannerVerified
+                              ? (detailState.probe.bannerDetail || t("monitor.bannerVerified"))
+                              : t("monitor.bannerUnverified"))
+                          : t("monitor.status.offline")}
+                      </span>
+                    </div>
+                    {detailState?.probe?.error && (
+                      <p className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-[11px] text-destructive break-words">
+                        {detailState.probe.error}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
               {renderMetrics(detailState, true)}
+              {companionItems.length > 0 && (
+                <section className="space-y-2" data-monitor-companion-desktops>
+                  <h3 className="text-sm font-medium">{t("monitor.companionDesktops")}</h3>
+                  <div className="space-y-1.5">
+                    {companionItems.map((item) => (
+                      <div
+                        key={item.protocol}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-border/50 bg-muted/20 px-2.5 py-2 text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+                              getProtocolBadgeClass(item.protocol),
+                            )}
+                          >
+                            {item.protocol === "rdp" ? <RdpProtocolIcon size={10} /> : <VncProtocolIcon size={10} />}
+                            {item.protocol}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                              <span>:{item.port}</span>
+                              <span className="rounded bg-muted px-1 py-0 text-[9px] text-muted-foreground font-sans">
+                                {item.tunnelViaHostSsh !== false ? t("monitor.viaSsh") : t("monitor.direct")}
+                              </span>
+                            </div>
+                            {item.bannerDetail && item.reachable && (
+                              <div className="truncate text-[10px] text-muted-foreground">{item.bannerDetail}</div>
+                            )}
+                          </div>
+                        </div>
+                        <div className={cn(
+                          "shrink-0 text-[11px] font-medium tabular-nums",
+                          item.reachable ? "text-emerald-700 dark:text-emerald-400" : "text-destructive",
+                        )}>
+                          {item.reachable
+                            ? (item.rttMs != null ? `${Math.round(item.rttMs)} ms` : t("monitor.status.online"))
+                            : t("monitor.status.offline")}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
               {detailState?.stats && (
                 detailState.stats.gpu != null ||
                 detailState.stats.gpuName ||
@@ -1314,19 +1729,40 @@ export function MonitorPanels({
                 <p>{detailState?.stats?.kernelRelease ?? "--"}</p>
                 <p>{detailState?.stats?.hostname ?? "--"}</p>
               </div>
+                </>
+              )}
             </AsidePanelContent>
             <AsidePanelFooter>
-              <Button
-                className="w-full gap-2"
-                disabled={!hostDetail}
-                onClick={() => hostDetail && onConnect(hostDetail)}
-              >
-                <Terminal size={14} />
-                {t("monitor.openTerminal")}
-              </Button>
+              <div className="flex gap-2">
+                {detailIsProbe && (
+                  <Button
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => monitorActions.retry(detail)}
+                  >
+                    <RefreshCw size={13} />
+                    {t("monitor.checkNow")}
+                  </Button>
+                )}
+                <Button
+                  className="flex-1 gap-2"
+                  disabled={!hostDetail}
+                  onClick={() => hostDetail && onConnect(hostDetail)}
+                >
+                  {detailIsProbe && detailProto === "rdp" ? (
+                    <RdpProtocolIcon size={14} />
+                  ) : detailIsProbe && detailProto === "vnc" ? (
+                    <VncProtocolIcon size={14} />
+                  ) : (
+                    <Terminal size={14} />
+                  )}
+                  {detailConnectLabel}
+                </Button>
+              </div>
             </AsidePanelFooter>
           </AsidePanel>
-        )}
+          );
+        })()}
       <Dialog open={!!recovery} onOpenChange={(open) => !open && setRecovery(null)}>
         <DialogContent>
           <DialogHeader>

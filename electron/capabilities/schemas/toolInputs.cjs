@@ -32,6 +32,26 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "terminal.stop": {
     jobId: { type: "string", description: "The background job ID returned by terminal_start." },
   },
+  "terminal.startBulk": {
+    command: { type: "string", description: "The long-running command to start on every target session." },
+    sessionIds: {
+      type: "string",
+      description: "JSON array of 2-20 unique terminal session IDs, for example [\"s-1\",\"s-2\"]. Every ID must be connected and in scope, otherwise no job is started.",
+    },
+  },
+  "terminal.pollBulk": {
+    bulkId: { type: "string", optional: true, description: "The bulkId returned by terminal_start_bulk. Pass this or jobIds." },
+    jobIds: { type: "string", optional: true, description: "JSON array of 1-20 background job IDs to poll instead of a bulkId." },
+    offsets: {
+      type: "string",
+      optional: true,
+      description: "JSON object mapping jobId to the nextOffset from a previous poll, for example {\"job-a\":5120} (default 0).",
+    },
+  },
+  "terminal.stopBulk": {
+    bulkId: { type: "string", optional: true, description: "The bulkId returned by terminal_start_bulk. Pass this or jobIds." },
+    jobIds: { type: "string", optional: true, description: "JSON array of 1-20 background job IDs to stop instead of a bulkId." },
+  },
   "session.environment": {},
   "session.reconnect": {
     sessionId: { type: "string", description: "An existing disconnected terminal session ID in the current granted scope." },
@@ -418,6 +438,26 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     startLine: { type: "number", optional: true, description: "Zero-based terminal buffer line to start from when range is lines." },
     maxLines: { type: "number", optional: true, description: "Maximum terminal rows to return. Defaults to 80, capped at 300." },
   },
+  "harness.remote_desktop.read_screen": {
+    sessionId: { type: "string", optional: true, description: "Remote desktop (VNC/RDP) session ID. Optional when the current AI scope contains only one remote desktop session." },
+    quality: { type: "string", optional: true, description: "Capture quality preset: standard (default, up to 1280px max edge) or high (up to 1920px max edge for dense text)." },
+    cropX: { type: "number", optional: true, description: "Optional crop left edge in 0-1000 normalized permille coordinates of the full desktop width." },
+    cropY: { type: "number", optional: true, description: "Optional crop top edge in 0-1000 normalized permille coordinates of the full desktop height." },
+    cropWidth: { type: "number", optional: true, description: "Optional crop width in 1-1000 normalized permille coordinates. Must be provided together with cropX, cropY, and cropHeight." },
+    cropHeight: { type: "number", optional: true, description: "Optional crop height in 1-1000 normalized permille coordinates. Must be provided together with cropX, cropY, and cropWidth." },
+    grid: { type: "string", optional: true, description: "Set to true to draw a translucent 0-1000 global coordinate grid overlay on the captured screenshot (useful before clicking with remote_desktop_act). Default false." },
+  },
+  "harness.remote_desktop.act": {
+    sessionId: { type: "string", optional: true, description: "Remote desktop (VNC/RDP) session ID. Optional when the current AI scope contains only one remote desktop session." },
+    actions: {
+      type: "string",
+      description: "JSON array of 1-12 mouse/keyboard actions in 0-1000 normalized permille coordinates. Supported types: click ({type:\"click\",x,y,button?,clickCount?,modifiers?}), move ({type:\"move\",x,y}), drag ({type:\"drag\",fromX,fromY,toX,toY,button?,steps?}), scroll ({type:\"scroll\",x,y,deltaX?,deltaY?}), type ({type:\"type\",text}), key ({type:\"key\",key}), wait ({type:\"wait\",ms}).",
+    },
+    captureAfter: { type: "string", optional: true, description: "Set to false to skip capturing a post-action verification screenshot. Default true." },
+    settleMs: { type: "number", optional: true, description: "Milliseconds to wait after actions before capturing the post-action screenshot (default 350, clamped 0-3000)." },
+    quality: { type: "string", optional: true, description: "Post-action screenshot quality preset: standard (default) or high." },
+    grid: { type: "string", optional: true, description: "Set to true to overlay a 0-1000 coordinate grid on the post-action screenshot. Default false." },
+  },
   "harness.web.search": {
     query: { type: "string", description: "The search query to look up on the web." },
     maxResults: { type: "number", optional: true, description: "Maximum number of search results to return." },
@@ -435,11 +475,15 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "terminal.execute":
     "Use this instead of the local shell when the command is intended for a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd). If the shell prompt cannot be recognized while the connection is alive and no busy signal is present, the command is NOT sent and the tool returns SHELL_READINESS_UNKNOWN (a recoverable, non-terminal result, not a failed command): do not blind-type into a possible password prompt — inspect the terminal read-only with get_environment or terminal_read_context, re-check readiness after the user presses Enter, reuse another idle session, or ask the user to confirm the prompt before retrying.",
   "terminal.executeBulk":
-    "Run the same command on several terminal sessions in parallel and wait for all of them. Call get_environment first to resolve sessionIds, and pass them as a JSON array of 2-20 unique ids. All ids are checked before anything is sent: if any id is out of scope, disconnected, busy or blocked by the safety policy, the call fails and no command runs on any host. Use only for commands expected to finish within about 60 seconds; every host gets the same timeout. Hosts with identical results are grouped, each group reports status, exitCode, stdout and stderr. A non-zero exitCode is a normal result, not a tool failure. Each confirm-mode call needs a fresh user approval listing every host. For a single session use terminal_execute; this tool rejects fewer than 2.",
+    "Call get_environment first to resolve sessionIds, and pass them as a JSON array of 2-20 unique ids. All ids are checked before anything is sent: if any id is out of scope, disconnected, busy or blocked by the safety policy, the call fails and no command runs on any host. Use only for commands expected to finish within about 60 seconds; every host gets the same timeout. Hosts with identical results are grouped; each group reports status, exitCode and stdout. A non-zero exitCode is a normal result, not a tool failure. Each confirm-mode call needs a fresh user approval listing every host. For a single session use terminal_execute; this tool rejects fewer than 2.",
   "terminal.start":
     "Use this instead of the local shell for long-running commands on a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes. Shell state such as cd or export does not persist between calls — combine cd with the command.",
   "terminal.poll":
     "Wait at least about 30 seconds between polls unless output justifies checking sooner.",
+  "terminal.startBulk":
+    "Call get_environment first and pass 2-20 unique sessionIds as a JSON array. All ids are checked before anything starts: if any id is out of scope, disconnected, busy or blocked by the safety policy, no job starts on any host. Each confirm-mode call needs a fresh user approval listing every host. Returns a bulkId and one jobId per host; poll and stop them with terminal_poll_bulk and terminal_stop_bulk. Jobs keep running if the agent run is stopped. For one session use terminal_start; for short commands use terminal_execute_bulk.",
+  "terminal.pollBulk":
+    "Pass each job's nextOffset in offsets to get only new output. Each job returns at most about 4 KB, less when many jobs are busy; when there is more, the newest output is returned and skippedChars says how much was skipped. Use terminal_poll on one job for its full output. allCompleted is true when no job is running. Wait at least about 30 seconds between polls unless output justifies checking sooner.",
   "vault.host.notes.get":
     "Host metadata notes on a saved host — not Vault → Notes sidebar entries.",
   "vault.host.notes.set":
@@ -474,6 +518,10 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
     "Returns full Netcatty automation script syntax reference (nct API, triggers, host targeting). Read before authoring scripts.",
   "vault.host.connectScripts.set":
     "Sets per-host onConnect script queue order. Global and matching dynamic-group scripts run first automatically.",
+  "harness.remote_desktop.read_screen":
+    "Use this for graphical VNC or RDP sessions (which have no text PTY). Start with a full-screen standard capture; pass grid=\"true\" when you need precise 0-1000 coordinates before clicking with remote_desktop_act. If small dialog or log text is hard to read, re-call with cropX/cropY/cropWidth/cropHeight (0-1000 permille coordinates) and quality=\"high\" for a crisp 1:1 native-pixel zoom.",
+  "harness.remote_desktop.act":
+    "Use this to interact with graphical VNC or RDP sessions (which have no text PTY). Always inspect the screen first with remote_desktop_read_screen (pass grid=\"true\" for exact 0-1000 coordinates). Batch up to 12 logical steps per call (for example click an input field, type text, and press Enter). By default a post-action verification screenshot is captured automatically after settleMs; inspect it before acting again. High-risk OS chords (Ctrl+Alt+Del, Alt+F4, Win+R, Win+L, Ctrl+Shift+Esc, Cmd+Q) always require explicit user confirmation. If USER_PREEMPTED, AI_READ_BLOCKED, or SESSION_VIEW_ONLY is returned, stop and check with the user.",
 });
 
 module.exports = {

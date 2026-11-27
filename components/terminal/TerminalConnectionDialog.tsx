@@ -76,12 +76,35 @@ export interface TerminalConnectionDialogProps {
         onContinue: () => void;
         onAddAndContinue: () => void;
     };
+    /** Optional protocol override when testing companion RDP/VNC on an SSH host. */
+    protocolOverride?: 'ssh' | 'rdp' | 'vnc';
+    /** Optional structured summary block shown when status === 'connected'. */
+    summaryContent?: React.ReactNode;
     // Progress props
     progressProps: Omit<TerminalConnectionProgressProps, 'status' | 'error' | 'showLogs' | 'showEnterReconnectHint'>;
 }
 
 // Helper to get protocol display info
-const getProtocolInfo = (host: Host): { i18nKey: string; showPort: boolean; port: number } => {
+const getProtocolInfo = (
+    host: Host,
+    protocolOverride?: 'ssh' | 'rdp' | 'vnc',
+): { i18nKey: string; fallbackLabel?: string; showPort: boolean; port: number } => {
+    if (protocolOverride === 'rdp') {
+        return {
+            i18nKey: '',
+            fallbackLabel: 'RDP',
+            showPort: true,
+            port: host.rdpConfig?.port || (host.protocol === 'rdp' ? host.port : undefined) || 3389,
+        };
+    }
+    if (protocolOverride === 'vnc') {
+        return {
+            i18nKey: '',
+            fallbackLabel: 'VNC',
+            showPort: true,
+            port: host.vncConfig?.port || (host.protocol === 'vnc' ? host.port : undefined) || 5900,
+        };
+    }
     // Check moshEnabled first since mosh uses protocol: "ssh" with moshEnabled: true
     if (host.moshEnabled) {
         return { i18nKey: 'terminal.connection.protocol.mosh', showPort: true, port: host.port || 22 };
@@ -104,6 +127,10 @@ const getProtocolInfo = (host: Host): { i18nKey: string; showPort: boolean; port
         case 'telnet':
             // Telnet uses telnetPort, not port (which is SSH port)
             return { i18nKey: 'terminal.connection.protocol.telnet', showPort: true, port: resolveTelnetPort(host) };
+        case 'rdp':
+            return { i18nKey: '', fallbackLabel: 'RDP', showPort: true, port: host.rdpConfig?.port || host.port || 3389 };
+        case 'vnc':
+            return { i18nKey: '', fallbackLabel: 'VNC', showPort: true, port: host.vncConfig?.port || host.port || 5900 };
         case 'mosh':
             return { i18nKey: 'terminal.connection.protocol.mosh', showPort: true, port: host.port || 22 };
         case 'serial':
@@ -131,6 +158,8 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
     showEnterReconnectHint,
     isFocusedPane,
     hostKeyVerification,
+    protocolOverride,
+    summaryContent,
     progressProps,
 }) => {
     const { t } = useI18n();
@@ -139,7 +168,8 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
     const isRestoredDisconnected = status === 'disconnected' && restoreState === 'restored-disconnected';
     const isConnecting = status === 'connecting';
     const canDismissDisconnected = status === 'disconnected' && !needsAuth && !!onDismissDisconnected;
-    const protocolInfo = getProtocolInfo(host);
+    const protocolInfo = getProtocolInfo(host, protocolOverride);
+    const protocolLabel = protocolInfo.i18nKey ? t(protocolInfo.i18nKey) : (protocolInfo.fallbackLabel ?? '');
     const isVerifyingHostKey = Boolean(hostKeyVerification);
     const isHostKeyChanged = hostKeyVerification?.hostKeyInfo.status === 'changed';
     const shouldCompleteProgress = hasError || (!isConnecting && !needsAuth);
@@ -335,7 +365,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                                         className="text-[10px] font-mono truncate"
                                         style={{ color: 'color-mix(in srgb, var(--terminal-ui-fg, var(--foreground)) 58%, transparent)' }}
                                     >
-                                        {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname}
+                                        {protocolLabel} {protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname}
                                     </div>
                                 </>
                             )}
@@ -465,6 +495,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                                 </div>
                             </div>
                         )}
+                        {status === 'connected' && summaryContent}
                         <TerminalConnectionProgress
                             status={status}
                             error={error}

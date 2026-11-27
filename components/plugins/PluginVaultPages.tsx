@@ -3,7 +3,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import type { usePluginVaultPages } from '../../application/state/usePluginVaultPages';
 import { PluginContributionIcon } from './PluginContributionIcon';
 import { Button } from '../ui/button';
-import { LazyPluginHostDrawnPage } from './LazyPluginHostDrawnPage';
+import { LazyPluginHostDrawnPage, preloadPluginHostDrawnPage } from './LazyPluginHostDrawnPage';
 
 type VaultPages = ReturnType<typeof usePluginVaultPages>;
 const subscribeHidden = (hide: () => void) => activeTabStore.subscribeSync((id) => { if (id !== 'vault') hide(); });
@@ -17,6 +17,8 @@ export function PluginVaultNavigation({ model, collapsed }: { model: VaultPages;
       title={`${page.title} — ${page.pluginName}`}
       aria-label={`${page.title} — ${page.pluginName}`}
       aria-current={model.selected?.key === page.key ? 'page' : undefined}
+      onMouseEnter={preloadPluginHostDrawnPage}
+      onFocus={preloadPluginHostDrawnPage}
       onClick={() => model.select(page.key)}>
       <PluginContributionIcon pluginId={page.pluginId} icon={page.icon} size={16} className="shrink-0" />
       {!collapsed && <span className="truncate">{page.title}</span>}

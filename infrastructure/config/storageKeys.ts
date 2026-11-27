@@ -149,6 +149,7 @@ export const STORAGE_KEY_SFTP_TRANSFER_CENTER = 'netcatty_sftp_transfer_center_v
 export const STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR = 'netcatty_sftp_auto_open_sidebar_v1';
 export const STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD = 'netcatty_sftp_follow_terminal_cwd_v1';
 export const STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE = 'netcatty_sftp_default_view_mode_v1';
+export const STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR = 'netcatty_sftp_tree_double_click_behavior_v1';
 /** Compact vs comfortable SFTP file-list row density. */
 export const STORAGE_KEY_SFTP_LIST_DENSITY = 'netcatty_sftp_list_density_v1';
 export const STORAGE_KEY_SFTP_HOST_VIEW_MODES = 'netcatty_sftp_host_view_modes_v1';
@@ -363,3 +364,20 @@ export const STORAGE_KEY_MONITOR_HIDDEN_COLUMNS = "netcatty_monitor_hidden_colum
 
 // Preferred application for saved terminal logs (independent of SFTP associations).
 export const STORAGE_KEY_SESSION_LOG_APPLICATION = "netcatty.sessionLogApplication";
+
+// Remote Desktop (VNC / RDP) TOFU pinned TLS certificates (SHA-256 fingerprints).
+export const STORAGE_KEY_KNOWN_REMOTE_DESKTOP_CERTS = 'netcatty_known_remote_desktop_certs_v1';
+export const KNOWN_REMOTE_DESKTOP_CERTS = STORAGE_KEY_KNOWN_REMOTE_DESKTOP_CERTS;
+
+// Remote Desktop Session Recordings (device-local settings)
+export const STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD = 'netcatty_remote_desktop_auto_record_v1';
+export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS = 'netcatty_remote_desktop_recording_fps_v1';
+export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO = 'netcatty_remote_desktop_recording_include_audio_v1';
+export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB = 'netcatty_remote_desktop_recording_max_mb_v1';
+export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS = 'netcatty_remote_desktop_recording_retention_days_v1';
+
+// Remote Desktop AI Computer Use audit log (device-local)
+export const STORAGE_KEY_REMOTE_DESKTOP_AI_AUDIT = 'netcatty_remote_desktop_ai_audit_v1';
+
+// Remote Desktop RDPDR local shared folders per host (device-local, never synced to cloud/iOS)
+export const STORAGE_KEY_REMOTE_DESKTOP_SHARED_FOLDERS = 'netcatty_remote_desktop_shared_folders_v1';

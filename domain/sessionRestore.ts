@@ -1,6 +1,15 @@
-import type { PluginConnectionConfig, SerialConfig, TerminalSession, Workspace, WorkspaceNode } from "./models";
+import type {
+  PluginConnectionConfig,
+  RdpConfig,
+  SerialConfig,
+  TerminalSession,
+  VncConfig,
+  Workspace,
+  WorkspaceNode,
+} from "./models";
 import { createEmptyWorkspaceRoot } from "./workspace";
 import { isPluginHostProtocol, sanitizePluginConnection } from "./pluginConnection";
+import { sanitizeRdpConfig, sanitizeVncConfig } from "./remoteDesktop";
 
 export const SESSION_RESTORE_VERSION = 1 as const;
 
@@ -20,6 +29,9 @@ export type RestoredTerminalSession = {
   shellType?: TerminalSession["shellType"];
   charset?: string;
   serialConfig?: SerialConfig;
+  vncConfig?: VncConfig;
+  rdpConfig?: RdpConfig;
+  remoteDesktopCompanion?: boolean;
   localShell?: string;
   localShellArgs?: string[];
   localShellName?: string;
@@ -95,7 +107,7 @@ const isOneOf = <T extends string | number>(
 ): value is T => allowed.includes(value as T);
 
 const sanitizeProtocol = (value: unknown): TerminalSession["protocol"] | undefined => {
-  if (isOneOf(value, ["ssh", "telnet", "mosh", "et", "local", "serial"] as const)) return value;
+  if (isOneOf(value, ["ssh", "telnet", "mosh", "et", "local", "serial", "vnc", "rdp"] as const)) return value;
   return typeof value === "string" && isPluginHostProtocol(value) ? value : undefined;
 };
 
@@ -135,6 +147,8 @@ const sanitizeSerialConfig = (value: unknown): SerialConfig | undefined => {
 
 const restoreSession = (session: TerminalSession): RestoredTerminalSession => {
   const serialConfig = sanitizeSerialConfig(session.serialConfig);
+  const vncConfig = sanitizeVncConfig(session.vncConfig);
+  const rdpConfig = sanitizeRdpConfig(session.rdpConfig);
   const protocol = sanitizeProtocol(session.protocol);
   const pluginConnection = sanitizePluginConnection(session.pluginConnection, protocol);
   const shellType = sanitizeShellType(session.shellType);
@@ -153,6 +167,9 @@ const restoreSession = (session: TerminalSession): RestoredTerminalSession => {
     ...(shellType ? { shellType } : {}),
     ...(session.charset ? { charset: session.charset } : {}),
     ...(serialConfig ? { serialConfig } : {}),
+    ...(vncConfig ? { vncConfig } : {}),
+    ...(rdpConfig ? { rdpConfig } : {}),
+    ...(session.remoteDesktopCompanion === true ? { remoteDesktopCompanion: true } : {}),
     ...(session.localShell !== undefined ? { localShell: session.localShell } : {}),
     ...(session.localShellArgs ? { localShellArgs: [...session.localShellArgs] } : {}),
     ...(session.localShellName !== undefined ? { localShellName: session.localShellName } : {}),
@@ -178,6 +195,8 @@ const restoreSessionFromUnknown = (value: unknown): RestoredTerminalSession | nu
   if (!id || !hostId || !hostLabel || !hostname || username === undefined) return null;
 
   const serialConfig = sanitizeSerialConfig(value.serialConfig);
+  const vncConfig = sanitizeVncConfig(value.vncConfig);
+  const rdpConfig = sanitizeRdpConfig(value.rdpConfig);
   const protocol = sanitizeProtocol(value.protocol);
   const pluginConnection = sanitizePluginConnection(value.pluginConnection, protocol);
   const shellType = sanitizeShellType(value.shellType);
@@ -196,6 +215,9 @@ const restoreSessionFromUnknown = (value: unknown): RestoredTerminalSession | nu
     ...(shellType ? { shellType } : {}),
     ...(readString(value, "charset") ? { charset: readString(value, "charset") } : {}),
     ...(serialConfig ? { serialConfig } : {}),
+    ...(vncConfig ? { vncConfig } : {}),
+    ...(rdpConfig ? { rdpConfig } : {}),
+    ...(readBoolean(value, "remoteDesktopCompanion") === true ? { remoteDesktopCompanion: true } : {}),
     ...(readStringAllowEmpty(value, "localShell") !== undefined ? { localShell: readStringAllowEmpty(value, "localShell") } : {}),
     ...(Array.isArray(value.localShellArgs) ? { localShellArgs: value.localShellArgs.filter((arg): arg is string => typeof arg === "string") } : {}),
     ...(readStringAllowEmpty(value, "localShellName") !== undefined ? { localShellName: readStringAllowEmpty(value, "localShellName") } : {}),

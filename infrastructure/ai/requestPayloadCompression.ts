@@ -206,6 +206,54 @@ function compressContentPartForRequestRetry(
     const output = record.output;
     if (output && typeof output === "object") {
       const outputRecord = output as Record<string, unknown>;
+      if (outputRecord.type === "content" && Array.isArray(outputRecord.value)) {
+        let contentChanged = false;
+        const nextValue = outputRecord.value.map((contentPart) => {
+          if (!contentPart || typeof contentPart !== "object") return contentPart;
+          const partRecord = contentPart as Record<string, unknown>;
+          if (partRecord.type === "file") {
+            const fileMediaType = typeof partRecord.mediaType === "string" ? partRecord.mediaType : "";
+            const keepImage = preserveAttachments && fileMediaType.startsWith("image/");
+            if (!keepImage) {
+              contentChanged = true;
+              const details = [
+                typeof partRecord.filename === "string" ? `filename=${partRecord.filename}` : undefined,
+                fileMediaType ? `mediaType=${fileMediaType}` : undefined,
+              ].filter(Boolean).join(", ");
+              return {
+                type: "text",
+                text: details
+                  ? `[image omitted for request size: ${details}]`
+                  : "[image omitted for request size]",
+              };
+            }
+            return contentPart;
+          }
+          if (partRecord.type === "text" && typeof partRecord.text === "string") {
+            const limit = maxToolResultChars != null && Number.isFinite(maxToolResultChars) && maxToolResultChars > 0
+              ? Math.floor(maxToolResultChars) + Math.max(2_048, Math.floor(Math.floor(maxToolResultChars) * 0.5))
+              : RETRY_MAX_TOOL_RESULT_CHARS;
+            if (partRecord.text.length <= limit) return contentPart;
+            const nextText = maxToolResultChars != null && Number.isFinite(maxToolResultChars) && maxToolResultChars > 0
+              ? truncateTextWithHeadAndTail(partRecord.text, limit)
+              : compressAndTruncateText(partRecord.text, RETRY_MAX_TOOL_RESULT_CHARS);
+            if (nextText === partRecord.text) return contentPart;
+            contentChanged = true;
+            return { ...partRecord, text: nextText };
+          }
+          return contentPart;
+        });
+        if (contentChanged) {
+          return {
+            ...record,
+            output: {
+              ...outputRecord,
+              value: nextValue,
+            },
+          };
+        }
+        return part;
+      }
       const text = outputRecord.type === "text" && typeof outputRecord.value === "string"
         ? outputRecord.value
         : outputRecord.type === "json" ? JSON.stringify(outputRecord.value) : undefined;

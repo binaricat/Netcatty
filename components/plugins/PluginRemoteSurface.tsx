@@ -96,24 +96,25 @@ const RemotePopoverElement = memo(function RemotePopoverElement({ node, settled 
 });
 
 const RemoteSplitPaneElement = memo(function RemoteSplitPaneElement({ node, settled }: { node: RemoteElementNode; settled: boolean }): React.ReactNode {
-  const surface = useContext(SurfaceContext);
+  const { onEvent } = useContext(SurfaceContext);
+  const rawWidgetProps = node.attributes['data-plugin-widget-props'];
   const parsed = useMemo(
-    () => parseWidgetPropsJson<PluginSplitPaneWidgetProps>(node.attributes['data-plugin-widget-props']),
-    [node.attributes['data-plugin-widget-props']],
+    () => parseWidgetPropsJson<PluginSplitPaneWidgetProps>(rawWidgetProps),
+    [rawWidgetProps],
   );
   const elementChildren = node.children.filter((child) => child.type === 1 || (child.type === 3 && child.data.length > 0));
   const firstChild = elementChildren[0] ? renderRemoteNode(elementChildren[0], settled) : null;
   const secondChild = elementChildren[1] ? renderRemoteNode(elementChildren[1], settled) : null;
   const emit = useCallback(
     (widgetEvent: string, detail?: Record<string, unknown>) => {
-      surface.onEvent({
+      onEvent({
         nodeId: node.id,
         type: 'widget',
         widgetEvent,
         detail: detail as PluginSurfaceEvent['detail'],
       });
     },
-    [surface.onEvent, node.id],
+    [onEvent, node.id],
   );
   return (
     <PluginSplitPane
@@ -129,18 +130,18 @@ const RemoteSplitPaneElement = memo(function RemoteSplitPaneElement({ node, sett
 });
 
 const RemoteSlottedWidgetElement = memo(function RemoteSlottedWidgetElement({ node, kind }: { node: RemoteElementNode; kind: SlottedWidgetKind }): React.ReactNode {
-  const surface = useContext(SurfaceContext);
+  const { onEvent, shadowHost } = useContext(SurfaceContext);
   const slotName = `nc-widget-${node.id}`;
   const emit = useCallback(
     (widgetEvent: string, detail?: Record<string, unknown>) => {
-      surface.onEvent({
+      onEvent({
         nodeId: node.id,
         type: 'widget',
         widgetEvent,
         detail: detail as PluginSurfaceEvent['detail'],
       });
     },
-    [surface.onEvent, node.id],
+    [onEvent, node.id],
   );
 
   const wrapperProps = buildRemoteElementProps(node);
@@ -160,7 +161,7 @@ const RemoteSlottedWidgetElement = memo(function RemoteSlottedWidgetElement({ no
         wrapperProps,
         React.createElement('slot', { name: slotName, style: { display: 'contents' } }),
       )}
-      {surface.shadowHost && createPortal(
+      {shadowHost && createPortal(
         <div
           slot={slotName}
           data-plugin-widget-host={kind}
@@ -173,14 +174,15 @@ const RemoteSlottedWidgetElement = memo(function RemoteSlottedWidgetElement({ no
             onWidgetEvent={emit}
           />
         </div>,
-        surface.shadowHost,
+        shadowHost,
       )}
     </>
   );
 });
 
 const resolvedImageCache = new WeakMap<(path: string) => Promise<string>, Map<string, string>>();
-const IMAGE_RETRY_DELAYS_MS = [200, 600] as const;
+const IMAGE_RETRY_DELAYS_MS = [150, 400, 1000] as const;
+const TRANSPARENT_PLACEHOLDER_SRC = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
 function getCachedImageUrl(loader: ((path: string) => Promise<string>) | undefined, imagePath: string | undefined): string | undefined {
   if (!loader || !imagePath) return undefined;
@@ -235,7 +237,15 @@ const RemoteImageElement = memo(function RemoteImageElement({ node }: { node: Re
     };
   }, [imagePath, loadImage]);
   const props = buildRemoteElementProps(node);
-  props.src = imageUrl;
+  if (imageUrl) {
+    props.src = imageUrl;
+  } else {
+    // Use a transparent 1x1 placeholder while loading so Chromium never flashes
+    // a broken-image icon or raw alt text before the rasterized asset arrives.
+    props.src = TRANSPARENT_PLACEHOLDER_SRC;
+    props.alt = '';
+    props['data-plugin-image-loading'] = 'true';
+  }
   return React.createElement('img', props);
 });
 
@@ -328,17 +338,22 @@ function readSelectionRange(
 
 /** Host-owned DOM, kept inside a closed shadow root and a clipped stacking context. */
 export function PluginRemoteSurface({ tree, css, onEvent, settled = true, loadImage, depth = 0 }: { depth?: number; tree: unknown; css: string; settled?: boolean; loadImage?(path: string): Promise<string>; onEvent(event: PluginSurfaceEvent): void }) {
-  const checked = useMemo(() => {
+  const checkedTree = useMemo(() => {
     try {
       validatePluginRemoteTree(tree);
-      return { tree: tree as { children: RemoteNode[] }, css: validatePluginStylesheet(css) };
+      return tree as { children: RemoteNode[] };
     } catch { return null; }
-  }, [tree, css]);
-  if (!checked) return <p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>;
+  }, [tree]);
+  const checkedCss = useMemo(() => {
+    try {
+      return validatePluginStylesheet(css);
+    } catch { return null; }
+  }, [css]);
+  if (!checkedTree || checkedCss === null) return <p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>;
   return (
     <LazyLoadBoundary name="Plugin view" fallback={<p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>}>
       <ResourceLoader.Provider value={loadImage}>
-        <ValidatedPluginRemoteSurface tree={checked.tree} css={checked.css} onEvent={onEvent} settled={settled} depth={depth} />
+        <ValidatedPluginRemoteSurface tree={checkedTree} css={checkedCss} onEvent={onEvent} settled={settled} depth={depth} />
       </ResourceLoader.Provider>
     </LazyLoadBoundary>
   );

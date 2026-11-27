@@ -44,3 +44,23 @@ test("chart reduction preserves missing samples and cadence gaps", () => {
   assert.equal(geometry.segments.length, 4);
   assert.ok(geometry.segments.every((segment) => !segment.path.includes(" L ")));
 });
+
+test("latencyMs field auto-scales with minimum 10ms ceiling and supports hit testing", () => {
+  const latencyPoints: MonitorPoint[] = [
+    { at: 1000, cpu: null, memory: null, disk: null, rx: null, tx: null, latencyMs: 3 },
+    { at: 6000, cpu: null, memory: null, disk: null, rx: null, tx: null, latencyMs: 6 },
+  ];
+  const lowScale = buildMonitorTrendGeometry(latencyPoints, "latencyMs", 1, 5, 6000);
+  assert.equal(lowScale.max, 10);
+  assert.equal(lowScale.segments.length, 1);
+  assert.equal(findMonitorChartPoint(latencyPoints, "latencyMs", 5900, 300), latencyPoints[1]);
+
+  const highScale = buildMonitorTrendGeometry(
+    [...latencyPoints, { at: 11000, cpu: null, memory: null, disk: null, rx: null, tx: null, latencyMs: 85 }],
+    "latencyMs",
+    1,
+    5,
+    11000,
+  );
+  assert.equal(highScale.max, 85);
+});

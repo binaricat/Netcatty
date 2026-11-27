@@ -27,10 +27,35 @@ const HOST_TOKENS = new Set([
   "--radius", "--font-sans", "--font-mono",
 ]);
 const decode = (name) => cssTree.ident.decode(name).toLowerCase();
+const MAX_STYLESHEET_CACHE_ENTRIES = 32;
+const MAX_INLINE_STYLE_CACHE_ENTRIES = 256;
+const validatedStylesheetCache = new Map();
+const validatedInlineStyleCache = new Map();
+
+function getCachedCss(cache, source) {
+  if (!cache.has(source)) return undefined;
+  const value = cache.get(source);
+  cache.delete(source);
+  cache.set(source, value);
+  return value;
+}
+
+function setCachedCss(cache, limit, source, value) {
+  if (cache.has(source)) cache.delete(source);
+  while (cache.size >= limit) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+  cache.set(source, value);
+}
 
 /** Returns canonical CSS only if every construct is safe for a clipped shadow root. */
 function validatePluginCss(source, context = "stylesheet") {
   if (typeof source !== "string" || source.length > MAX_CSS_LENGTH || source.includes("\0")) throw new TypeError("Invalid plugin stylesheet");
+  const cache = context === "stylesheet" ? validatedStylesheetCache : validatedInlineStyleCache;
+  const cached = getCachedCss(cache, source);
+  if (cached !== undefined) return cached;
   let ast;
   try { ast = cssTree.parse(source, { context, parseCustomProperty: true, positions: false }); }
   catch { throw new TypeError("Invalid plugin stylesheet"); }
@@ -60,7 +85,9 @@ function validatePluginCss(source, context = "stylesheet") {
       }
     }
   });
-  return cssTree.generate(ast);
+  const canonical = cssTree.generate(ast);
+  setCachedCss(cache, context === "stylesheet" ? MAX_STYLESHEET_CACHE_ENTRIES : MAX_INLINE_STYLE_CACHE_ENTRIES, source, canonical);
+  return canonical;
 }
 
 function validatePluginStylesheet(source) { return validatePluginCss(source); }

@@ -201,3 +201,39 @@ test("compressMessagesForRequestTooLargeRetry honors custom maxToolResultChars f
   assert.equal(preserved.didAdjust, false);
   assert.deepEqual(preserved.messages, messages);
 });
+
+test("compressMessagesForRequestTooLargeRetry strips tool-result content images on 413 retry while preserving them on routine pass", () => {
+  const messages: ModelMessage[] = [
+    {
+      role: "tool",
+      content: [{
+        type: "tool-result",
+        toolCallId: "rd-1",
+        toolName: "remote_desktop_read_screen",
+        output: {
+          type: "content",
+          value: [
+            { type: "text", text: JSON.stringify({ ok: true, sessionId: "rdp-1" }) },
+            {
+              type: "file",
+              mediaType: "image/jpeg",
+              data: { type: "data", data: "Z".repeat(50_000) },
+              filename: "remote-screen.jpg",
+            },
+          ],
+        },
+      }],
+    } as unknown as ModelMessage,
+  ];
+
+  const routine = compressMessagesForRequestTooLargeRetry(messages, { preserveAttachments: true });
+  assert.equal(routine.didAdjust, false);
+  assert.deepEqual(routine.messages, messages);
+
+  const retry413 = compressMessagesForRequestTooLargeRetry(messages, { preserveAttachments: false });
+  assert.equal(retry413.didAdjust, true);
+  const serialized = JSON.stringify(retry413.messages);
+  assert.doesNotMatch(serialized, /ZZZZZZZZ/);
+  assert.match(serialized, /image omitted for request size/);
+  assert.match(serialized, /rdp-1/);
+});

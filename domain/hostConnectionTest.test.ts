@@ -5,6 +5,7 @@ import {
   buildHostConnectionTestPlan,
   formatConnectionTestProgressLog,
   resolveHostConnectionTestDeadlineMs,
+  resolveRemoteDesktopConnectionTestDeadlineMs,
 } from "./hostConnectionTest";
 import type { Host, SSHKey } from "./models";
 
@@ -49,7 +50,7 @@ test("builds password-auth options without proxy or chain", () => {
   });
 
   assert.equal(plan.ok, true);
-  if (!plan.ok) return;
+  if (!plan.ok || plan.kind !== "ssh") return;
   assert.equal(plan.needsCredentialReentry, false);
   assert.equal(plan.options.hostname, "target.example.test");
   assert.equal(plan.options.port, 22);
@@ -71,7 +72,7 @@ test("builds key-auth options with the resolved private key", () => {
   });
 
   assert.equal(plan.ok, true);
-  if (!plan.ok) return;
+  if (!plan.ok || plan.kind !== "ssh") return;
   assert.equal(plan.options.privateKey, "PRIVATE KEY MATERIAL");
   assert.equal(plan.options.keyId, "key-1");
   assert.equal(plan.options.password, undefined);
@@ -94,7 +95,7 @@ test("resolves a jump-host chain by id", () => {
   });
 
   assert.equal(plan.ok, true);
-  if (!plan.ok) return;
+  if (!plan.ok || plan.kind !== "ssh") return;
   assert.equal(plan.options.jumpHosts?.length, 1);
   assert.equal(plan.options.jumpHosts?.[0].hostname, "jump.example.test");
   assert.equal(plan.options.jumpHosts?.[0].username, "root");
@@ -120,7 +121,7 @@ test("flags an undecryptable primary password for re-entry and strips it", () =>
   });
 
   assert.equal(plan.ok, true);
-  if (!plan.ok) return;
+  if (!plan.ok || plan.kind !== "ssh") return;
   assert.equal(plan.needsCredentialReentry, true);
   assert.equal(plan.options.password, undefined);
 });
@@ -152,7 +153,7 @@ test("pins auto + password to a single password attempt", () => {
   });
 
   assert.equal(plan.ok, true);
-  if (!plan.ok) return;
+  if (!plan.ok || plan.kind !== "ssh") return;
   assert.equal(plan.options.authMethod, "password");
   assert.equal(plan.options.password, "secret");
 });
@@ -164,7 +165,7 @@ test("uses short test-only connection timeouts", () => {
   });
 
   assert.equal(plan.ok, true);
-  if (!plan.ok) return;
+  if (!plan.ok || plan.kind !== "ssh") return;
   assert.equal(plan.options.sshTcpConnectTimeoutMs, 8000);
   assert.equal(plan.options.sshAuthReadyTimeoutMs, 15000);
 });
@@ -201,7 +202,7 @@ test("test deadline follows the probe timeouts, not the host's terminal timeouts
     host: host({ password: "secret", sshTcpConnectTimeoutSeconds: 3, sshAuthReadyTimeoutSeconds: 5 }),
   });
   assert.equal(plan.ok, true);
-  if (!plan.ok) return;
+  if (!plan.ok || plan.kind !== "ssh") return;
 
   // 8s TCP + 15s auth sent to the bridge, plus grace — never the host's 5s.
   assert.equal(resolveHostConnectionTestDeadlineMs(plan.options), 8000 + 15000 + 2000);
@@ -218,4 +219,105 @@ test("test deadline adds every jump hop's dial and auth timeouts", () => {
   });
 
   assert.equal(deadline, 8000 + 15000 + 20000 + 120000 + 1000 + 2000 + 2000);
+});
+
+test("builds zero-credential standalone RDP and VNC probe plans without ever serializing desktop passwords", () => {
+  const rdpPlan = buildHostConnectionTestPlan({
+    ...base,
+    host: host({
+      protocol: "rdp",
+      port: 3390,
+      username: "Administrator",
+      password: "RDP_SECRET_PASSWORD",
+      rdpConfig: {
+        port: 3390,
+        securityMode: "nla",
+        loadBalanceInfo: "Cookie: mstshash=web",
+      },
+    }),
+    knownRemoteDesktopFingerprints: ["AA:BB:CC"],
+  });
+
+  assert.equal(rdpPlan.ok, true);
+  if (!rdpPlan.ok || rdpPlan.kind !== "remote-desktop") {
+    assert.fail("Expected remote-desktop RDP plan");
+  }
+  assert.equal(rdpPlan.needsCredentialReentry, false);
+  assert.equal(rdpPlan.options.protocol, "rdp");
+  assert.equal(rdpPlan.options.hostname, "target.example.test");
+  assert.equal(rdpPlan.options.port, 3390);
+  assert.equal(rdpPlan.options.securityMode, "nla");
+  assert.equal(rdpPlan.options.loadBalanceInfo, "Cookie: mstshash=web");
+  assert.deepEqual(rdpPlan.options.knownCertFingerprints, ["AA:BB:CC"]);
+  assert.ok(!JSON.stringify(rdpPlan.options).includes("RDP_SECRET_PASSWORD"));
+  assert.equal(resolveRemoteDesktopConnectionTestDeadlineMs(rdpPlan.options), 8000 + 8000 + 2000);
+
+  const vncPlan = buildHostConnectionTestPlan({
+    ...base,
+    host: host({
+      protocol: "vnc",
+      port: 5902,
+      password: "VNC_SECRET_PASSWORD",
+    }),
+  });
+  assert.equal(vncPlan.ok, true);
+  if (!vncPlan.ok || vncPlan.kind !== "remote-desktop") {
+    assert.fail("Expected remote-desktop VNC plan");
+  }
+  assert.equal(vncPlan.options.protocol, "vnc");
+  assert.equal(vncPlan.options.port, 5902);
+  assert.ok(!JSON.stringify(vncPlan.options).includes("VNC_SECRET_PASSWORD"));
+});
+
+test("builds companion RDP probe plan over SSH tunnel with SSH tunnel config and extended deadline", () => {
+  const plan = buildHostConnectionTestPlan({
+    ...base,
+    host: host({
+      protocol: "ssh",
+      port: 2222,
+      username: "ops",
+      password: "SSH_TUNNEL_PASSWORD",
+      authMethod: "password",
+      rdpConfig: {
+        enabled: true,
+        port: 3389,
+        tunnelViaHostSsh: true,
+        tunnelTargetHost: "127.0.0.1",
+      },
+    }),
+    protocolOverride: "rdp",
+  });
+
+  assert.equal(plan.ok, true);
+  if (!plan.ok || plan.kind !== "remote-desktop") {
+    assert.fail("Expected companion remote-desktop plan");
+  }
+  assert.equal(plan.options.tunnelViaHostSsh, true);
+  assert.equal(plan.options.hostname, "127.0.0.1");
+  assert.equal(plan.options.port, 3389);
+  assert.equal(plan.options.sshTunnelConfig?.hostname, "target.example.test");
+  assert.equal(plan.options.sshTunnelConfig?.port, 2222);
+  assert.equal(
+    resolveRemoteDesktopConnectionTestDeadlineMs(plan.options),
+    (8000 + 15000) + 8000 + 8000 + 2000,
+  );
+});
+
+test("formats remote desktop probe progress phases", () => {
+  assert.equal(
+    formatConnectionTestProgressLog({ hop: 1, total: 1, label: "win.lan:3389", phase: "resolving" }),
+    "Resolving win.lan:3389...",
+  );
+  assert.equal(
+    formatConnectionTestProgressLog({ hop: 1, total: 1, label: "win.lan:3389", phase: "tcp-connected", error: "12 ms" }),
+    "win.lan:3389 - TCP connected (12 ms)",
+  );
+  assert.equal(
+    formatConnectionTestProgressLog({ hop: 1, total: 1, label: "win.lan:3389", phase: "x224-negotiated", error: "RDP (NLA / CredSSP)" }),
+    "win.lan:3389 - RDP X.224 negotiated (RDP (NLA / CredSSP))",
+  );
+  assert.equal(
+    formatConnectionTestProgressLog({ hop: 1, total: 1, label: "mac.lan:5900", phase: "rfb-banner", error: "RFB 003.889" }),
+    "mac.lan:5900 - VNC banner: RFB 003.889",
+  );
 });

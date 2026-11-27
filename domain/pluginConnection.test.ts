@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  isBuiltInHostProtocol,
   isPluginCredentialCatalogEntryAvailable,
   isSafePluginAuthenticationUrl,
   pluginProtocolForProvider,
@@ -93,4 +94,22 @@ test('plugin authentication URLs require HTTPS except for loopback HTTP callback
   assert.equal(isSafePluginAuthenticationUrl('http://login.example.com/authorize'), false);
   assert.equal(isSafePluginAuthenticationUrl('https://user:password@login.example.com/authorize'), false);
   assert.equal(isSafePluginAuthenticationUrl('javascript:alert(1)'), false);
+});
+
+test('built-in protocols include vnc/rdp and plugin hosts strip rdpConfig/vncConfig', () => {
+  assert.equal(isBuiltInHostProtocol('vnc'), true);
+  assert.equal(isBuiltInHostProtocol('rdp'), true);
+  const pluginHost = stripBuiltInConnectionFieldsForPluginHost({
+    id: 'host-rd',
+    label: 'Desktop',
+    hostname: 'host.test',
+    username: 'admin',
+    tags: [],
+    os: 'windows',
+    protocol: pluginProtocolForProvider('com.example.transport.connection'),
+    rdpConfig: { port: 3389, domain: 'CORP' },
+    vncConfig: { port: 5900, viewOnly: true },
+  });
+  assert.equal(pluginHost.rdpConfig, undefined);
+  assert.equal(pluginHost.vncConfig, undefined);
 });

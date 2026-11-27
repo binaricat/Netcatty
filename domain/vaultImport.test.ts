@@ -1239,3 +1239,69 @@ test("applyVaultHostImport can preserve distinct sessions with the same endpoint
   assert.equal(merged.skippedExistingCount, 0);
   assert.equal(merged.hosts.length, 3);
 });
+
+test("RDP format detection and import builds standalone Windows RDP host", () => {
+  const rdpText = [
+    "full address:s:win-app.corp.local:3390",
+    "username:s:CORP\\Administrator",
+    "desktopwidth:i:1920",
+    "desktopheight:i:1080",
+    "audiomode:i:0",
+  ].join("\r\n");
+
+  assert.equal(detectVaultImportFormat(rdpText), "rdp");
+  const result = importVaultHostsFromText("rdp", rdpText, { fileName: "WinApp.rdp" });
+  assert.equal(result.hosts.length, 1);
+  assert.equal(result.stats.imported, 1);
+  assert.equal(result.hosts[0].label, "WinApp");
+  assert.equal(result.hosts[0].protocol, "rdp");
+  assert.equal(result.hosts[0].os, "windows");
+  assert.equal(result.hosts[0].hostname, "win-app.corp.local");
+  assert.equal(result.hosts[0].port, 3390);
+  assert.equal(result.hosts[0].username, "Administrator");
+  assert.equal(result.hosts[0].rdpConfig?.domain, "CORP");
+});
+
+test("MobaXterm import parses RDP (type 4) and VNC (type 5) sessions and matches rdp:/vnc: passwords", () => {
+  const masterPassword = "moba-master-pass";
+  const encryptMoba = (plaintext: string): string => {
+    const key = createHash("sha512").update(masterPassword, "utf8").digest().subarray(0, 32);
+    const iv = createCipheriv("aes-256-ecb", key, null).update(Buffer.alloc(16));
+    const cipher = createCipheriv("aes-256-cfb8", key, iv);
+    cipher.setAutoPadding(false);
+    return Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]).toString("base64");
+  };
+
+  const result = importVaultHostsFromText("mobaxterm", [
+    "[Sesspass]",
+    "Administrator@WIN=dummy",
+    "[Passwords]",
+    `rdp3390:CORP\\Administrator@10.0.1.10=${encryptMoba("rdp-pass")}`,
+    `vnc5901:10.0.1.20=${encryptMoba("vnc-pass")}`,
+    "[Bookmarks]",
+    "SubRep=Desktops",
+    "ImgNum=42",
+    "Win Server=#91#4%10.0.1.10%3390%CORP\\Administrator%0%0%0%-1#",
+    "Linux VNC=#107#5%10.0.1.20%5901%-1%0#",
+  ].join("\n"), { masterPassword });
+
+  assert.equal(result.hosts.length, 2);
+  const rdpHost = result.hosts.find((h) => h.protocol === "rdp");
+  const vncHost = result.hosts.find((h) => h.protocol === "vnc");
+  assert.ok(rdpHost);
+  assert.ok(vncHost);
+
+  assert.equal(rdpHost.hostname, "10.0.1.10");
+  assert.equal(rdpHost.port, 3390);
+  assert.equal(rdpHost.username, "Administrator");
+  assert.equal(rdpHost.rdpConfig?.domain, "CORP");
+  assert.equal(rdpHost.os, "windows");
+  assert.equal(rdpHost.password, "rdp-pass");
+  assert.equal(rdpHost.authMethod, "password");
+
+  assert.equal(vncHost.hostname, "10.0.1.20");
+  assert.equal(vncHost.port, 5901);
+  assert.equal(vncHost.username, "");
+  assert.equal(vncHost.password, "vnc-pass");
+  assert.equal(vncHost.authMethod, "password");
+});

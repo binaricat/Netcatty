@@ -19,7 +19,7 @@ import {
   shouldCompactByBudget,
 } from './contextBudget';
 import { estimateModelMessagesTokensWithKind } from './tokenEstimator';
-import { pruneStaleToolContext } from './staleContextPruner';
+import { pruneStaleToolContext, SYNTHETIC_REMOTE_SCREEN_MARKER } from './staleContextPruner';
 import type { PrepareStepContextInput } from './turnDrivers/types';
 import type {
   AgentEventListener,
@@ -325,10 +325,28 @@ export function extractLatestUserGoal(messages: ModelMessage[] | ChatMessage[]):
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     if (message.role !== 'user') continue;
-    const content = typeof message.content === 'string'
-      ? message.content.trim()
-      : '';
-    if (content && !content.startsWith('[Netcatty session context')) return sliceHead(content, 500);
+    let content = '';
+    if (typeof message.content === 'string') {
+      content = message.content.trim();
+    } else if (Array.isArray(message.content)) {
+      content = (message.content as unknown[])
+        .filter((part): part is { type: 'text'; text: string } => (
+          typeof part === 'object'
+          && part !== null
+          && (part as { type?: unknown }).type === 'text'
+          && typeof (part as { text?: unknown }).text === 'string'
+        ))
+        .map((part) => part.text.trim())
+        .filter(Boolean)
+        .join('\n');
+    }
+    if (
+      content
+      && !content.startsWith('[Netcatty session context')
+      && !content.startsWith(SYNTHETIC_REMOTE_SCREEN_MARKER)
+    ) {
+      return sliceHead(content, 500);
+    }
   }
   return undefined;
 }

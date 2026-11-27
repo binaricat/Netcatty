@@ -91,3 +91,77 @@ test("unchanged stats are retained by reference while fresh, cleared and new-end
   assert.equal(mergeMonitorSnapshotHistory(merged, { ...delta, hosts: { h: { ...state, stats: null, points: [] } } }).hosts.h.stats, null);
   assert.equal(mergeMonitorSnapshotHistory(merged, { ...delta, hosts: { h: { ...state, historyId: "endpoint-b", stats: null, points: [] } } }).hosts.h.stats, null);
 });
+
+test("incremental snapshots preserve probe metadata, companionProbes, and latencyMs points", () => {
+  const probeState: MonitorHostState = {
+    historyId: "probe-rdp",
+    mode: "probe",
+    status: "live",
+    at: 2000,
+    statsAt: 2000,
+    probe: {
+      protocol: "rdp",
+      port: 3389,
+      reachable: true,
+      rttMs: 12,
+      bannerVerified: true,
+      bannerDetail: "RDP (NLA / CredSSP)",
+      checkedAt: 2000,
+    },
+    points: [{ at: 2000, cpu: null, memory: null, disk: null, rx: null, tx: null, latencyMs: 12 }],
+  };
+  const sshWithComp: MonitorHostState = {
+    ...state,
+    companionProbes: {
+      vnc: {
+        protocol: "vnc",
+        port: 5900,
+        reachable: true,
+        rttMs: 5,
+        bannerVerified: true,
+        bannerDetail: "RFB 3.8",
+        checkedAt: 2000,
+        tunnelViaHostSsh: true,
+      },
+    },
+  };
+  const initial: MonitorSnapshot = {
+    historyMode: "replace",
+    runtimeId: "w1",
+    epoch: 0,
+    takenAt: 2000,
+    running: ["p"],
+    startedAt: { p: 0 },
+    count: 1,
+    hostCount: 2,
+    activeSessions: [],
+    hosts: { rdp: probeState, ssh: sshWithComp },
+  };
+  const delta: MonitorSnapshot = {
+    ...initial,
+    historyMode: "append",
+    takenAt: 7000,
+    hosts: {
+      rdp: {
+        historyId: "probe-rdp",
+        mode: "probe",
+        status: "live",
+        at: 7000,
+        statsAt: 2000,
+        points: [{ at: 7000, cpu: null, memory: null, disk: null, rx: null, tx: null, latencyMs: 15 }],
+      },
+      ssh: {
+        ...state,
+        stats: undefined,
+        companionProbes: undefined,
+        points: [],
+      },
+    },
+  };
+  const merged = mergeMonitorSnapshotHistory(initial, delta);
+  assert.equal(merged.hosts.rdp.mode, "probe");
+  assert.equal(merged.hosts.rdp.probe, probeState.probe);
+  assert.deepEqual(merged.hosts.rdp.points.map((p) => p.latencyMs), [12, 15]);
+  assert.equal(merged.hosts.ssh.companionProbes, sshWithComp.companionProbes);
+  assert.equal(monitorStateSince({ ...probeState, status: "offline" }, 2000)?.status, "queued");
+});

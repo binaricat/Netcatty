@@ -138,12 +138,15 @@ export function PluginErCanvas({
     setViewport({ x, y, zoom });
   }, [tables, positions]);
 
+  const fitToViewRef = useRef(fitToView);
+  fitToViewRef.current = fitToView;
+
   useEffect(() => {
     if (typeof requestAnimationFrame !== 'function') {
-      fitToView();
+      fitToViewRef.current();
       return;
     }
-    const frame = requestAnimationFrame(fitToView);
+    const frame = requestAnimationFrame(() => fitToViewRef.current());
     return () => cancelAnimationFrame(frame);
   }, [tableSignature]);
 

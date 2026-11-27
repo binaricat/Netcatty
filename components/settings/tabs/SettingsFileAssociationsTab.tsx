@@ -9,12 +9,18 @@ import { useSettingsState } from "../../../application/state/useSettingsState";
 import { useStoredString } from "../../../application/state/useStoredString";
 import {
   STORAGE_KEY_SFTP_DEFAULT_DOWNLOAD_DIR,
+  STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR,
   STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD,
 } from "../../../infrastructure/config/storageKeys";
 import {
   buildSftpDownloadDialogDirectoryOptions,
   normalizeSftpDefaultDownloadDirectory,
 } from "../../../domain/sftpDownloadLocation";
+import {
+  DEFAULT_SFTP_TREE_FOLDER_DOUBLE_CLICK_BEHAVIOR,
+  isSftpTreeFolderDoubleClickBehavior,
+  type SftpTreeFolderDoubleClickBehavior,
+} from "../../../domain/sftpTreeFolderDoubleClick";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { Button } from "../../ui/button";
@@ -47,6 +53,11 @@ export default function SettingsFileAssociationsTab() {
   const { t } = useI18n();
   const [packedDownload, setPackedDownload] = useStoredString<string>(STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD, "true");
   const [storedDownloadDir, setStoredDownloadDir] = useStoredString<string>(STORAGE_KEY_SFTP_DEFAULT_DOWNLOAD_DIR, "");
+  const [sftpTreeFolderDoubleClick, setSftpTreeFolderDoubleClick] = useStoredString<SftpTreeFolderDoubleClickBehavior>(
+    STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR,
+    DEFAULT_SFTP_TREE_FOLDER_DOUBLE_CLICK_BEHAVIOR,
+    isSftpTreeFolderDoubleClickBehavior,
+  );
   const defaultDownloadDir = normalizeSftpDefaultDownloadDirectory(storedDownloadDir);
   const [isSelectingDownloadDir, setIsSelectingDownloadDir] = useState(false);
   const { getAllAssociations, removeAssociation, setOpenerForExtension, getDefaultOpener, setDefaultOpener, removeDefaultOpener } = useSftpFileAssociations();
@@ -183,6 +194,24 @@ export default function SettingsFileAssociationsTab() {
             ]}
             onChange={(value) => setSftpDefaultViewMode(value as 'list' | 'tree')}
             className="w-48"
+          />
+        </SettingRow>
+      </SettingCard>
+
+      <SectionHeader title={t('settings.sftp.treeFolderDoubleClick')} />
+      <SettingCard>
+        <SettingRow
+          anchorId="sftp-tree-folder-double-click"
+          description={t('settings.sftp.treeFolderDoubleClick.desc')}
+        >
+          <Select
+            value={sftpTreeFolderDoubleClick}
+            options={[
+              { value: 'navigate', label: t('settings.sftp.treeFolderDoubleClick.navigate') },
+              { value: 'expand', label: t('settings.sftp.treeFolderDoubleClick.expand') },
+            ]}
+            onChange={(value) => setSftpTreeFolderDoubleClick(value as SftpTreeFolderDoubleClickBehavior)}
+            className="w-56"
           />
         </SettingRow>
       </SettingCard>

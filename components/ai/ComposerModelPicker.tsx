@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, Loader2, Pin, RotateCw, Search, Star } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Eye, Loader2, Pin, RotateCw, Search, Star } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import {
@@ -10,6 +10,7 @@ import {
   type ComposerModelPrefs,
   type ComposerPickerModel,
 } from '../../infrastructure/ai/composerPicker';
+import { resolveModelVisionSupport } from '../../infrastructure/ai/visionCapability';
 import type { AgentModelPreset, ProviderConfig } from '../../infrastructure/ai/types';
 import { formatRelativeTime } from '../AIChatSessionHistoryDrawer';
 import { ProviderIconBadge } from '../settings/tabs/ai/ProviderIconBadge';
@@ -60,6 +61,8 @@ export interface ComposerModelPickerProps {
   onSelectProviderModel?: (providerId: string, modelId: string, contextWindow?: number) => void;
   onSelectModel?: (modelId: string, options?: { custom?: boolean }) => void;
   onTogglePinned: (entry: ComposerModelPrefEntry) => void;
+  /** Show subtle eye icons next to vision-capable models (default true). */
+  showVisionBadges?: boolean;
 }
 
 const rowClassName =
@@ -75,23 +78,44 @@ const ModelRow: React.FC<{
   model: ComposerPickerModel;
   selected: boolean;
   pinned: boolean;
+  supportsVision: boolean;
+  visionLabel: string;
   onSelect: () => void;
   onTogglePinned: () => void;
   pinLabel: string;
   unpinLabel: string;
-}> = ({ model, selected, pinned, onSelect, onTogglePinned, pinLabel, unpinLabel }) => (
+}> = ({
+  model,
+  selected,
+  pinned,
+  supportsVision,
+  visionLabel,
+  onSelect,
+  onTogglePinned,
+  pinLabel,
+  unpinLabel,
+}) => (
   <div className="group/row relative">
     <button
       type="button"
       role="option"
       aria-selected={selected}
       onClick={onSelect}
-      className={rowClassName}
+      className={`${rowClassName} pr-7`}
     >
       {selected
         ? <Check size={11} className="text-primary shrink-0" />
         : <span className="w-[11px] shrink-0" />}
       <span className="min-w-0 flex-1 truncate text-foreground/88" title={model.name}>{model.name}</span>
+      {supportsVision && (
+        <span
+          className="inline-flex shrink-0 items-center text-muted-foreground/45"
+          title={visionLabel}
+          data-vision-capable="true"
+        >
+          <Eye size={10} aria-hidden="true" />
+        </span>
+      )}
     </button>
     <button
       type="button"
@@ -127,6 +151,7 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
   onSelectProviderModel,
   onSelectModel,
   onTogglePinned,
+  showVisionBadges = true,
 }) => {
   const { t } = useI18n();
   const hasProviders = providers.length > 0;
@@ -248,6 +273,15 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
       : { modelId, ...(customPrefIds.has(modelId.toLowerCase()) ? { custom: true as const } : {}) }
   );
 
+  const visionBadgeLabel = t('ai.vision.modelSupportsVision');
+  const modelSupportsVision = (model: ComposerPickerModel): boolean => {
+    if (!showVisionBadges) return false;
+    return resolveModelVisionSupport({
+      providerId: previewProvider?.providerId,
+      modelId: model.id,
+    }) === 'yes';
+  };
+
   if (hasProviders && view === 'providers') {
     return (
       <div className="w-[260px] max-w-[calc(100vw-16px)] py-1">
@@ -360,6 +394,8 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
                 model={model}
                 selected={model.id === selectedModelId && (!hasProviders || previewProvider?.id === selectedProviderId)}
                 pinned
+                supportsVision={modelSupportsVision(model)}
+                visionLabel={visionBadgeLabel}
                 onSelect={() => selectModel(model.id)}
                 onTogglePinned={() => onTogglePinned(prefEntryFor(model.id))}
                 pinLabel={t('ai.chat.pinModel')}
@@ -378,6 +414,8 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
                 model={model}
                 selected={model.id === selectedModelId && (!hasProviders || previewProvider?.id === selectedProviderId)}
                 pinned={pinnedKeys.has(model.id)}
+                supportsVision={modelSupportsVision(model)}
+                visionLabel={visionBadgeLabel}
                 onSelect={() => selectModel(model.id)}
                 onTogglePinned={() => onTogglePinned(prefEntryFor(model.id))}
                 pinLabel={t('ai.chat.pinModel')}
@@ -397,6 +435,8 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
             model={model}
             selected={model.id === selectedModelId && (!hasProviders || previewProvider?.id === selectedProviderId)}
             pinned={pinnedKeys.has(model.id)}
+            supportsVision={modelSupportsVision(model)}
+            visionLabel={visionBadgeLabel}
             onSelect={() => selectModel(model.id)}
             onTogglePinned={() => onTogglePinned(prefEntryFor(model.id))}
             pinLabel={t('ai.chat.pinModel')}

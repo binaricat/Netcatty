@@ -2411,5 +2411,59 @@
       "bypassesChatCancel": true
     },
     "agentKind": "global"
+  },
+  {
+    "capabilityId": "harness.remote_desktop.read_screen",
+    "toolName": "remote_desktop_read_screen",
+    "rpcMethod": "netcatty/readRemoteScreen",
+    "localExecution": false,
+    "description": "Capture a read-only screenshot of a connected VNC or RDP remote desktop session in the active AI scope. Use this for graphical VNC or RDP sessions (which have no text PTY). Start with a full-screen standard capture; pass grid=\"true\" when you need precise 0-1000 coordinates before clicking with remote_desktop_act. If small dialog or log text is hard to read, re-call with cropX/cropY/cropWidth/cropHeight (0-1000 permille coordinates) and quality=\"high\" for a crisp 1:1 native-pixel zoom.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": true,
+        "description": "Remote desktop (VNC/RDP) session ID. Optional when the current AI scope contains only one remote desktop session."
+      },
+      "quality": {
+        "type": "string",
+        "optional": true,
+        "description": "Capture quality preset: standard (default, up to 1280px max edge) or high (up to 1920px max edge for dense text)."
+      },
+      "cropX": {
+        "type": "number",
+        "optional": true,
+        "description": "Optional crop left edge in 0-1000 normalized permille coordinates of the full desktop width."
+      },
+      "cropY": {
+        "type": "number",
+        "optional": true,
+        "description": "Optional crop top edge in 0-1000 normalized permille coordinates of the full desktop height."
+      },
+      "cropWidth": {
+        "type": "number",
+        "optional": true,
+        "description": "Optional crop width in 1-1000 normalized permille coordinates. Must be provided together with cropX, cropY, and cropHeight."
+      },
+      "cropHeight": {
+        "type": "number",
+        "optional": true,
+        "description": "Optional crop height in 1-1000 normalized permille coordinates. Must be provided together with cropX, cropY, and cropWidth."
+      },
+      "grid": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to true to draw a translucent 0-1000 global coordinate grid overlay on the captured screenshot (useful before clicking with remote_desktop_act). Default false."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
   }
 ]

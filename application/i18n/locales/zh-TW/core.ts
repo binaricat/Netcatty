@@ -89,6 +89,7 @@ export const zhTWCoreMessages: Messages = {
   'common.apply': '套用',
   'common.use': '使用',
   'common.useGlobal': '跟隨全域',
+  'common.useGroup': '跟隨群組',
   'common.left': '左側',
   'common.right': '右側',
   'common.more': '更多',

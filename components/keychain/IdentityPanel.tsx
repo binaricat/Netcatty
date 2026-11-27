@@ -98,6 +98,15 @@ export const IdentityPanel: React.FC<IdentityPanelProps> = ({
             </div>
 
             <div className="space-y-2">
+                <Label>{t('keychain.identity.domain')}</Label>
+                <Input
+                    value={draftIdentity.domain || ''}
+                    onChange={e => setDraftIdentity({ ...draftIdentity, domain: e.target.value })}
+                    placeholder={t('keychain.identity.domainPlaceholder')}
+                />
+            </div>
+
+            <div className="space-y-2">
                 <Label>{t('terminal.auth.passwordLabel')}</Label>
                 <div className="relative">
                     <Input

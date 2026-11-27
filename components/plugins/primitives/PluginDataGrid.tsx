@@ -59,6 +59,7 @@ export function PluginDataGrid({
 }: PluginDataGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [colWidths, setColWidths] = useState<Record<string, number>>({});
   const [activeCell, setActiveCell] = useState<{ rowIndex: number; colIndex: number } | null>(null);
@@ -68,7 +69,16 @@ export function PluginDataGrid({
     colName: string;
     draft: string;
   } | null>(null);
+  const editingCellRef = useRef(editingCell);
+  editingCellRef.current = editingCell;
   const [lastSelectedRow, setLastSelectedRow] = useState<number | null>(null);
+
+  useEffect(() => () => {
+    if (blurTimerRef.current !== null) {
+      clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = null;
+    }
+  }, []);
 
   const deletedSet = useMemo(() => new Set(deletedRowIndices ?? []), [deletedRowIndices]);
   const selectedSet = useMemo(() => new Set(selectedRowIndices ?? []), [selectedRowIndices]);
@@ -109,8 +119,10 @@ export function PluginDataGrid({
     colVirtualizer.measure();
   }, [colWidths, visibleCols, colVirtualizer]);
 
+  const editRowIndex = editingCell?.rowIndex;
+  const editColIndex = editingCell?.colIndex;
   useEffect(() => {
-    if (editingCell) {
+    if (editRowIndex !== undefined && editColIndex !== undefined) {
       const focusInput = () => {
         editInputRef.current?.focus();
         editInputRef.current?.select();
@@ -121,7 +133,7 @@ export function PluginDataGrid({
         focusInput();
       }
     }
-  }, [editingCell?.rowIndex, editingCell?.colIndex]);
+  }, [editRowIndex, editColIndex]);
 
   const getRowAt = useCallback((rowIndex: number): { row: PluginDataGridRow; isInserted: boolean } | null => {
     if (rowIndex < rows.length) return { row: rows[rowIndex], isInserted: false };
@@ -145,6 +157,11 @@ export function PluginDataGrid({
   }, [dirtyCells, getRowAt]);
 
   const commitEdit = useCallback((cell: { rowIndex: number; colIndex: number; colName: string; draft: string }, asNull = false) => {
+    if (blurTimerRef.current !== null) {
+      clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = null;
+    }
+    editingCellRef.current = null;
     setEditingCell(null);
     onWidgetEvent('cellEdit', {
       rowIndex: cell.rowIndex,
@@ -202,13 +219,13 @@ export function PluginDataGrid({
     const startX = event.clientX;
     const startWidth = getColWidth(col);
     const target = event.currentTarget;
-    try { target.setPointerCapture(event.pointerId); } catch {}
+    try { target.setPointerCapture(event.pointerId); } catch { /* pointer capture unsupported */ }
     const onMove = (moveEvent: PointerEvent) => {
       const nextWidth = Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, Math.round(startWidth + (moveEvent.clientX - startX))));
       setColWidths((prev) => (prev[col.name] === nextWidth ? prev : { ...prev, [col.name]: nextWidth }));
     };
     const onUp = () => {
-      try { target.releasePointerCapture(event.pointerId); } catch {}
+      try { target.releasePointerCapture(event.pointerId); } catch { /* pointer already released */ }
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
@@ -241,7 +258,7 @@ export function PluginDataGrid({
           return value === null || value === undefined ? 'NULL' : formatCellDisplay(value);
         }).join('\t'))
         .join('\n');
-      try { void navigator.clipboard?.writeText?.(text)?.catch?.(() => {}); } catch {}
+      try { void navigator.clipboard?.writeText?.(text)?.catch?.(() => {}); } catch { /* clipboard unavailable */ }
       onWidgetEvent('cellCopy', {
         text,
         rowIndex: activeCell?.rowIndex ?? selectedIndices[0],
@@ -255,7 +272,7 @@ export function PluginDataGrid({
       if (!entry) return false;
       const { value } = getEffectiveValue(activeCell.rowIndex, entry.col, entry.origIndex);
       const text = value === null || value === undefined ? 'NULL' : formatCellDisplay(value);
-      try { void navigator.clipboard?.writeText?.(text)?.catch?.(() => {}); } catch {}
+      try { void navigator.clipboard?.writeText?.(text)?.catch?.(() => {}); } catch { /* clipboard unavailable */ }
       onWidgetEvent('cellCopy', {
         text,
         rowIndex: activeCell.rowIndex,
@@ -592,6 +609,11 @@ export function PluginDataGrid({
                                         commitEdit(editingCell, false);
                                       } else if (e.key === 'Escape') {
                                         e.preventDefault();
+                                        if (blurTimerRef.current !== null) {
+                                          clearTimeout(blurTimerRef.current);
+                                          blurTimerRef.current = null;
+                                        }
+                                        editingCellRef.current = null;
                                         setEditingCell(null);
                                       } else if (e.key === 'Tab') {
                                         e.preventDefault();
@@ -604,19 +626,13 @@ export function PluginDataGrid({
                                     }}
                                     onBlur={() => {
                                       const snapshot = editingCell;
-                                      setTimeout(() => {
-                                        setEditingCell((curr) => {
-                                          if (curr && curr.rowIndex === snapshot.rowIndex && curr.colIndex === snapshot.colIndex) {
-                                            onWidgetEvent('cellEdit', {
-                                              rowIndex: curr.rowIndex,
-                                              colName: curr.colName,
-                                              value: curr.draft,
-                                              isNull: false,
-                                            });
-                                            return null;
-                                          }
-                                          return curr;
-                                        });
+                                      if (blurTimerRef.current !== null) clearTimeout(blurTimerRef.current);
+                                      blurTimerRef.current = setTimeout(() => {
+                                        blurTimerRef.current = null;
+                                        const curr = editingCellRef.current;
+                                        if (curr && curr.rowIndex === snapshot.rowIndex && curr.colIndex === snapshot.colIndex) {
+                                          commitEdit(curr, false);
+                                        }
                                       }, 0);
                                     }}
                                     className="h-6 min-w-0 flex-1 rounded border border-primary bg-background px-1.5 font-mono text-[12px] text-foreground outline-none"

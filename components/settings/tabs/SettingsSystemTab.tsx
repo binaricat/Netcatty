@@ -1,13 +1,38 @@
 /**
  * Settings System Tab - System information, temp file management, session logs, and global hotkey
  */
-import { ChevronDown, ChevronRight, Download, ExternalLink, FolderOpen, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, ExternalLink, FolderOpen, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
+import {
+  JumpServerIcon,
+  RdpProtocolIcon,
+  SystemRdpClientIcon,
+} from "../../icons/RemoteDesktopIcons";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import type { AppLockSystemUnlockStatus } from "../../../application/state/useAppLockState";
 import type { AppLockSettings, AppLockSettingsChangeError, AppLockTimeoutMinutes } from "../../../domain/appLock";
 import { getCredentialProtectionAvailability } from "../../../infrastructure/services/credentialProtection";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
+import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
+import {
+  STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS,
+} from "../../../infrastructure/config/storageKeys";
+import {
+  DEFAULT_REMOTE_DESKTOP_AUTO_RECORD,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_FPS,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_MAX_MB,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS,
+  normalizeRemoteDesktopRecordingFps,
+  normalizeRemoteDesktopRecordingMaxMb,
+  normalizeRemoteDesktopRecordingRetentionDays,
+  type RemoteDesktopRecordingFps,
+} from "../../../application/state/settingsStorageSync";
+import { VaultDeleteConfirmDialog } from "../../vault/VaultDeleteConfirmDialog";
 import type { UpdateState } from '../../../application/state/useUpdateCheck';
 import { SessionLogFormat, keyEventToString } from "../../../domain/models";
 import type { HttpNetworkProxyMode, HttpNetworkProxySettings } from "../../../domain/httpNetworkProxy";
@@ -104,12 +129,24 @@ interface SettingsSystemTabProps {
   setSessionLogsFormat: (format: SessionLogFormat) => void;
   sessionLogsTimestampsEnabled: boolean;
   setSessionLogsTimestampsEnabled: (enabled: boolean) => void;
+  remoteDesktopAutoRecord?: boolean;
+  setRemoteDesktopAutoRecord?: (enabled: boolean) => void;
+  remoteDesktopRecordingFps?: RemoteDesktopRecordingFps;
+  setRemoteDesktopRecordingFps?: (fps: RemoteDesktopRecordingFps) => void;
+  remoteDesktopRecordingIncludeAudio?: boolean;
+  setRemoteDesktopRecordingIncludeAudio?: (enabled: boolean) => void;
+  remoteDesktopRecordingMaxMb?: number;
+  setRemoteDesktopRecordingMaxMb?: (maxMb: number) => void;
+  remoteDesktopRecordingRetentionDays?: number;
+  setRemoteDesktopRecordingRetentionDays?: (days: number) => void;
   sshDebugLogsEnabled: boolean;
   setSshDebugLogsEnabled: (enabled: boolean) => void;
   sshDeepLinkEnabled: boolean;
   setSshDeepLinkEnabled: (enabled: boolean) => void;
   jmsDeepLinkEnabled: boolean;
   setJmsDeepLinkEnabled: (enabled: boolean) => void;
+  jumpServerRdpLaunchMode?: 'builtin' | 'system';
+  setJumpServerRdpLaunchMode?: (mode: 'builtin' | 'system') => void;
   explorerContextMenuEnabled: boolean;
   setExplorerContextMenuEnabled: (enabled: boolean) => void;
   explorerContextMenuSupported: boolean;
@@ -158,12 +195,24 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   setSessionLogsFormat,
   sessionLogsTimestampsEnabled,
   setSessionLogsTimestampsEnabled,
+  remoteDesktopAutoRecord: remoteDesktopAutoRecordProp,
+  setRemoteDesktopAutoRecord: setRemoteDesktopAutoRecordProp,
+  remoteDesktopRecordingFps: remoteDesktopRecordingFpsProp,
+  setRemoteDesktopRecordingFps: setRemoteDesktopRecordingFpsProp,
+  remoteDesktopRecordingIncludeAudio: remoteDesktopRecordingIncludeAudioProp,
+  setRemoteDesktopRecordingIncludeAudio: setRemoteDesktopRecordingIncludeAudioProp,
+  remoteDesktopRecordingMaxMb: remoteDesktopRecordingMaxMbProp,
+  setRemoteDesktopRecordingMaxMb: setRemoteDesktopRecordingMaxMbProp,
+  remoteDesktopRecordingRetentionDays: remoteDesktopRecordingRetentionDaysProp,
+  setRemoteDesktopRecordingRetentionDays: setRemoteDesktopRecordingRetentionDaysProp,
   sshDebugLogsEnabled,
   setSshDebugLogsEnabled,
   sshDeepLinkEnabled,
   setSshDeepLinkEnabled,
   jmsDeepLinkEnabled,
   setJmsDeepLinkEnabled,
+  jumpServerRdpLaunchMode = 'builtin',
+  setJumpServerRdpLaunchMode,
   explorerContextMenuEnabled,
   setExplorerContextMenuEnabled,
   explorerContextMenuSupported,
@@ -219,6 +268,143 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   const [isLoadingSshDebugLogInfo, setIsLoadingSshDebugLogInfo] = useState(false);
   const [isClearingSessionLogs, setIsClearingSessionLogs] = useState(false);
   const [sessionLogsClearResult, setSessionLogsClearResult] = useState<{ deletedCount: number; failedCount: number } | null>(null);
+
+  // Local fallback state for Remote Desktop Recordings settings so the card stays
+  // functional whether or not the parent container passes these props explicitly.
+  const [localRdAutoRecord, setLocalRdAutoRecord] = useState<boolean>(() => {
+    const stored = localStorageAdapter.readBoolean(STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD);
+    return stored ?? DEFAULT_REMOTE_DESKTOP_AUTO_RECORD;
+  });
+  const [localRdFps, setLocalRdFps] = useState<RemoteDesktopRecordingFps>(() => {
+    const stored = localStorageAdapter.readString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS);
+    return stored === null
+      ? DEFAULT_REMOTE_DESKTOP_RECORDING_FPS
+      : normalizeRemoteDesktopRecordingFps(stored);
+  });
+  const [localRdIncludeAudio, setLocalRdIncludeAudio] = useState<boolean>(() => {
+    const stored = localStorageAdapter.readBoolean(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO);
+    return stored ?? DEFAULT_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO;
+  });
+  const [localRdMaxMb, setLocalRdMaxMb] = useState<number>(() => {
+    const stored = localStorageAdapter.readString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB);
+    return stored === null
+      ? DEFAULT_REMOTE_DESKTOP_RECORDING_MAX_MB
+      : normalizeRemoteDesktopRecordingMaxMb(stored);
+  });
+  const [localRdRetentionDays, setLocalRdRetentionDays] = useState<number>(() => {
+    const stored = localStorageAdapter.readString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS);
+    return stored === null
+      ? DEFAULT_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS
+      : normalizeRemoteDesktopRecordingRetentionDays(stored);
+  });
+
+  const remoteDesktopAutoRecord = remoteDesktopAutoRecordProp ?? localRdAutoRecord;
+  const remoteDesktopRecordingFps = remoteDesktopRecordingFpsProp ?? localRdFps;
+  const remoteDesktopRecordingIncludeAudio = remoteDesktopRecordingIncludeAudioProp ?? localRdIncludeAudio;
+  const remoteDesktopRecordingMaxMb = remoteDesktopRecordingMaxMbProp ?? localRdMaxMb;
+  const remoteDesktopRecordingRetentionDays = remoteDesktopRecordingRetentionDaysProp ?? localRdRetentionDays;
+
+  const handleSetRemoteDesktopAutoRecord = useCallback((enabled: boolean) => {
+    if (setRemoteDesktopAutoRecordProp) {
+      setRemoteDesktopAutoRecordProp(enabled);
+      return;
+    }
+    setLocalRdAutoRecord(enabled);
+    localStorageAdapter.writeBoolean(STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD, enabled);
+    netcattyBridge.get()?.notifySettingsChanged?.({ key: STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD, value: enabled });
+  }, [setRemoteDesktopAutoRecordProp]);
+
+  const handleSetRemoteDesktopRecordingFps = useCallback((fps: RemoteDesktopRecordingFps) => {
+    const normalized = normalizeRemoteDesktopRecordingFps(fps);
+    if (setRemoteDesktopRecordingFpsProp) {
+      setRemoteDesktopRecordingFpsProp(normalized);
+      return;
+    }
+    setLocalRdFps(normalized);
+    localStorageAdapter.writeString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS, String(normalized));
+    netcattyBridge.get()?.notifySettingsChanged?.({ key: STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS, value: normalized });
+  }, [setRemoteDesktopRecordingFpsProp]);
+
+  const handleSetRemoteDesktopRecordingIncludeAudio = useCallback((enabled: boolean) => {
+    if (setRemoteDesktopRecordingIncludeAudioProp) {
+      setRemoteDesktopRecordingIncludeAudioProp(enabled);
+      return;
+    }
+    setLocalRdIncludeAudio(enabled);
+    localStorageAdapter.writeBoolean(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO, enabled);
+    netcattyBridge.get()?.notifySettingsChanged?.({ key: STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO, value: enabled });
+  }, [setRemoteDesktopRecordingIncludeAudioProp]);
+
+  const handleSetRemoteDesktopRecordingMaxMb = useCallback((maxMb: number) => {
+    const normalized = normalizeRemoteDesktopRecordingMaxMb(maxMb);
+    if (setRemoteDesktopRecordingMaxMbProp) {
+      setRemoteDesktopRecordingMaxMbProp(normalized);
+      return;
+    }
+    setLocalRdMaxMb(normalized);
+    localStorageAdapter.writeString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB, String(normalized));
+    netcattyBridge.get()?.notifySettingsChanged?.({ key: STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB, value: normalized });
+  }, [setRemoteDesktopRecordingMaxMbProp]);
+
+  const handleSetRemoteDesktopRecordingRetentionDays = useCallback((days: number) => {
+    const normalized = normalizeRemoteDesktopRecordingRetentionDays(days);
+    if (setRemoteDesktopRecordingRetentionDaysProp) {
+      setRemoteDesktopRecordingRetentionDaysProp(normalized);
+      return;
+    }
+    setLocalRdRetentionDays(normalized);
+    localStorageAdapter.writeString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS, String(normalized));
+    netcattyBridge.get()?.notifySettingsChanged?.({ key: STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS, value: normalized });
+  }, [setRemoteDesktopRecordingRetentionDaysProp]);
+
+  const [recordingStats, setRecordingStats] = useState<{ count: number; totalBytes: number; dirPath: string } | null>(null);
+  const [isLoadingRecordingStats, setIsLoadingRecordingStats] = useState(false);
+  const [isClearingRecordings, setIsClearingRecordings] = useState(false);
+  const [clearRecordingsConfirmOpen, setClearRecordingsConfirmOpen] = useState(false);
+  const [recordingsClearDeletedCount, setRecordingsClearDeletedCount] = useState<number | null>(null);
+
+  const loadRecordingStats = useCallback(async () => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.remoteDesktopRecordings?.getStats) return;
+    setIsLoadingRecordingStats(true);
+    try {
+      const stats = await bridge.remoteDesktopRecordings.getStats();
+      setRecordingStats(stats);
+    } catch (err) {
+      console.error("[SettingsSystemTab] Failed to get recording stats:", err);
+    } finally {
+      setIsLoadingRecordingStats(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRecordingStats();
+  }, [loadRecordingStats]);
+
+  const handleOpenRecordingsFolder = useCallback(async () => {
+    try {
+      await netcattyBridge.get()?.remoteDesktopRecordings?.openFolder?.();
+    } catch (err) {
+      console.error("[SettingsSystemTab] Failed to open recordings folder:", err);
+    }
+  }, []);
+
+  const handleConfirmClearAllRecordings = useCallback(async () => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.remoteDesktopRecordings?.clearAll) return;
+    setIsClearingRecordings(true);
+    setRecordingsClearDeletedCount(null);
+    try {
+      const res = await bridge.remoteDesktopRecordings.clearAll({});
+      setRecordingsClearDeletedCount(res?.deleted ?? 0);
+      setClearRecordingsConfirmOpen(false);
+      await loadRecordingStats();
+    } catch (err) {
+      console.error("[SettingsSystemTab] Failed to clear recordings:", err);
+    } finally {
+      setIsClearingRecordings(false);
+    }
+  }, [loadRecordingStats]);
 
   const [appVersion, setAppVersion] = useState('');
 
@@ -1187,6 +1373,162 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
               {t("settings.sessionLogs.hint")}
             </SettingHint>
 
+          <SectionHeader title={t("settings.remoteDesktopRecordings.title")} />
+            <SettingCard className="space-y-4 py-4">
+              <SettingRow
+                anchorId="system-remote-desktop-recordings-auto"
+                label={t("settings.remoteDesktopRecordings.autoRecord")}
+                description={t("settings.remoteDesktopRecordings.autoRecordDesc")}
+              >
+                <Toggle
+                  checked={remoteDesktopAutoRecord}
+                  onChange={handleSetRemoteDesktopAutoRecord}
+                  ariaLabel={t("settings.remoteDesktopRecordings.autoRecord")}
+                />
+              </SettingRow>
+
+              <SettingRow
+                anchorId="system-remote-desktop-recordings-fps"
+                label={t("settings.remoteDesktopRecordings.fps")}
+                description={t("settings.remoteDesktopRecordings.fpsDesc")}
+              >
+                <Select
+                  value={String(remoteDesktopRecordingFps)}
+                  options={[
+                    { value: "5", label: t("settings.remoteDesktopRecordings.fpsOption", { fps: 5 }) },
+                    { value: "10", label: t("settings.remoteDesktopRecordings.fpsOption", { fps: 10 }) },
+                    { value: "15", label: t("settings.remoteDesktopRecordings.fpsOption", { fps: 15 }) },
+                  ]}
+                  onChange={(val) => handleSetRemoteDesktopRecordingFps(Number(val) as RemoteDesktopRecordingFps)}
+                  className="w-36"
+                />
+              </SettingRow>
+
+              <SettingRow
+                anchorId="system-remote-desktop-recordings-audio"
+                label={t("settings.remoteDesktopRecordings.includeAudio")}
+                description={t("settings.remoteDesktopRecordings.includeAudioDesc")}
+              >
+                <Toggle
+                  checked={remoteDesktopRecordingIncludeAudio}
+                  onChange={handleSetRemoteDesktopRecordingIncludeAudio}
+                  ariaLabel={t("settings.remoteDesktopRecordings.includeAudio")}
+                />
+              </SettingRow>
+
+              <SettingRow
+                anchorId="system-remote-desktop-recordings-max-mb"
+                label={t("settings.remoteDesktopRecordings.maxStorage")}
+                description={t("settings.remoteDesktopRecordings.maxStorageDesc")}
+              >
+                <Select
+                  value={String(remoteDesktopRecordingMaxMb)}
+                  options={[
+                    { value: "256", label: "256 MB" },
+                    { value: "512", label: "512 MB" },
+                    { value: "1024", label: "1 GB" },
+                    { value: "2048", label: "2 GB" },
+                    { value: "5120", label: "5 GB" },
+                  ]}
+                  onChange={(val) => handleSetRemoteDesktopRecordingMaxMb(Number(val))}
+                  className="w-36"
+                />
+              </SettingRow>
+
+              <SettingRow
+                anchorId="system-remote-desktop-recordings-retention"
+                label={t("settings.remoteDesktopRecordings.retentionDays")}
+                description={t("settings.remoteDesktopRecordings.retentionDaysDesc")}
+              >
+                <Select
+                  value={String(remoteDesktopRecordingRetentionDays)}
+                  options={[
+                    { value: "7", label: t("settings.remoteDesktopRecordings.retentionDaysOption", { days: 7 }) },
+                    { value: "14", label: t("settings.remoteDesktopRecordings.retentionDaysOption", { days: 14 }) },
+                    { value: "30", label: t("settings.remoteDesktopRecordings.retentionDaysOption", { days: 30 }) },
+                    { value: "90", label: t("settings.remoteDesktopRecordings.retentionDaysOption", { days: 90 }) },
+                    { value: "0", label: t("settings.remoteDesktopRecordings.retentionUnlimited") },
+                  ]}
+                  onChange={(val) => handleSetRemoteDesktopRecordingRetentionDays(Number(val))}
+                  className="w-36"
+                />
+              </SettingRow>
+
+              <div className="space-y-2 pt-3 border-t border-border/60">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{t("settings.remoteDesktopRecordings.storageUsage")}</p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {recordingStats
+                        ? t("settings.remoteDesktopRecordings.storageUsageSummary", {
+                            count: recordingStats.count,
+                            size: formatBytes(recordingStats.totalBytes),
+                          })
+                        : t("settings.remoteDesktopRecordings.storageUsageLoading")}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => void loadRecordingStats()}
+                          disabled={isLoadingRecordingStats}
+                          className="h-8 w-8"
+                        >
+                          <RefreshCw size={14} className={cn(isLoadingRecordingStats && "animate-spin")} />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("settings.remoteDesktopRecordings.refresh")}</TooltipContent>
+                    </Tooltip>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleOpenRecordingsFolder()}
+                      className="gap-1.5"
+                    >
+                      <FolderOpen size={14} />
+                      {t("settings.remoteDesktopRecordings.openFolder")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setClearRecordingsConfirmOpen(true)}
+                      disabled={isClearingRecordings || (recordingStats?.count ?? 0) === 0}
+                      className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 size={14} />
+                      {isClearingRecordings
+                        ? t("settings.system.clearing")
+                        : t("settings.remoteDesktopRecordings.clearAll")}
+                    </Button>
+                  </div>
+                </div>
+                {recordingsClearDeletedCount !== null && (
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.remoteDesktopRecordings.clearResult", { count: recordingsClearDeletedCount })}
+                  </p>
+                )}
+              </div>
+            </SettingCard>
+
+            <SettingHint>
+              {t("settings.remoteDesktopRecordings.hint")}
+            </SettingHint>
+
+            <VaultDeleteConfirmDialog
+              open={clearRecordingsConfirmOpen}
+              title={t("settings.remoteDesktopRecordings.clearAllConfirmTitle")}
+              description={t("settings.remoteDesktopRecordings.clearAllConfirmDesc", {
+                count: recordingStats?.count ?? 0,
+              })}
+              confirmLabel={t("settings.remoteDesktopRecordings.clearAll")}
+              disabled={isClearingRecordings}
+              onOpenChange={setClearRecordingsConfirmOpen}
+              onConfirm={() => void handleConfirmClearAllRecordings()}
+            />
+
           <SectionHeader title={t('settings.sshDeepLink.title')} />
             <SettingCard>
               <SettingRow
@@ -1203,9 +1545,14 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
             </SettingCard>
 
           <SectionHeader title={t('settings.jmsDeepLink.title')} />
-            <SettingCard>
+            <SettingCard divided>
               <SettingRow
                 anchorId="system-jms-deep-link"
+                leading={
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    <JumpServerIcon size={18} />
+                  </div>
+                }
                 label={t('settings.jmsDeepLink.enable')}
                 description={t('settings.jmsDeepLink.enableDesc')}
               >
@@ -1215,6 +1562,85 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                   ariaLabel={t('settings.jmsDeepLink.enable')}
                 />
               </SettingRow>
+              <SettingsAnchor anchorId="system-jms-rdp-launch-mode" className="py-3.5 space-y-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.jmsDeepLink.rdpLaunchMode')}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    {t('settings.jmsDeepLink.rdpLaunchModeDesc')}
+                  </div>
+                </div>
+                <div
+                  role="radiogroup"
+                  aria-label={t('settings.jmsDeepLink.rdpLaunchMode')}
+                  className="grid grid-cols-1 gap-2.5 sm:grid-cols-2"
+                >
+                  {(
+                    [
+                      {
+                        value: 'builtin' as const,
+                        label: t('settings.jmsDeepLink.rdpLaunchMode.builtin'),
+                        hint: 'IronRDP tab inside Netcatty',
+                        icon: <RdpProtocolIcon size={18} />,
+                        activeTint: 'bg-blue-500 text-white shadow-sm',
+                        idleTint: 'bg-blue-500/12 text-blue-600 dark:text-blue-400',
+                      },
+                      {
+                        value: 'system' as const,
+                        label: t('settings.jmsDeepLink.rdpLaunchMode.system'),
+                        hint: isMac ? 'Windows App / Microsoft Remote Desktop' : 'mstsc.exe / OS default handler',
+                        icon: <SystemRdpClientIcon size={18} />,
+                        activeTint: 'bg-sky-500 text-white shadow-sm',
+                        idleTint: 'bg-sky-500/12 text-sky-600 dark:text-sky-400',
+                      },
+                    ] as const
+                  ).map((option) => {
+                    const selected = jumpServerRdpLaunchMode === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        data-jms-rdp-mode={option.value}
+                        onClick={() => setJumpServerRdpLaunchMode?.(option.value)}
+                        className={cn(
+                          'group relative flex items-center gap-3 rounded-xl border p-3 text-left transition-all',
+                          selected
+                            ? 'border-primary/70 bg-primary/8 ring-1 ring-primary/25 shadow-sm'
+                            : 'border-border/60 bg-background/60 hover:border-border hover:bg-secondary/50',
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors',
+                            selected ? option.activeTint : option.idleTint,
+                          )}
+                        >
+                          {option.icon}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-foreground">
+                            {option.label}
+                          </span>
+                          <span className="block truncate text-[11px] text-muted-foreground">
+                            {option.hint}
+                          </span>
+                        </span>
+                        <span
+                          className={cn(
+                            'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors',
+                            selected
+                              ? 'border-primary bg-primary text-primary-foreground'
+                              : 'border-border/80 bg-transparent text-transparent',
+                          )}
+                        >
+                          <Check size={10} strokeWidth={3} />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </SettingsAnchor>
             </SettingCard>
 
           {explorerContextMenuSupported ? (

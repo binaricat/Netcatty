@@ -14,6 +14,7 @@ export const zhTWTerminalMessages: Messages = {
   'terminal.directory.unavailable': '此工作階段暫不支援目錄導覽。',
   'terminal.directory.integrationUnavailable': 'PowerShell 目錄整合尚未就緒，啟動參數或執行原則可能阻止載入。',
   'terminal.directory.cmdIntegrationUnavailable': '正在等待原 CMD 工作階段回報目前目錄。',
+  'terminal.directory.gitBashIntegrationUnavailable': '正在等待原 Git Bash 工作階段中的可存取目錄。',
   'terminal.directory.nonFilesystem': '目前 PowerShell 位置不是檔案系統目錄。',
   'terminal.directory.accessDenied': '沒有權限列出此目錄。',
   'terminal.directory.busy': '請等待終端回到空白命令提示字元。',
@@ -190,6 +191,10 @@ export const zhTWTerminalMessages: Messages = {
   'settings.sftp.defaultViewMode.listDesc': '以平面列表顯示目前目錄的檔案',
   'settings.sftp.defaultViewMode.tree': '樹形檢視',
   'settings.sftp.defaultViewMode.treeDesc': '以層級樹形結構顯示檔案',
+  'settings.sftp.treeFolderDoubleClick': '樹形檢視雙擊資料夾',
+  'settings.sftp.treeFolderDoubleClick.desc': '選擇在 SFTP 樹形檢視中雙擊資料夾時的操作。點選左側箭頭始終在原地展開或摺疊。',
+  'settings.sftp.treeFolderDoubleClick.navigate': '進入目錄',
+  'settings.sftp.treeFolderDoubleClick.expand': '原地展開／摺疊',
 
   'sftp.autoSync.success': '檔案已同步到遠端：{fileName}',
   'sftp.autoSync.error': '同步檔案失敗：{error}',

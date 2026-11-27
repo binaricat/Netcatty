@@ -2,12 +2,13 @@ import { createRequire } from "node:module";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyLocalShellType, detectLocalOs } from "./localShell";
+import { classifyLocalShellType, detectLocalOs, isDiscoveredGitBash } from "./localShell";
 
 const require = createRequire(import.meta.url);
 const cjsLocalShell = require("./localShell.cjs") as {
   classifyLocalShellType: typeof classifyLocalShellType;
   detectLocalOs: typeof detectLocalOs;
+  isDiscoveredGitBash: typeof isDiscoveredGitBash;
 };
 
 test("local shell classification is shared between renderer and CommonJS bridge", () => {
@@ -43,4 +44,17 @@ test("local OS detection is shared between renderer and CommonJS bridge", () => 
   assert.equal(cjsLocalShell.detectLocalOs("MacIntel"), "macos");
   assert.equal(detectLocalOs("Win32"), "windows");
   assert.equal(cjsLocalShell.detectLocalOs("Win32"), "windows");
+});
+
+test("Git Bash discovery matching is shared between renderer and CommonJS bridge", () => {
+  const discovered = "C:\\Program Files\\Git\\bin\\bash.exe";
+  for (const [shell, expected] of [
+    ["git-bash", true],
+    ["c:/program files/git/bin/bash.exe", true],
+    ["wsl-ubuntu", false],
+    [undefined, false],
+  ] as const) {
+    assert.equal(isDiscoveredGitBash(shell, discovered), expected);
+    assert.equal(cjsLocalShell.isDiscoveredGitBash(shell, discovered), expected);
+  }
 });

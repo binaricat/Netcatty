@@ -98,6 +98,7 @@ export const esCoreMessages: Messages = {
   'common.apply': 'Aplicar',
   'common.use': 'Usar',
   'common.useGlobal': 'Usar global',
+  'common.useGroup': 'Usar grupo',
   'common.saveChanges': 'Guardar cambios',
   'common.advanced': 'Avanzado',
   'common.left': 'Izquierda',

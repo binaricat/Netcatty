@@ -688,6 +688,8 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                                 setSshDeepLinkEnabled={settings.setSshDeepLinkEnabled}
                                 jmsDeepLinkEnabled={settings.jmsDeepLinkEnabled}
                                 setJmsDeepLinkEnabled={settings.setJmsDeepLinkEnabled}
+                                jumpServerRdpLaunchMode={settings.jumpServerRdpLaunchMode}
+                                setJumpServerRdpLaunchMode={settings.setJumpServerRdpLaunchMode}
                                 explorerContextMenuEnabled={settings.explorerContextMenuEnabled}
                                 setExplorerContextMenuEnabled={settings.setExplorerContextMenuEnabled}
                                 explorerContextMenuSupported={settings.explorerContextMenuSupported}

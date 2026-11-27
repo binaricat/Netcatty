@@ -55,6 +55,11 @@ import {
   STORAGE_KEY_WINDOW_OPACITY,
   STORAGE_KEY_WINDOW_BACKGROUND_BLUR,
   STORAGE_KEY_APP_ICON_VARIANT,
+  STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS,
 } from '../../infrastructure/config/storageKeys';
 import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
 import { resolveAppearanceStorageEvent } from './appearanceSync';
@@ -65,6 +70,42 @@ import {
 import { isTerminalSidePanelAutoOpenTab, type TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePanelAutoOpen';
 import { isHostClickBehavior, type HostClickBehavior } from '../../domain/hostClickBehavior';
 import { isStartupLanding, type StartupLanding } from '../../domain/startupLanding';
+
+export type JumpServerRdpLaunchMode = 'builtin' | 'system';
+
+export const STORAGE_KEY_JUMPSERVER_RDP_LAUNCH_MODE = 'netcatty_jumpserver_rdp_launch_mode_v1';
+
+export const DEFAULT_JUMPSERVER_RDP_LAUNCH_MODE: JumpServerRdpLaunchMode = 'builtin';
+
+export const isJumpServerRdpLaunchMode = (value: unknown): value is JumpServerRdpLaunchMode => (
+  value === 'builtin' || value === 'system'
+);
+
+export type RemoteDesktopRecordingFps = 5 | 10 | 15;
+
+export const DEFAULT_REMOTE_DESKTOP_AUTO_RECORD = false;
+export const DEFAULT_REMOTE_DESKTOP_RECORDING_FPS: RemoteDesktopRecordingFps = 10;
+export const DEFAULT_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO = true;
+export const DEFAULT_REMOTE_DESKTOP_RECORDING_MAX_MB = 1024;
+export const DEFAULT_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS = 30;
+
+export const normalizeRemoteDesktopRecordingFps = (value: unknown): RemoteDesktopRecordingFps => {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (num === 5 || num === 10 || num === 15) return num;
+  return DEFAULT_REMOTE_DESKTOP_RECORDING_FPS;
+};
+
+export const normalizeRemoteDesktopRecordingMaxMb = (value: unknown): number => {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (Number.isFinite(num) && num >= 64 && num <= 102400) return Math.round(num);
+  return DEFAULT_REMOTE_DESKTOP_RECORDING_MAX_MB;
+};
+
+export const normalizeRemoteDesktopRecordingRetentionDays = (value: unknown): number => {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (Number.isFinite(num) && num >= 0 && num <= 3650) return Math.round(num);
+  return DEFAULT_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS;
+};
 
 interface UseSettingsStorageSyncParams {
   enabled?: boolean;
@@ -110,9 +151,15 @@ interface UseSettingsStorageSyncParams {
   sessionLogsDir: string;
   sessionLogsFormat: SessionLogFormat;
   sessionLogsTimestampsEnabled: boolean;
+  remoteDesktopAutoRecord: boolean;
+  remoteDesktopRecordingFps: RemoteDesktopRecordingFps;
+  remoteDesktopRecordingIncludeAudio: boolean;
+  remoteDesktopRecordingMaxMb: number;
+  remoteDesktopRecordingRetentionDays: number;
   sshDebugLogsEnabled: boolean;
   sshDeepLinkEnabled: boolean;
   jmsDeepLinkEnabled: boolean;
+  jumpServerRdpLaunchMode: JumpServerRdpLaunchMode;
   explorerContextMenuEnabled: boolean;
   globalHotkeyEnabled: boolean;
   autoUpdateEnabled: boolean;
@@ -162,9 +209,15 @@ interface UseSettingsStorageSyncParams {
   setSessionLogsDir: Dispatch<SetStateAction<string>>;
   setSessionLogsFormat: Dispatch<SetStateAction<SessionLogFormat>>;
   setSessionLogsTimestampsEnabled: Dispatch<SetStateAction<boolean>>;
+  setRemoteDesktopAutoRecordState: Dispatch<SetStateAction<boolean>>;
+  setRemoteDesktopRecordingFpsState: Dispatch<SetStateAction<RemoteDesktopRecordingFps>>;
+  setRemoteDesktopRecordingIncludeAudioState: Dispatch<SetStateAction<boolean>>;
+  setRemoteDesktopRecordingMaxMbState: Dispatch<SetStateAction<number>>;
+  setRemoteDesktopRecordingRetentionDaysState: Dispatch<SetStateAction<number>>;
   setSshDebugLogsEnabled: Dispatch<SetStateAction<boolean>>;
   setSshDeepLinkEnabledState: (enabled: boolean) => void;
   setJmsDeepLinkEnabledState: (enabled: boolean) => void;
+  setJumpServerRdpLaunchModeState: Dispatch<SetStateAction<JumpServerRdpLaunchMode>>;
   setExplorerContextMenuEnabledState: (enabled: boolean) => void;
   setGlobalHotkeyEnabled: Dispatch<SetStateAction<boolean>>;
   setWindowOpacity: (raw: unknown) => void;
@@ -186,7 +239,9 @@ export function useSettingsStorageSync({
   sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
   sftpUseCompressedUpload, sftpSkipUnchanged, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
   showRecentHosts, hostClickBehavior, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, localShellSidePanelAutoOpen, localShellSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, showTabNumberBadges, disableTerminalFontZoom, restorePreviousSession, restoreTerminalCwd, startupLanding,
-  editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, explorerContextMenuEnabled,
+  editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled,
+  remoteDesktopAutoRecord, remoteDesktopRecordingFps, remoteDesktopRecordingIncludeAudio, remoteDesktopRecordingMaxMb, remoteDesktopRecordingRetentionDays,
+  sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, jumpServerRdpLaunchMode, explorerContextMenuEnabled,
   globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, windowBackgroundBlur, appIconVariant,
   setTheme, setLightUiThemeId, setDarkUiThemeId, setAccentMode, applyIncomingCustomAccent,
   setCustomCSS, setUiFontFamilyId, setHotkeyScheme, setUiLanguage,
@@ -195,7 +250,9 @@ export function useSettingsStorageSync({
   setSftpDoubleClickBehavior, setSftpAutoSync, setSftpShowHiddenFiles,
   setSftpUseCompressedUpload, setSftpSkipUnchanged, setSftpAutoOpenSidebar, setSftpFollowTerminalCwd, setSftpDefaultViewMode,
   setShowRecentHostsState, setHostClickBehaviorState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setTerminalSidePanelAutoOpenState, setTerminalSidePanelAutoOpenTabState, setLocalShellSidePanelAutoOpenState, setLocalShellSidePanelAutoOpenTabState, setShellOnlyTabNumberShortcutsState, setShowTabNumberBadgesState, setDisableTerminalFontZoomState, setRestorePreviousSessionState, setRestoreTerminalCwdState, setStartupLandingState,
-  setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled, setSshDebugLogsEnabled, setSshDeepLinkEnabledState, setJmsDeepLinkEnabledState, setExplorerContextMenuEnabledState,
+  setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled,
+  setRemoteDesktopAutoRecordState, setRemoteDesktopRecordingFpsState, setRemoteDesktopRecordingIncludeAudioState, setRemoteDesktopRecordingMaxMbState, setRemoteDesktopRecordingRetentionDaysState,
+  setSshDebugLogsEnabled, setSshDeepLinkEnabledState, setJmsDeepLinkEnabledState, setJumpServerRdpLaunchModeState, setExplorerContextMenuEnabledState,
   setGlobalHotkeyEnabled, setWindowOpacity, setWindowBackgroundBlur, setAppIconVariant, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
   setSftpTransferConcurrencyState, setSshTransportIdleTtlMsState,
   applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings,
@@ -210,7 +267,9 @@ export function useSettingsStorageSync({
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpSkipUnchanged, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
     showRecentHosts, hostClickBehavior, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, localShellSidePanelAutoOpen, localShellSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, showTabNumberBadges, disableTerminalFontZoom, restorePreviousSession, restoreTerminalCwd, startupLanding,
-    editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, explorerContextMenuEnabled,
+    editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled,
+    remoteDesktopAutoRecord, remoteDesktopRecordingFps, remoteDesktopRecordingIncludeAudio, remoteDesktopRecordingMaxMb, remoteDesktopRecordingRetentionDays,
+    sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, jumpServerRdpLaunchMode, explorerContextMenuEnabled,
     globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, windowBackgroundBlur, appIconVariant,
   });
   settingsSnapshotRef.current = {
@@ -220,7 +279,9 @@ export function useSettingsStorageSync({
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpSkipUnchanged, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
     showRecentHosts, hostClickBehavior, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, localShellSidePanelAutoOpen, localShellSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, showTabNumberBadges, disableTerminalFontZoom, restorePreviousSession, restoreTerminalCwd, startupLanding,
-    editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, explorerContextMenuEnabled,
+    editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled,
+    remoteDesktopAutoRecord, remoteDesktopRecordingFps, remoteDesktopRecordingIncludeAudio, remoteDesktopRecordingMaxMb, remoteDesktopRecordingRetentionDays,
+    sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, jumpServerRdpLaunchMode, explorerContextMenuEnabled,
     globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, windowBackgroundBlur, appIconVariant,
   };
 
@@ -367,6 +428,36 @@ export function useSettingsStorageSync({
           setSessionLogsTimestampsEnabled(newValue);
         }
       }
+      if (e.key === STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD && e.newValue !== null) {
+        const newValue = e.newValue === 'true';
+        if (newValue !== s.remoteDesktopAutoRecord) {
+          setRemoteDesktopAutoRecordState(newValue);
+        }
+      }
+      if (e.key === STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS && e.newValue !== null) {
+        const next = normalizeRemoteDesktopRecordingFps(e.newValue);
+        if (next !== s.remoteDesktopRecordingFps) {
+          setRemoteDesktopRecordingFpsState(next);
+        }
+      }
+      if (e.key === STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO && e.newValue !== null) {
+        const newValue = e.newValue === 'true';
+        if (newValue !== s.remoteDesktopRecordingIncludeAudio) {
+          setRemoteDesktopRecordingIncludeAudioState(newValue);
+        }
+      }
+      if (e.key === STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB && e.newValue !== null) {
+        const next = normalizeRemoteDesktopRecordingMaxMb(e.newValue);
+        if (next !== s.remoteDesktopRecordingMaxMb) {
+          setRemoteDesktopRecordingMaxMbState(next);
+        }
+      }
+      if (e.key === STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS && e.newValue !== null) {
+        const next = normalizeRemoteDesktopRecordingRetentionDays(e.newValue);
+        if (next !== s.remoteDesktopRecordingRetentionDays) {
+          setRemoteDesktopRecordingRetentionDaysState(next);
+        }
+      }
       if (e.key === STORAGE_KEY_SSH_DEBUG_LOGS_ENABLED && e.newValue !== null) {
         const newValue = e.newValue === 'true';
         if (newValue !== s.sshDebugLogsEnabled) {
@@ -383,6 +474,11 @@ export function useSettingsStorageSync({
         const newValue = e.newValue === 'true';
         if (newValue !== s.jmsDeepLinkEnabled) {
           setJmsDeepLinkEnabledState(newValue);
+        }
+      }
+      if (e.key === STORAGE_KEY_JUMPSERVER_RDP_LAUNCH_MODE && e.newValue !== null) {
+        if (isJumpServerRdpLaunchMode(e.newValue) && e.newValue !== s.jumpServerRdpLaunchMode) {
+          setJumpServerRdpLaunchModeState(e.newValue);
         }
       }
       if (e.key === STORAGE_KEY_EXPLORER_CONTEXT_MENU_ENABLED && e.newValue !== null) {
@@ -583,8 +679,14 @@ export function useSettingsStorageSync({
     setSessionLogsEnabled,
     setSessionLogsFormat,
     setSessionLogsTimestampsEnabled,
+    setRemoteDesktopAutoRecordState,
+    setRemoteDesktopRecordingFpsState,
+    setRemoteDesktopRecordingIncludeAudioState,
+    setRemoteDesktopRecordingMaxMbState,
+    setRemoteDesktopRecordingRetentionDaysState,
     setSshDeepLinkEnabledState,
     setJmsDeepLinkEnabledState,
+    setJumpServerRdpLaunchModeState,
     setExplorerContextMenuEnabledState,
     setSshDebugLogsEnabled,
     setSftpAutoOpenSidebar,

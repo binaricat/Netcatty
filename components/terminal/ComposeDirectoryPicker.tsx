@@ -2,7 +2,7 @@ import { ArrowUp, ChevronDown, Folder, LoaderCircle, RefreshCw } from 'lucide-re
 import { memo, useEffect, useId, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { useComposeDirectoryPicker } from '../../application/state/useComposeDirectoryPicker';
-import { directoryDisplayName, directoryLabel } from '../../domain/directoryPicker';
+import { directoryDisplayName } from '../../domain/directoryPicker';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import type { ComposeBarTheme } from './TerminalComposeBar';
 
@@ -51,8 +51,8 @@ export const ComposeDirectoryPicker = memo(function ComposeDirectoryPicker({ ses
       <Popover open={model.open} onOpenChange={value => { if (value) outside.current = false; model.setOpen(value); }}>
         <PopoverTrigger asChild>
           <button type="button" disabled={model.pending}
-            aria-label={t('terminal.directory.open', { path: model.cwd ? directoryLabel(model.cwd, model.home, model.pathFlavor) : t('terminal.directory.unknown') })}
-            title={model.cwd ? directoryDisplayName(model.cwd) : t('terminal.directory.unknown')}
+            aria-label={t('terminal.directory.open', { path: model.display?.ariaPath ?? t('terminal.directory.unknown') })}
+            title={model.display?.title ?? t('terminal.directory.unknown')}
             className="h-6 min-w-0 max-w-full flex items-center gap-1.5 rounded border px-2 text-[11px] font-mono transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60"
             style={{ backgroundColor: theme.chipBg, borderColor: theme.borderColor, color: theme.resolvedFg }}
             onMouseEnter={(event) => {
@@ -63,7 +63,7 @@ export const ComposeDirectoryPicker = memo(function ComposeDirectoryPicker({ ses
             }}
           >
             {model.pending ? <LoaderCircle size={12} className="shrink-0 animate-spin" /> : <Folder size={12} className="shrink-0" />}
-            <span className="truncate">{model.cwd ? directoryDisplayName(directoryLabel(model.cwd, model.home, model.pathFlavor)) : t('terminal.directory.unknown')}</span>
+            <span className="truncate">{model.display?.label ?? t('terminal.directory.unknown')}</span>
             <ChevronDown size={10} className="shrink-0 opacity-60" />
           </button>
         </PopoverTrigger>

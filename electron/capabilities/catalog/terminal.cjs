@@ -106,6 +106,66 @@ const TERMINAL_CAPABILITIES = [
       cli: { command: ["job-stop"] },
     },
   },
+  {
+    id: "terminal.startBulk",
+    domain: "terminal",
+    status: CAPABILITY_STATUS.IMPLEMENTED,
+    description: "Start the same long-running command as a background job on several terminal sessions at once.",
+    policy: {
+      write: true,
+      sensitiveRead: false,
+      longRunning: true,
+      requiresChatSession: true,
+      bypassesObserverBlock: false,
+      bypassesApproval: false,
+      bypassesChatCancel: false,
+      // One approval covers many hosts, so remembered grants and session-wide
+      // approvals must never satisfy it.
+      requiresFreshApproval: true,
+    },
+    surfaces: {
+      builtin: { rpcMethod: "netcatty/jobStartBulk", mcpTool: "terminal_start_bulk" },
+      public: { rpcMethod: "public/terminalStartBulk", mcpTool: "terminal_start_bulk" },
+    },
+  },
+  {
+    id: "terminal.pollBulk",
+    domain: "terminal",
+    status: CAPABILITY_STATUS.IMPLEMENTED,
+    description: "Poll incremental output from several long-running terminal jobs at once.",
+    policy: {
+      write: false,
+      sensitiveRead: false,
+      longRunning: false,
+      requiresChatSession: true,
+      bypassesObserverBlock: false,
+      bypassesApproval: true,
+      bypassesChatCancel: true,
+    },
+    surfaces: {
+      builtin: { rpcMethod: "netcatty/jobPollBulk", mcpTool: "terminal_poll_bulk" },
+      public: { rpcMethod: "public/terminalPollBulk", mcpTool: "terminal_poll_bulk" },
+    },
+  },
+  {
+    id: "terminal.stopBulk",
+    domain: "terminal",
+    status: CAPABILITY_STATUS.IMPLEMENTED,
+    description: "Stop several long-running terminal jobs at once.",
+    policy: {
+      write: true,
+      sensitiveRead: false,
+      longRunning: false,
+      requiresChatSession: true,
+      bypassesObserverBlock: true,
+      bypassesApproval: true,
+      bypassesChatCancel: true,
+    },
+    surfaces: {
+      builtin: { rpcMethod: "netcatty/jobStopBulk", mcpTool: "terminal_stop_bulk" },
+      public: { rpcMethod: "public/terminalStopBulk", mcpTool: "terminal_stop_bulk" },
+    },
+  },
 ];
 
 module.exports = { TERMINAL_CAPABILITIES };

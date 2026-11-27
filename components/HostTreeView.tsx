@@ -17,7 +17,19 @@ import {
 } from '../domain/hostClickBehavior';
 import { sortByVaultOrder } from '../domain/vaultOrder';
 import { getVaultHostRowSubtitle } from '../domain/localShellHost';
+import {
+  DEFAULT_RDP_PORT,
+  DEFAULT_VNC_PORT,
+  hasCompanionRdp,
+  hasCompanionVnc,
+  isRdpProtocol,
+  isRemoteDesktopProtocol,
+  isVncProtocol,
+  type RemoteDesktopProtocol,
+} from '../domain/remoteDesktop';
 import { isVaultHostDraggable } from '../domain/vaultHostDrag';
+import { getProtocolBadgeClass } from './protocolVisuals';
+import { RdpProtocolIcon, VncProtocolIcon } from './icons/RemoteDesktopIcons';
 import { STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED } from '../infrastructure/config/storageKeys';
 import { GroupConfig, GroupNode, Host } from '../types';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
@@ -289,6 +301,8 @@ interface HostTreeViewProps {
   onExpandAll?: (paths: string[]) => void;
   onCollapseAll?: () => void;
   onConnect: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
   onOpenBrowser?: (host: Host) => void;
   onEditHost: (host: Host) => void;
   onDuplicateHost: (host: Host) => void;
@@ -331,6 +345,8 @@ interface TreeNodeProps {
   expandedPaths: Set<string>;
   onToggle: (path: string) => void;
   onConnect: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
   onOpenBrowser?: (host: Host) => void;
   onEditHost: (host: Host) => void;
   onDuplicateHost: (host: Host) => void;
@@ -379,6 +395,8 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   expandedPaths,
   onToggle,
   onConnect,
+  onConnectRemoteDesktop,
+  onOpenSystemRemoteDesktop,
   onOpenBrowser,
   onEditHost,
   onDuplicateHost,
@@ -602,6 +620,8 @@ const TreeNode: React.FC<TreeNodeProps> = ({
               expandedPaths={expandedPaths}
               onToggle={onToggle}
               onConnect={onConnect}
+              onConnectRemoteDesktop={onConnectRemoteDesktop}
+              onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
               onOpenBrowser={onOpenBrowser}
               onEditHost={onEditHost}
               onDuplicateHost={onDuplicateHost}
@@ -647,6 +667,8 @@ const TreeNode: React.FC<TreeNodeProps> = ({
               host={host}
               depth={depth + 1}
               onConnect={onConnect}
+              onConnectRemoteDesktop={onConnectRemoteDesktop}
+              onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
               onOpenBrowser={onOpenBrowser}
               onEditHost={onEditHost}
               onDuplicateHost={onDuplicateHost}
@@ -681,6 +703,8 @@ interface HostTreeItemProps {
   host: Host;
   depth: number;
   onConnect: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
   onOpenBrowser?: (host: Host) => void;
   onEditHost: (host: Host) => void;
   onDuplicateHost: (host: Host) => void;
@@ -713,14 +737,19 @@ export const getHostTreeDisplayDetails = (
     ? applyGroupDefaults(host, groupDefaultsByPath?.get(host.group) ?? resolveGroupDefaults(host.group, groupConfigs))
     : host;
   const isTelnet = displayHost.protocol === 'telnet';
+  const defaultPort = isTelnet
+    ? resolveTelnetPort(displayHost)
+    : isRdpProtocol(displayHost.protocol)
+      ? (displayHost.port ?? displayHost.rdpConfig?.port ?? DEFAULT_RDP_PORT)
+      : isVncProtocol(displayHost.protocol)
+        ? (displayHost.port ?? displayHost.vncConfig?.port ?? DEFAULT_VNC_PORT)
+        : (displayHost.port ?? 22);
   return {
     protocol: displayHost.protocol,
     username: isTelnet
       ? (resolveTelnetUsername(displayHost) || '')
       : (displayHost.username?.trim() || ''),
-    port: isTelnet
-      ? resolveTelnetPort(displayHost)
-      : (displayHost.port ?? 22),
+    port: defaultPort,
   };
 };
 
@@ -728,6 +757,8 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
   host,
   depth,
   onConnect,
+  onConnectRemoteDesktop,
+  onOpenSystemRemoteDesktop,
   onOpenBrowser,
   onEditHost,
   onDuplicateHost,
@@ -760,6 +791,10 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
   const displayProtocol = displayDetails.protocol;
   const displayUsername = displayDetails.username;
   const displayPort = displayDetails.port;
+  const isStandaloneRdp = isRdpProtocol(safeHost.protocol);
+  const isStandaloneVnc = isVncProtocol(safeHost.protocol);
+  const companionRdp = !isStandaloneRdp && hasCompanionRdp(safeHost);
+  const companionVnc = !isStandaloneVnc && hasCompanionVnc(safeHost);
   const isMultiSelected = Boolean(isMultiSelectMode && selectedHostIds?.has(host.id));
   const isFocusSelected = !isMultiSelectMode && hostClickBehavior === 'select' && focusedHostId === host.id;
   const isSelected = isMultiSelected || isFocusSelected;
@@ -871,17 +906,65 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
                   <Edit2 size={12} />
                 </button>
                 <HostNotesIndicator notes={host.notes} />
+                {(isStandaloneRdp || isStandaloneVnc || companionRdp || companionVnc) && (
+                  <span className="ml-auto flex shrink-0 items-center gap-1">
+                    {isStandaloneRdp && (
+                      <span
+                        className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 ${getProtocolBadgeClass('rdp')}`}
+                      >
+                        <RdpProtocolIcon size={10} />
+                        RDP
+                      </span>
+                    )}
+                    {isStandaloneVnc && (
+                      <span
+                        className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 ${getProtocolBadgeClass('vnc')}`}
+                      >
+                        <VncProtocolIcon size={10} />
+                        VNC
+                      </span>
+                    )}
+                    {companionRdp && (
+                      <button
+                        type="button"
+                        title={t('vault.hosts.connectRdp')}
+                        className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 transition-all hover:brightness-110 ${getProtocolBadgeClass('rdp')}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onConnectRemoteDesktop?.(safeHost, 'rdp');
+                        }}
+                      >
+                        <RdpProtocolIcon size={10} />
+                        +RDP
+                      </button>
+                    )}
+                    {companionVnc && (
+                      <button
+                        type="button"
+                        title={t('vault.hosts.connectVnc')}
+                        className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 transition-all hover:brightness-110 ${getProtocolBadgeClass('vnc')}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onConnectRemoteDesktop?.(safeHost, 'vnc');
+                        }}
+                      >
+                        <VncProtocolIcon size={10} />
+                        +VNC
+                      </button>
+                    )}
+                  </span>
+                )}
               </div>
               <div className="truncate text-[11px] leading-4 text-muted-foreground">
-                {displayProtocol === 'local'
+                {displayProtocol === 'local' || isRemoteDesktopProtocol(displayProtocol)
                   ? getVaultHostRowSubtitle(safeHost, { localFallback: t('localShell.subtitle') })
                   : `${displayUsername}@${host.hostname}:${displayPort}`}
               </div>
             </div>
           )}
-          actions={(displayProtocol && displayProtocol !== 'ssh') || tags.length > 0 ? (
+          actions={(displayProtocol && displayProtocol !== 'ssh' && !isRemoteDesktopProtocol(displayProtocol)) || tags.length > 0 ? (
             <div className="ml-2 flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-              {displayProtocol && displayProtocol !== 'ssh' && (
+              {displayProtocol && displayProtocol !== 'ssh' && !isRemoteDesktopProtocol(displayProtocol) && (
                 <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] leading-none text-primary">
                   {displayProtocol.toUpperCase()}
                 </span>
@@ -899,6 +982,8 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
       <HostTreeHostContextMenuContent
         host={host}
         onConnect={onConnect}
+        onConnectRemoteDesktop={onConnectRemoteDesktop}
+        onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
         onOpenBrowser={onOpenBrowser}
         onEditHost={onEditHost}
         onDuplicateHost={onDuplicateHost}
@@ -919,6 +1004,8 @@ const HostTreeViewInner: React.FC<HostTreeViewProps> = ({
   onExpandAll: externalOnExpandAll,
   onCollapseAll: externalOnCollapseAll,
   onConnect,
+  onConnectRemoteDesktop,
+  onOpenSystemRemoteDesktop,
   onOpenBrowser,
   onEditHost,
   onDuplicateHost,
@@ -1230,6 +1317,8 @@ const HostTreeViewInner: React.FC<HostTreeViewProps> = ({
                 expandedPaths={expandedPaths}
                 onToggle={togglePath}
                 onConnect={onConnect}
+                onConnectRemoteDesktop={onConnectRemoteDesktop}
+                onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
                 onOpenBrowser={onOpenBrowser}
                 onEditHost={onEditHost}
                 onDuplicateHost={onDuplicateHost}
@@ -1273,6 +1362,8 @@ const HostTreeViewInner: React.FC<HostTreeViewProps> = ({
                 host={item.host}
                 depth={item.depth}
                 onConnect={onConnect}
+                onConnectRemoteDesktop={onConnectRemoteDesktop}
+                onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
                 onOpenBrowser={onOpenBrowser}
                 onEditHost={onEditHost}
                 onDuplicateHost={onDuplicateHost}
@@ -1323,6 +1414,8 @@ function hostTreeViewAreEqual(prev: HostTreeViewProps, next: HostTreeViewProps):
     && prev.onExpandAll === next.onExpandAll
     && prev.onCollapseAll === next.onCollapseAll
     && prev.onConnect === next.onConnect
+    && prev.onConnectRemoteDesktop === next.onConnectRemoteDesktop
+    && prev.onOpenSystemRemoteDesktop === next.onOpenSystemRemoteDesktop
     && prev.onOpenBrowser === next.onOpenBrowser
     && prev.onEditHost === next.onEditHost
     && prev.onDuplicateHost === next.onDuplicateHost
