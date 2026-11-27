@@ -62,19 +62,19 @@ jobs:
     name: build-linux-x64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Restore cached PR build
         id: et-build-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: out/
           key: et-pr-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ET_REF }}-${{ hashFiles('.github/workflows/build-et-binaries.yml', 'scripts/build-et/**') }}
       - name: Restore vcpkg download cache
         if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: .cache/vcpkg-downloads
           key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
@@ -107,7 +107,7 @@ jobs:
             quay.io/pypa/manylinux2014_x86_64 \
             bash scripts/build-et/build-linux.sh
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: et-linux-x64
           path: out/
@@ -117,19 +117,19 @@ jobs:
     name: build-linux-arm64
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Restore cached PR build
         id: et-build-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: out/
           key: et-pr-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ET_REF }}-${{ hashFiles('.github/workflows/build-et-binaries.yml', 'scripts/build-et/**') }}
       - name: Restore vcpkg download cache
         if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: .cache/vcpkg-downloads
           key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
@@ -162,7 +162,7 @@ jobs:
             quay.io/pypa/manylinux2014_aarch64 \
             bash scripts/build-et/build-linux.sh
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: et-linux-arm64
           path: out/
@@ -175,19 +175,19 @@ jobs:
     name: build-macos-universal
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Restore cached PR build
         id: et-build-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: out/
           key: et-pr-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ET_REF }}-${{ hashFiles('.github/workflows/build-et-binaries.yml', 'scripts/build-et/**') }}
       - name: Restore vcpkg download cache
         if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ runner.temp }}/vcpkg-downloads
           key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
@@ -205,7 +205,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
         run: bash scripts/build-et/build-macos.sh
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: et-darwin-universal
           path: out/
@@ -218,19 +218,19 @@ jobs:
     name: build-windows-x64
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Restore cached PR build
         id: et-build-cache
         if: github.event_name == 'pull_request'
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: out/
           key: et-pr-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ET_REF }}-${{ hashFiles('.github/workflows/build-et-binaries.yml', 'scripts/build-et/**') }}
       - name: Restore vcpkg download cache
         if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ runner.temp }}\vcpkg-downloads
           key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
@@ -247,7 +247,7 @@ jobs:
         run: choco install -y ninja
       - name: Set up MSVC developer command prompt
         if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@v1.13.0
         with:
           arch: x64
       - name: Build et (win32-x64)
@@ -258,7 +258,7 @@ jobs:
         shell: pwsh
         run: pwsh -File scripts/build-et/build-windows.ps1
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: et-win32-x64
           path: out/
@@ -283,11 +283,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           path: artifacts
       - name: Stage release files
