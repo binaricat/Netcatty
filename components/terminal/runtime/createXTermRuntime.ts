@@ -294,6 +294,9 @@ type DetachedDisposedKittyBroadcastState = {
   passwordPromptActiveRef?: MutableRefObject<boolean>;
   broadcastPasswordBypassRef?: MutableRefObject<boolean>;
   terminalBackend: TerminalBackendApi;
+  encodedKeys: Set<string>;
+  legacySuppressedKeys: Set<string>;
+  win32ShiftEnterTextKeys: Set<string>;
 };
 
 /**
@@ -303,20 +306,17 @@ type DetachedDisposedKittyBroadcastState = {
 const registerDetachedDisposedKittyBroadcastHandler = (
   state: DetachedDisposedKittyBroadcastState,
 ): void => {
-  const encodedKeys = new Set<string>();
-  const legacySuppressedKeys = new Set<string>();
-  const win32ShiftEnterTextKeys = new Set<string>();
   const detachedHandler = createKittyKeyboardBroadcastHandler({
     resolveOptions: () => ({
       kittyProtocolEnabled: state.kittyProtocolEnabled,
       kittyMode: state.kittyMode,
       applicationCursorMode: state.applicationCursorMode,
-      encodedKeys,
-      legacySuppressedKeys,
+      encodedKeys: state.encodedKeys,
+      legacySuppressedKeys: state.legacySuppressedKeys,
       win32InputMode: state.win32InputMode,
       shiftEnterSettings: state.terminalSettingsRef.current,
       nativeKittyPreservesShiftEnter: state.nativeKittyPreservesShiftEnter,
-      win32ShiftEnterTextKeys,
+      win32ShiftEnterTextKeys: state.win32ShiftEnterTextKeys,
     }),
     getSessionId: () => state.sessionRef.current,
     isSensitiveInput: () => state.passwordPromptActiveRef?.current === true
@@ -3742,6 +3742,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           passwordPromptActiveRef: ctx.passwordPromptActiveRef,
           broadcastPasswordBypassRef: ctx.broadcastPasswordBypassRef,
           terminalBackend: ctx.terminalBackend,
+          encodedKeys: broadcastEncodedKeys,
+          legacySuppressedKeys: broadcastLegacySuppressedKeys,
+          win32ShiftEnterTextKeys: broadcastWin32ShiftEnterTextKeys,
         });
       }
       disposeLinePasteHandler?.();
