@@ -66,13 +66,13 @@ function subscribeToPtyData(ptyStream, onData) {
 // comfortably larger than the prompt including the escape codes it may carry.
 const PROMPT_SUFFIX_MIN_WINDOW_CHARS = 2048;
 const PROMPT_SUFFIX_WINDOW_PER_PROMPT_CHAR = 8;
-// Controls that mutate screen/cursor state beyond harmless SGR/OSC/bracketed-paste
-// (e.g. ED/EL, cursor movement, alternate screen, RIS, backspace). When present,
-// naive ANSI stripping can join pre-clear text or ignore mid-line/alt-screen state.
+// Full-screen clears (ED 2 / RIS) discard prior screen content so earlier
+// lines cannot combine with post-clear text. ED 3 (`\x1b[3J`) only clears
+// scrollback and leaves the visible screen intact.
 // eslint-disable-next-line no-control-regex
-const MUTATING_TERMINAL_CONTROL_REGEX = /\u001B(?:c|\[(?![0-9;:]*m|\?2004[hl])[0-?]*[ -/]*[@-~])|\u009B|\u0008/;
+const SCREEN_CLEAR_CONTROL_REGEX = /\u001B(?:c|\[2J)/g;
 // eslint-disable-next-line no-control-regex
-const SCREEN_CLEAR_CONTROL_REGEX = /\u001B(?:c|\[[23]J)/g;
+const REDRAW_CONTROL_REGEX = /\r(?!\n)|[\u0008\u001B\u009B]/;
 
 function sliceAfterLastScreenClear(text) {
   let lastEnd = 0;
@@ -94,27 +94,8 @@ function hasExpectedPromptSuffix(text, expectedPrompt) {
     PROMPT_SUFFIX_MIN_WINDOW_CHARS,
     String(expectedPrompt).length * PROMPT_SUFFIX_WINDOW_PER_PROMPT_CHAR,
   );
-  const tail = fullText.length > windowChars ? fullText.slice(-windowChars) : fullText;
-  const hasMutatingControl = MUTATING_TERMINAL_CONTROL_REGEX.test(tail);
-  if (hasMutatingControl) {
-    const rendered = renderCursorBoundScreenText(tail);
-    if (!rendered) return false;
-    if (
-      rendered.rawText.endsWith(normalizedPrompt)
-      || rendered.trimmedAboveText.endsWith(normalizedPrompt)
-    ) {
-      return true;
-    }
-    // Preserve matching for live-PTY-cached two-line prompts whose `\r\r\n`
-    // bytes were stored as blank lines (`\n\n`), while never matching across
-    // a screen clear/reset.
-    if (ansiFreePrompt.includes("\n\n")) {
-      const crAsLfPrompt = ansiFreePrompt.replace(/\r/g, "\n");
-      const postClearStripped = stripAnsi(sliceAfterLastScreenClear(tail));
-      if (postClearStripped.replace(/\r/g, "\n").endsWith(crAsLfPrompt)) return true;
-    }
-    return false;
-  }
+  const rawTail = fullText.length > windowChars ? fullText.slice(-windowChars) : fullText;
+  const tail = sliceAfterLastScreenClear(rawTail);
   const strippedTail = stripAnsi(tail);
   // Drop CR so a redraw inside one line (`root@host:~\r# `) still matches
   // the cached prompt. That collapses a two-line PS1's `\r\r\n` to a single
@@ -127,9 +108,13 @@ function hasExpectedPromptSuffix(text, expectedPrompt) {
     const crAsLfPrompt = ansiFreePrompt.replace(/\r/g, "\n");
     if (strippedTail.replace(/\r/g, "\n").endsWith(crAsLfPrompt)) return true;
   }
-  // Bare carriage-return overwrites (without CSI) can redraw a prompt line;
-  // compare the cursor-bound rendered state when bare CR is present.
-  if (!/\r(?!\n)/.test(tail)) return false;
+  // Only fall back to rendered screen comparison when raw matching fails and
+  // the tail contains terminal redraw controls (bare CR overwrite, backspace,
+  // or CSI/C1 erase/cursor controls). Running this strictly after the raw
+  // fast paths avoids regressing scrolling PTYs that repaint prompts with
+  // absolute cursor positioning (e.g. `\x1b[24;1H\x1b[Kuser@host:~$ `), while
+  // letting screen-derived multiline prompts match raw CR+EL redraws.
+  if (!REDRAW_CONTROL_REGEX.test(tail)) return false;
   const rendered = renderCursorBoundScreenText(tail);
   if (!rendered) return false;
   return rendered.rawText.endsWith(normalizedPrompt)

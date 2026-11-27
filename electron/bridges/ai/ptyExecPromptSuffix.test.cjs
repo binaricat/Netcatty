@@ -144,4 +144,16 @@ test("screen-derived multiline prompts match raw CR+EL redraws while rejecting u
     hasExpectedPromptSuffix("output\r\n# \r\x1b[K# ", seededPrompt),
     false,
   );
+
+  // Scrolling PTY that repaints a prompt with absolute cursor positioning must still match.
+  assert.equal(
+    hasExpectedPromptSuffix(`${"row\r\n".repeat(80)}\x1b[24;1H\x1b[Kuser@host:~$ `, "user@host:~$ "),
+    true,
+  );
+
+  // Scrollback-only clear (ED 3) leaves the visible prompt intact.
+  assert.equal(
+    hasExpectedPromptSuffix("user@host:~$ \x1b[3J", "user@host:~$ "),
+    true,
+  );
 });
