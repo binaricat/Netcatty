@@ -98,7 +98,8 @@ function startBridge({ token, authDelayMs = 0, onGetContext = null }) {
           });
         };
         if (msg.method === "auth/verify" && authDelayMs > 0) {
-          setTimeout(respond, authDelayMs);
+          const timer = setTimeout(respond, authDelayMs);
+          timer.unref?.();
         } else {
           respond();
         }

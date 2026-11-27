@@ -18,10 +18,11 @@ function createExitWaiter(timeoutMs = 2000) {
   const exits = [];
   let resolveExit;
   const exited = new Promise((resolve, reject) => {
+    // Keep this timer referenced until exit() clears it so isolated unit tests
+    // with fake streams and unref'd lifecycle timers stay alive until shutdown.
     const timer = setTimeout(() => {
       reject(new Error(`exit was not called within ${timeoutMs}ms`));
     }, timeoutMs);
-    timer.unref?.();
     resolveExit = (code) => {
       clearTimeout(timer);
       resolve(code);

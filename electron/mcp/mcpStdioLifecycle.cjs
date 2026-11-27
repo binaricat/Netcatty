@@ -200,6 +200,7 @@ function createMcpStdioLifecycle({
       } catch {
         // Ignore non-standard stdin implementations.
       }
+      if (shuttingDown) return;
     }
 
     if (watchParentPid && Number.isInteger(initialPpid) && initialPpid > 1) {
