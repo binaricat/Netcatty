@@ -88,6 +88,26 @@ test('prompt host controller detects ANSI-styled JumpServer menus and upgrades m
   assert.deepEqual(nested, [false, true]);
 });
 
+test('prompt host controller detects consumed JumpServer prompts in coalesced output', () => {
+  for (const coalesced of [
+    'Welcome\r\nOpt> 42\r\n[root@target-01 ~]# ',
+    'Welcome\r\n[Host]> 10.1.64.1\r\n[root@target-01 ~]# ',
+    'Welcome\r\n\x1b[32mOpt> \x1b[0m42\r\n[root@target-01 ~]# ',
+  ]) {
+    const { changes, controller, nested } = createHarness();
+    controller.handleTerminalOutput('ssh-1', coalesced);
+    assert.deepEqual(changes, [['ssh-1', 'target-01']], JSON.stringify(coalesced));
+    assert.deepEqual(nested, [true], JSON.stringify(coalesced));
+  }
+
+  // Also works when the consumed menu prompt is split across chunks.
+  const { changes, controller, nested } = createHarness();
+  controller.handleTerminalOutput('ssh-1', 'Welcome\r\nO');
+  controller.handleTerminalOutput('ssh-1', 'pt> 42\r\n[root@target-02 ~]# ');
+  assert.deepEqual(changes, [['ssh-1', 'target-02']]);
+  assert.deepEqual(nested, [true]);
+});
+
 test('prompt host controller observes the original host when returning from a target', () => {
   const { changes, controller } = createHarness();
   controller.handleTerminalOutput('ssh-1', '[root@jump.example.com ~]# ');

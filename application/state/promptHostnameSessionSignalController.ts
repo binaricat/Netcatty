@@ -1,6 +1,7 @@
 import type { TerminalSession } from '../../domain/models';
 import {
   extractTerminalPromptHostname,
+  isJumpServerMenuLine,
   isJumpServerMenuPrompt,
 } from '../../domain/terminalPromptSecurity';
 
@@ -59,7 +60,7 @@ export function createPromptHostnameSessionSignalController({
       if (
         !jumpServerSessions.has(sessionId)
         && combined.includes('>')
-        && combined.split(/\r\n|\r|\n/u).some((line) => isJumpServerMenuPrompt(line))
+        && combined.split(/\r\n|\r|\n/u).some((line) => isJumpServerMenuLine(line))
       ) {
         jumpServerSessions.add(sessionId);
       }

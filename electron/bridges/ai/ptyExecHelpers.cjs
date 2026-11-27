@@ -88,6 +88,24 @@ function sliceAfterLastScreenClear(text) {
   return lastEnd > 0 ? text.slice(lastEnd) : text;
 }
 
+function hasTabNearPrompt(tail, strippedTailNoCr, normalizedPrompt) {
+  if (!tail.includes("\t") || !normalizedPrompt.includes(" ")) return false;
+  const trailingNewlines = normalizedPrompt.match(/\n+$/)?.[0] || "";
+  if (trailingNewlines && !strippedTailNoCr.endsWith(trailingNewlines)) return false;
+  const promptBody = trailingNewlines
+    ? normalizedPrompt.slice(0, -trailingNewlines.length)
+    : normalizedPrompt;
+  const tailBody = trailingNewlines
+    ? strippedTailNoCr.slice(0, -trailingNewlines.length)
+    : strippedTailNoCr;
+  const promptLastLine = promptBody.slice(promptBody.lastIndexOf("\n") + 1);
+  const trimmedPromptEnd = promptLastLine.trimEnd();
+  const lastSpaceIdx = trimmedPromptEnd.lastIndexOf(" ");
+  const trailingToken = lastSpaceIdx >= 0 ? promptLastLine.slice(lastSpaceIdx + 1) : promptLastLine;
+  return (trailingToken.length > 0 && tailBody.endsWith(trailingToken))
+    || /\t[ \t]*$/.test(tailBody);
+}
+
 function hasExpectedPromptSuffix(text, expectedPrompt) {
   if (!expectedPrompt) return false;
   const ansiFreePrompt = stripAnsi(String(expectedPrompt || ""));
@@ -130,7 +148,9 @@ function hasExpectedPromptSuffix(text, expectedPrompt) {
   // fast paths avoids regressing scrolling PTYs that repaint prompts with
   // absolute cursor positioning (e.g. `\x1b[24;1H\x1b[Kuser@host:~$ `), while
   // letting screen-derived multiline prompts match raw CR+EL redraws.
-  if (!REDRAW_CONTROL_REGEX.test(tail)) return false;
+  if (!REDRAW_CONTROL_REGEX.test(tail) && !hasTabNearPrompt(tail, strippedTailNoCr, normalizedPrompt)) {
+    return false;
+  }
   const rendered = renderCursorBoundScreenText(tail);
   if (!rendered) return false;
   return rendered.rawText.endsWith(normalizedPrompt)
