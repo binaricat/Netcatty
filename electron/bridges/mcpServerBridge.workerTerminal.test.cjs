@@ -387,6 +387,8 @@ test("readiness rehydration runs ordered drain barrier and bounds live buffer to
       startLine: 0,
       endLine: 23,
       cursorLine: 1,
+      cursorLineText: "[root@target ~]# ",
+      cursorAtLineEnd: true,
       alternateScreen: false,
     };
   });
@@ -410,7 +412,7 @@ test("readiness rehydration runs ordered drain barrier and bounds live buffer to
     "worker:netcatty:ai:seedIdlePrompt",
     "worker:netcatty:ai:exec",
   ]);
-  assert.equal(requests[1].payload.context, "Last login\n[root@target ~]#");
+  assert.equal(requests[1].payload.context, "Last login\n[root@target ~]# ");
   assert.equal(requests[1].payload.expectedGeneration, 19);
   assert.equal(requests[1].payload.outputDrained, true);
 });
@@ -560,6 +562,58 @@ test("readiness rehydration fails closed when output drain fails or primary scre
       chatSessionId: "chat-3",
     });
     assert.equal(reads, 0);
+    assert.deepEqual(requests.map((r) => r.channel), ["netcatty:ai:shellReadiness", "netcatty:ai:exec"]);
+  }
+
+  // Case 4: cursor is not at end of line (mid-line edit) -> never seeds.
+  {
+    const requests = [];
+    const bridge = loadFreshBridge();
+    bridge.init({
+      sessions: new Map(),
+      electronModule: null,
+      drainTerminalOutput: async () => ({ success: true }),
+      terminalWorkerManager: {
+        getSessionOwnerWebContentsId: () => null,
+        drainOutputSession: () => true,
+        request(channel, payload) {
+          requests.push({ channel, payload });
+          if (channel === "netcatty:ai:shellReadiness") {
+            return Promise.resolve({
+              ok: true,
+              found: true,
+              trackedShell: true,
+              freshIdlePrompt: "",
+              visibleIdlePrompt: "",
+              readiness: "unknown",
+              generation: 7,
+              bufferedBytes: 0,
+              unackedBytes: 0,
+              outputPaused: false,
+            });
+          }
+          return Promise.resolve({ ok: true, stdout: "ok\n", stderr: "", exitCode: 0 });
+        },
+      },
+    });
+    bridge.setVaultAgentInvoker(async () => ({
+      ok: true,
+      content: "[root@target ~]# echo hi",
+      startLine: 0,
+      endLine: 0,
+      cursorLine: 0,
+      cursorAtLineEnd: false,
+      alternateScreen: false,
+    }));
+    bridge.setPermissionMode("auto");
+    bridge.setCommandBlocklist([]);
+    bridge.updateSessionMetadata([{ sessionId: "ssh-1", protocol: "ssh", connected: true }], "chat-4");
+
+    await bridge.dispatchBuiltinRpc("netcatty/exec", {
+      sessionId: "ssh-1",
+      command: "pwd",
+      chatSessionId: "chat-4",
+    });
     assert.deepEqual(requests.map((r) => r.channel), ["netcatty:ai:shellReadiness", "netcatty:ai:exec"]);
   }
 });

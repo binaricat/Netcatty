@@ -42,6 +42,8 @@ export interface TerminalContextReadResult {
   source: TerminalContextReadSource;
   alternateScreen?: boolean;
   cursorLine?: number;
+  cursorLineText?: string;
+  cursorAtLineEnd?: boolean;
 }
 
 export type TerminalContextReader = (

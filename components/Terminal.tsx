@@ -785,6 +785,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         viewportY?: number;
         baseY?: number;
         cursorY?: number;
+        cursorX?: number;
       };
       const totalLines = Math.max(0, activeBuffer.length);
       const cursorLine = totalLines > 0
@@ -792,6 +793,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         && typeof activeBuffer.cursorY === 'number'
         ? Math.min(totalLines - 1, Math.max(0, activeBuffer.baseY + activeBuffer.cursorY))
         : undefined;
+      let cursorLineText: string | undefined;
+      let cursorAtLineEnd: boolean | undefined;
+      if (cursorLine !== undefined && typeof activeBuffer.cursorX === 'number') {
+        const line = activeBuffer.getLine(cursorLine);
+        if (line) {
+          const cursorColumn = Math.min(term.cols, Math.max(0, Math.floor(activeBuffer.cursorX)));
+          const afterCursor = line.translateToString(true, cursorColumn, term.cols);
+          cursorAtLineEnd = afterCursor.length === 0;
+          if (cursorAtLineEnd) {
+            cursorLineText = line.translateToString(false, 0, cursorColumn);
+          }
+        }
+      }
       const viewportStartLine = alternateScreen
         ? 0
         : Math.max(0, activeBuffer.viewportY ?? Math.max(0, totalLines - term.rows));
@@ -831,6 +845,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         source: 'live',
         alternateScreen,
         ...(cursorLine !== undefined ? { cursorLine } : {}),
+        ...(cursorLineText !== undefined ? { cursorLineText } : {}),
+        ...(cursorAtLineEnd !== undefined ? { cursorAtLineEnd } : {}),
       };
     }
 

@@ -1771,6 +1771,9 @@ function extractCursorBoundedContextForSeed(visible) {
   if (cursorLine < startLine || cursorLine > endLine) {
     return "";
   }
+  if (visible.cursorAtLineEnd === false) {
+    return "";
+  }
   const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const relativeCursor = cursorLine - startLine;
   if (relativeCursor < 0 || relativeCursor >= lines.length) {
@@ -1784,7 +1787,11 @@ function extractCursorBoundedContextForSeed(visible) {
       return "";
     }
   }
-  return lines.slice(0, relativeCursor + 1).join("\n");
+  const boundedLines = lines.slice(0, relativeCursor + 1);
+  if (typeof visible.cursorLineText === "string") {
+    boundedLines[relativeCursor] = visible.cursorLineText;
+  }
+  return boundedLines.join("\n");
 }
 
 async function rehydrateWorkerPromptFromVisibleContext({
