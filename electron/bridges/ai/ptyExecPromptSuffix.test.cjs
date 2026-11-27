@@ -166,4 +166,19 @@ test("screen-derived multiline prompts match raw CR+EL redraws while rejecting u
     hasExpectedPromptSuffix("user@host:~$ \x1b[3J", "user@host:~$ "),
     true,
   );
+
+  // Rehydrated multiline prompt whose header had trailing spaces matches CRLF-only output
+  // without requiring redraw controls, while still enforcing trailing space on the cursor line.
+  assert.equal(
+    hasExpectedPromptSuffix("user@host: /workspace   \r\n$ ", "user@host: /workspace\n$ "),
+    true,
+  );
+  assert.equal(
+    hasExpectedPromptSuffix("user@host: /workspace   \r\n$ ", "user@host: /workspace\n$"),
+    false,
+  );
+  assert.equal(
+    hasExpectedPromptSuffix("user@host: /workspace   \r\n$ ls", "user@host: /workspace\n$ "),
+    false,
+  );
 });

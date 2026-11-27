@@ -101,16 +101,28 @@ function hasExpectedPromptSuffix(text, expectedPrompt) {
   const rawTail = fullText.length > windowChars ? fullText.slice(-windowChars) : fullText;
   const tail = sliceAfterLastScreenClear(rawTail);
   const strippedTail = stripAnsi(tail);
+  const strippedTailNoCr = strippedTail.replace(/\r/g, "");
   // Drop CR so a redraw inside one line (`root@host:~\r# `) still matches
   // the cached prompt. That collapses a two-line PS1's `\r\r\n` to a single
   // LF, which no longer ends with the cache (`user@host: /root\n\n\n$ `).
-  if (strippedTail.replace(/\r/g, "").endsWith(normalizedPrompt)) return true;
+  if (strippedTailNoCr.endsWith(normalizedPrompt)) return true;
   // The idle-prompt cache turns those CRs into LFs and keeps the blank
   // lines. Compare that form too, only when the cache itself spans lines,
   // so a bare `$`/`#` is unchanged.
   if (ansiFreePrompt.includes("\n")) {
     const crAsLfPrompt = ansiFreePrompt.replace(/\r/g, "\n");
     if (strippedTail.replace(/\r/g, "\n").endsWith(crAsLfPrompt)) return true;
+    // Screen-derived multiline prompts trim trailing whitespace on lines above
+    // the cursor (matching xterm's translateToString(true)) while preserving
+    // exact spacing on the final cursor line. Normalize trailing spaces on
+    // non-final lines on CRLF-only streams too, gated on a final-line match.
+    const promptLastLine = normalizedPrompt.slice(normalizedPrompt.lastIndexOf("\n") + 1);
+    if (
+      strippedTailNoCr.endsWith(promptLastLine)
+      && strippedTailNoCr.replace(/[ \t]+\n/g, "\n").endsWith(normalizedPrompt)
+    ) {
+      return true;
+    }
   }
   // Only fall back to rendered screen comparison when raw matching fails and
   // the tail contains terminal redraw controls (bare CR overwrite, backspace,
