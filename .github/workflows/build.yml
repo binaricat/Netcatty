@@ -339,7 +339,7 @@ jobs:
       # The GitHub runner already retries container pulls three times. Use the
       # official Quay mirror to avoid the Docker Hub endpoint that repeatedly
       # timed out in package validation.
-      image: quay.io/almalinuxorg/almalinux:8
+      image: quay.io/almalinuxorg/almalinux:8.10-20261114@sha256:e85b75cd6ce05cd1e7616d4b2590077e0acc395e7ee73a9f887b17d1591b6ef3
     env:
       MOSH_BIN_RELEASE: ${{ needs.resolve-mosh.outputs.mosh_bin_release }}
       ET_BIN_RELEASE: ${{ needs.resolve-et.outputs.et_bin_release }}
@@ -626,7 +626,7 @@ jobs:
       && (needs.resolve-et.result == 'success' || needs.resolve-et.result == 'skipped')
     runs-on: ubuntu-24.04-arm
     container:
-      image: debian:bullseye
+      image: debian:bullseye-20260824@sha256:6f519a81440354a85eb592c5f32109ab80605f6b892455983a6f618bf87fabe9
     env:
       MOSH_BIN_RELEASE: ${{ needs.resolve-mosh.outputs.mosh_bin_release }}
       ET_BIN_RELEASE: ${{ needs.resolve-et.outputs.et_bin_release }}
