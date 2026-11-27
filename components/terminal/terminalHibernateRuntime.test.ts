@@ -366,6 +366,33 @@ test("serializeTerminalForHibernate compresses large snapshots and resolves them
   assert.equal(restored, largeText);
 });
 
+test("serializeTerminalForHibernate with compress:false skips inline gzip so live listeners detach before compressing", async () => {
+  const { compressHibernateSnapshot, resolveHibernateWakeHistoryAsync } = await import("./terminalHibernateRuntime.ts");
+  const largeText = Array.from({ length: 200 }, (_, i) => `\x1b[32mINFO\x1b[0m line ${i} hello world`).join("\r\n");
+  const term = createFakeTerm("normal", 3, 200);
+  const serializeAddon = {
+    serialize: (options?: Record<string, unknown>) => (
+      options?.range ? "viewport-only" : largeText
+    ),
+  };
+  const result = await serializeTerminalForHibernate(term as never, serializeAddon as never, { compress: false });
+  assert.equal(result.snapshot, largeText);
+  assert.equal(result.compressedSnapshot, null);
+
+  const compressed = await compressHibernateSnapshot(result.snapshot);
+  assert.ok(compressed instanceof Uint8Array);
+  assert.ok(compressed.byteLength > 0);
+  const restored = await resolveHibernateWakeHistoryAsync({
+    snapshot: "",
+    compressedSnapshot: compressed,
+    viewportSnapshot: result.viewportSnapshot,
+    scrollbackSnapshot: "",
+    pendingBuffer: "",
+    alternateScreen: false,
+  });
+  assert.equal(restored, largeText);
+});
+
 test("serializeTerminalForHibernate waits for deferred history preparation", async () => {
   const term = createFakeTerm("normal", 3, 5);
   const events: string[] = [];

@@ -231,6 +231,7 @@ import { readActiveTerminalBufferTextRange } from "./terminal/terminalContextBuf
 import {
   applyAuthoritativeHibernateSnapshot,
   appendHibernatePendingBuffer,
+  compressHibernateSnapshot,
   isTerminalAlternateScreenActive,
   readTerminalHibernateContext,
   resolveHibernateWakeHistoryAsync,
@@ -536,6 +537,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const hasRuntimeRef = useRef(false);
   const hibernateSnapshotRef = useRef("");
   const hibernateCompressedSnapshotRef = useRef<Uint8Array | null>(null);
+  const hibernateCompressionGenRef = useRef(0);
   const hibernateViewportSnapshotRef = useRef("");
   const hibernateScrollbackSnapshotRef = useRef("");
   const hibernateContextSnapshotRef = useRef("");
@@ -1883,6 +1885,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           try { term.scrollToBottom?.(); } catch { /* ignore */ }
         } else if (hibernatedRef.current || softHiddenRef.current) {
           if (typeof hibernateCompressedSnapshotRef !== "undefined") {
+            hibernateCompressionGenRef.current += 1;
             hibernateCompressedSnapshotRef.current = null;
           }
           applyAuthoritativeHibernateSnapshot({
@@ -2114,6 +2117,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     hibernatedRef.current = false;
     softHiddenRef.current = false;
     hibernateSnapshotRef.current = "";
+    hibernateCompressionGenRef.current += 1;
     hibernateCompressedSnapshotRef.current = null;
     hibernateViewportSnapshotRef.current = "";
     hibernateScrollbackSnapshotRef.current = "";
@@ -2352,6 +2356,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       alternateScreen: boolean;
     },
   ) => {
+    hibernateCompressionGenRef.current += 1;
     if (snapshot.compressedSnapshot && snapshot.compressedSnapshot.byteLength > 0) {
       hibernateCompressedSnapshotRef.current = snapshot.compressedSnapshot;
       hibernateSnapshotRef.current = "";
@@ -2453,6 +2458,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         preferWasm: resolveHibernatePreferWasmSerialize(terminalSettingsRef.current),
         prepare: () => xtermRuntimeRef.current?.keywordHighlighter.prepareForSerialization()
           ?? Promise.resolve(),
+        compress: false,
       },
     );
 
@@ -2464,6 +2470,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
 
     applyHibernateSnapshot(snapshot);
+    const compressionGen = hibernateCompressionGenRef.current;
+    const rawSnapshotToCompress = hibernateSnapshotRef.current;
     isBootActiveRef.current = false;
     const connectedBackendId = hibernateStatus === "connected" ? backendId : null;
     if (connectedBackendId) {
@@ -2478,6 +2486,22 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       beginHibernatedSessionListeners(connectedBackendId);
     }
     hibernatedRef.current = true;
+    // Compress the retained snapshot only after the live runtime is detached
+    // and incoming output is safely routed to hibernatePendingBufferRef.
+    if (rawSnapshotToCompress) {
+      void compressHibernateSnapshot(rawSnapshotToCompress).then((compressed) => {
+        if (
+          compressed
+          && compressed.byteLength > 0
+          && hibernatedRef.current
+          && hibernateCompressionGenRef.current === compressionGen
+          && hibernateSnapshotRef.current === rawSnapshotToCompress
+        ) {
+          hibernateCompressedSnapshotRef.current = compressed;
+          hibernateSnapshotRef.current = "";
+        }
+      });
+    }
     // Hibernation rebuilds the autofill controller on wake; drop any open
     // picker so it cannot stay visible against a non-pending controller.
     setPasswordPickerState(null);
