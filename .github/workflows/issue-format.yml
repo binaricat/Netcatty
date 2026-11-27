@@ -17,14 +17,15 @@ jobs:
       !contains(github.event.issue.labels.*.name, 'format-exempt')
     steps:
       - name: Checkout format helpers
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
+          persist-credentials: false
           sparse-checkout: |
             scripts/issue-format.cjs
           sparse-checkout-cone-mode: false
 
       - name: Validate title and body
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         with:
           script: |
             const format = require(`${process.env.GITHUB_WORKSPACE}/scripts/issue-format.cjs`);
