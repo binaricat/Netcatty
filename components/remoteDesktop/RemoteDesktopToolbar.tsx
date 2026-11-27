@@ -100,6 +100,7 @@ export interface RemoteDesktopToolbarProps {
   statusDetail?: string;
   tunneled?: boolean;
   encrypted?: boolean;
+  legacySecurityBadge?: string | null;
   resolution?: { width: number; height: number } | null;
   fps?: number;
   isFullscreen: boolean;
@@ -449,6 +450,7 @@ const RemoteDesktopNetworkTelemetryPill = React.memo(({
   fpsProp,
   resolutionLabel,
   encrypted,
+  legacySecurityBadge,
   tunneled,
   narrowMode,
 }: {
@@ -458,6 +460,7 @@ const RemoteDesktopNetworkTelemetryPill = React.memo(({
   fpsProp?: number;
   resolutionLabel: string;
   encrypted?: boolean;
+  legacySecurityBadge?: string | null;
   tunneled?: boolean;
   narrowMode: boolean;
 }) => {
@@ -601,6 +604,12 @@ const RemoteDesktopNetworkTelemetryPill = React.memo(({
                 <span>{tr(t, 'remoteDesktop.network.tlsEncrypted', 'TLS')}</span>
               </span>
             )}
+            {!encrypted && legacySecurityBadge && (
+              <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+                <ShieldAlert size={10} />
+                <span>{legacySecurityBadge}</span>
+              </span>
+            )}
             {tunneled && (
               <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
                 <SshTunnelIcon size={10} />
@@ -623,6 +632,7 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
   statusDetail,
   tunneled,
   encrypted,
+  legacySecurityBadge,
   resolution,
   fps,
   isFullscreen,
@@ -794,6 +804,20 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                 className="shrink-0 text-emerald-500/80"
                 aria-label={tr(t, 'remoteDesktop.toolbar.encrypted', 'Encrypted TLS connection')}
               />
+            )}
+            {!narrowMode && !encrypted && legacySecurityBadge && (
+              <span
+                className="inline-flex items-center gap-0.5 rounded bg-amber-500/12 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 shrink-0"
+                title={tr(
+                  t,
+                  'remoteDesktop.toolbar.standardRdpSecurity',
+                  'Standard RDP Security ({{cipher}})',
+                  { cipher: legacySecurityBadge },
+                )}
+              >
+                <ShieldAlert size={10} />
+                <span>{legacySecurityBadge}</span>
+              </span>
             )}
             {viewOnly && (
               <span className="inline-flex items-center gap-1 rounded bg-amber-500/12 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 shrink-0">
@@ -1332,6 +1356,7 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
             fpsProp={fps}
             resolutionLabel={resolutionLabel}
             encrypted={encrypted}
+            legacySecurityBadge={legacySecurityBadge}
             tunneled={tunneled}
             narrowMode={narrowMode}
           />

@@ -6,9 +6,13 @@ import type { Host, Identity, KnownHost, SSHKey, TerminalSession } from '../../t
 import type { RdpMultiMonitorMode } from '../../domain/models/connection';
 import {
   computeMonitorLayoutEntries,
+  formatStandardRdpSecurityBadge,
+  resolveEffectiveRdpSecurityMode,
   resolveRemoteDesktopConnectionSpec,
   type MonitorLayoutSpec,
+  type RdpAutoFallbackStage,
   type RdpDisplayControlCaps,
+  type RdpNegotiatedSecurityInfo,
   type RemoteDesktopProtocol,
 } from '../../domain/remoteDesktop';
 import { stopAgentTurn, type AgentStopBridge } from '../../infrastructure/ai/harness/agentStop';
@@ -230,7 +234,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const [connectAttempt, setConnectAttempt] = useState(0);
-  const [fallbackDisableCredSsp, setFallbackDisableCredSsp] = useState(false);
+  const [autoFallbackStage, setAutoFallbackStage] = useState<RdpAutoFallbackStage>('none');
 
   // Display, audio, input, and toolbar controls
   const [displayMode, setDisplayMode] = useState<RemoteDesktopDisplayMode>(() => {
@@ -260,6 +264,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
   const [encrypted, setEncrypted] = useState<boolean>(false);
+  const [rdpSecurityInfo, setRdpSecurityInfo] = useState<RdpNegotiatedSecurityInfo | null>(null);
   const [desktopTitle, setDesktopTitle] = useState<string | null>(null);
   // Resolution presets, multi-monitor, RDPDR local shared folders, and live telemetry
   const [fixedResolution, setFixedResolution] = useState<{ width: number; height: number } | null>(null);
@@ -868,6 +873,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     setWsUrl(null);
     setDisconnectError(null);
     setPendingCert(null);
+    setRdpSecurityInfo(null);
     setRemoteClipboardFiles([]);
     setClipboardFileTransferStatus(null);
     setClipboardTransfer(null);
@@ -896,7 +902,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       knownHosts,
       quality,
       viewOnly,
-      securityMode: fallbackDisableCredSsp ? 'tls' : spec.rdpConfig?.securityMode,
+      securityMode: resolveEffectiveRdpSecurityMode(spec.rdpConfig?.securityMode, autoFallbackStage),
       ignoreCertErrors: spec.rdpConfig?.ignoreCertErrors,
     });
 
@@ -938,7 +944,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     // Intentionally reconnect only when connectAttempt, connectionIntent, needsAuthPrompt, or fallback change.
     // Quality changes apply live over the active VNC WebSocket without reconnecting.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectAttempt, connectionIntent, needsAuthPrompt, fallbackDisableCredSsp]);
+  }, [connectAttempt, connectionIntent, needsAuthPrompt, autoFallbackStage]);
 
   const handleCertDecision = useCallback(
     (decision: RemoteDesktopCertDecisionValue) => {
@@ -974,7 +980,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       setAuthErrorMessage(null);
       setNeedsAuthPrompt(false);
       setConnectionIntent('active');
-      setFallbackDisableCredSsp(false);
+      setAutoFallbackStage('none');
       setConnectAttempt((n) => n + 1);
     },
     [],
@@ -989,7 +995,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
 
   const handleReconnect = useCallback(() => {
     setDisconnectError(null);
-    setFallbackDisableCredSsp(false);
+    setAutoFallbackStage('none');
     setConnectionIntent('active');
     setConnectAttempt((n) => n + 1);
   }, []);
@@ -1118,9 +1124,16 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     [releaseKeyboardGrab, sessionId, updateStatus],
   );
 
-  const handleNegotiationFallback = useCallback(() => {
-    setFallbackDisableCredSsp(true);
-    setStageMessage('CredSSP unavailable, retrying with TLS security...');
+  const handleNegotiationFallback = useCallback((nextStage: Exclude<RdpAutoFallbackStage, 'none'>) => {
+    // Clear wsUrl synchronously so RdpCanvasView unmounts immediately and never
+    // starts a stale WASM connect() against the closing WebSocket on this render.
+    setWsUrl(null);
+    setAutoFallbackStage(nextStage);
+    setStageMessage(
+      nextStage === 'rdp'
+        ? 'TLS unavailable, retrying with Standard RDP security...'
+        : 'CredSSP unavailable, retrying with TLS security...',
+    );
     setConnectAttempt((n) => n + 1);
   }, []);
 
@@ -1436,13 +1449,36 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   );
 
   const handleRdpConnected = useCallback(
-    (info: { width: number; height: number; encrypted?: boolean }) => {
+    (info: {
+      width: number;
+      height: number;
+      encrypted?: boolean;
+      securityInfo?: RdpNegotiatedSecurityInfo;
+    }) => {
       setResolution({ width: info.width, height: info.height });
       setEncrypted(Boolean(info.encrypted));
+      setRdpSecurityInfo(info.securityInfo ?? null);
+      if (autoFallbackStage === 'rdp') {
+        const badge = formatStandardRdpSecurityBadge(info.securityInfo);
+        toast.info(
+          badge
+            ? tr(
+                t,
+                'remoteDesktop.rdp.fallbackStandardRdpWithCipher',
+                'Connected using Standard RDP Security ({{cipher}}).',
+                { cipher: badge },
+              )
+            : tr(
+                t,
+                'remoteDesktop.rdp.fallbackStandardRdp',
+                'Connected using Standard RDP Security.',
+              ),
+        );
+      }
       setStageMessage('Desktop connected');
       updateStatus('connected');
     },
-    [updateStatus],
+    [autoFallbackStage, t, updateStatus],
   );
 
   const handleRemoteClipboardFilesChange = useCallback(
@@ -1496,6 +1532,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         statusDetail={stageMessage}
         tunneled={tunneled}
         encrypted={encrypted}
+        legacySecurityBadge={isRdp ? formatStandardRdpSecurityBadge(rdpSecurityInfo) : null}
         resolution={resolution}
         isFullscreen={isFullscreen}
         keyboardGrabActive={keyboardGrabActive}
@@ -1644,7 +1681,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
             password={credentials.password}
             domain={credentials.domain}
             rdpConfig={spec.rdpConfig}
-            fallbackDisableCredSsp={fallbackDisableCredSsp}
+            autoFallbackStage={autoFallbackStage}
             isVisible={isVisible}
             displayMode={displayMode}
             highDpi={highDpi}

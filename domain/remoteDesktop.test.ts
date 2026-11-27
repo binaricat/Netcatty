@@ -10,6 +10,7 @@ import {
   DEFAULT_RDP_PORT,
   DEFAULT_VNC_PORT,
   formatBandwidthBps,
+  formatStandardRdpSecurityBadge,
   formatVncDisplayNumber,
   getAvailableRemoteDesktopProtocols,
   hasCompanionRdp,
@@ -24,6 +25,8 @@ import {
   normalizeVncConfig,
   parseVncPortOrDisplay,
   RDP_RESOLUTION_PRESETS,
+  resolveEffectiveRdpSecurityMode,
+  resolveNextRdpAutoFallback,
   resolveRemoteDesktopConnectionSpec,
   sanitizeRdpConfig,
   sanitizeVncConfig,
@@ -441,4 +444,118 @@ test('fixed RDP resolution validation rejects invalid drafts before sanitization
   for (const resolutionMode of ['dynamic', 'fit'] as const) {
     assert.equal(hasValidRdpFixedResolution({ ...config, resolutionMode }, { width: '' }), true);
   }
+});
+
+test('RDP auto-fallback steps NLA -> TLS -> Standard RDP safely without downgrading explicit modes', () => {
+  assert.equal(resolveEffectiveRdpSecurityMode('auto', 'none'), 'auto');
+  assert.equal(resolveEffectiveRdpSecurityMode('auto', 'tls'), 'tls');
+  assert.equal(resolveEffectiveRdpSecurityMode('auto', 'rdp'), 'rdp');
+  assert.equal(resolveEffectiveRdpSecurityMode('nla', 'rdp'), 'nla');
+  assert.equal(resolveEffectiveRdpSecurityMode('tls', 'rdp'), 'tls');
+
+  // Generic negotiation failure steps none -> tls -> rdp -> null
+  assert.equal(
+    resolveNextRdpAutoFallback({
+      configuredMode: 'auto',
+      currentStage: 'none',
+      isNegotiationFailure: true,
+      errorMessage: 'server requires TLS without CredSSP',
+    }),
+    'tls',
+  );
+  assert.equal(
+    resolveNextRdpAutoFallback({
+      configuredMode: 'auto',
+      currentStage: 'tls',
+      isNegotiationFailure: true,
+      errorMessage: 'negotiation failure',
+    }),
+    'rdp',
+  );
+  assert.equal(
+    resolveNextRdpAutoFallback({
+      configuredMode: 'auto',
+      currentStage: 'rdp',
+      isNegotiationFailure: true,
+      errorMessage: 'negotiation failure',
+    }),
+    null,
+  );
+
+  // Server explicitly advertising Standard-RDP-only jumps straight to 'rdp'
+  assert.equal(
+    resolveNextRdpAutoFallback({
+      configuredMode: 'auto',
+      currentStage: 'none',
+      isNegotiationFailure: true,
+      errorMessage: '[negotiation failure] server only supports Standard RDP Security',
+    }),
+    'rdp',
+  );
+  assert.equal(
+    resolveNextRdpAutoFallback({
+      configuredMode: 'auto',
+      currentStage: 'none',
+      isNegotiationFailure: true,
+      errorMessage: 'SSL_NOT_ALLOWED_BY_SERVER',
+    }),
+    'rdp',
+  );
+
+  // Explicit modes and non-negotiation errors must never fallback
+  assert.equal(
+    resolveNextRdpAutoFallback({
+      configuredMode: 'nla',
+      currentStage: 'none',
+      isNegotiationFailure: true,
+      errorMessage: 'server only supports Standard RDP Security',
+    }),
+    null,
+  );
+  assert.equal(
+    resolveNextRdpAutoFallback({
+      configuredMode: 'tls',
+      currentStage: 'none',
+      isNegotiationFailure: true,
+      errorMessage: 'server only supports Standard RDP Security',
+    }),
+    null,
+  );
+  assert.equal(
+    resolveNextRdpAutoFallback({
+      configuredMode: 'auto',
+      currentStage: 'none',
+      isNegotiationFailure: false,
+      errorMessage: 'wrong password',
+    }),
+    null,
+  );
+});
+
+test('formatStandardRdpSecurityBadge formats RC4/FIPS/Unencrypted labels and hides TLS', () => {
+  assert.equal(formatStandardRdpSecurityBadge(null), null);
+  assert.equal(
+    formatStandardRdpSecurityBadge({ standardRdp: false, encrypted: true, method: 'tls', level: 'enhanced' }),
+    null,
+  );
+  assert.equal(
+    formatStandardRdpSecurityBadge({ standardRdp: true, encrypted: true, method: 'rc4-128', level: 'client-compatible' }),
+    'RC4-128',
+  );
+  assert.equal(
+    formatStandardRdpSecurityBadge({ standardRdp: true, encrypted: true, method: 'rc4-56', level: 'client-compatible' }),
+    'RC4-56',
+  );
+  assert.equal(
+    formatStandardRdpSecurityBadge({ standardRdp: true, encrypted: true, method: 'rc4-40', level: 'low' }),
+    'RC4-40',
+  );
+  assert.equal(
+    formatStandardRdpSecurityBadge({ standardRdp: true, encrypted: true, method: 'fips', level: 'fips' }),
+    'FIPS',
+  );
+  assert.equal(
+    formatStandardRdpSecurityBadge({ standardRdp: true, encrypted: false, method: 'none', level: 'none' }),
+    'Unencrypted',
+  );
 });
