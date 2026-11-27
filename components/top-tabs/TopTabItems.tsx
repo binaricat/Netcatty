@@ -250,7 +250,16 @@ export const formatSessionTopTabTooltip = (
 export const formatSessionTopTabLabel = (
   session: Pick<
     TerminalSession,
-    'customName' | 'hostLabel' | 'promptHostname' | 'dynamicTitle' | 'codingCliProviderId' | 'protocol' | 'hostname' | 'moshEnabled' | 'etEnabled'
+    | 'customName'
+    | 'hostLabel'
+    | 'promptHostname'
+    | 'promptHostnameFromJumpServer'
+    | 'dynamicTitle'
+    | 'codingCliProviderId'
+    | 'protocol'
+    | 'hostname'
+    | 'moshEnabled'
+    | 'etEnabled'
   >,
   dynamicTabTitleMode?: DynamicTabTitleMode,
 ): string => {

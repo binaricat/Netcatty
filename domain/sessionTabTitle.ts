@@ -12,7 +12,12 @@ export const getSessionConnectionLabel = (
 
 type SessionTabLabelSession = Pick<
   TerminalSession,
-  'customName' | 'hostLabel' | 'promptHostname' | 'dynamicTitle' | 'codingCliProviderId'
+  | 'customName'
+  | 'hostLabel'
+  | 'promptHostname'
+  | 'promptHostnameFromJumpServer'
+  | 'dynamicTitle'
+  | 'codingCliProviderId'
 >;
 
 const joinWorkspaceLabels = (labels: readonly string[]): string | null => {
@@ -176,10 +181,12 @@ export const resolveSessionTabTitle = (
   if (session.codingCliProviderId && dynamicTitle) {
     return dynamicTitle;
   }
-  if (dynamicTabTitleMode !== 'all') {
-    return connectionLabel;
-  }
   const promptHostname = session.promptHostname?.trim();
+  if (dynamicTabTitleMode !== 'all') {
+    return promptHostname && session.promptHostnameFromJumpServer
+      ? promptHostname
+      : connectionLabel;
+  }
   if (!dynamicTitle) return promptHostname || connectionLabel;
   if (promptHostname) {
     const reportedHost = shellTitleHostname(dynamicTitle);

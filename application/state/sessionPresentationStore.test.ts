@@ -131,13 +131,14 @@ test('session snapshot distinguishes missing fields from null tombstones', () =>
 
 test('prompt hostnames overlay as presentation without replacing configured hostname', () => {
   sessionPresentationStore.clearSession('prompt-host');
-  publishSessionPromptHost('prompt-host', '10.1.64.1');
+  publishSessionPromptHost('prompt-host', '10.1.64.1', { fromJumpServer: true });
   const merged = applySessionPresentation(session({
     id: 'prompt-host',
     hostLabel: 'jumpserver',
     hostname: 'jumpserver.example.com',
   }));
   assert.equal(merged.promptHostname, '10.1.64.1');
+  assert.equal(merged.promptHostnameFromJumpServer, true);
   assert.equal(merged.hostname, 'jumpserver.example.com');
   sessionPresentationStore.clearSession('prompt-host');
 });
