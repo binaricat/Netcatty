@@ -87,11 +87,13 @@ import {
   DEFAULT_VNC_CONFIG,
   DEFAULT_VNC_PORT,
   getHostEnabledProtocols,
+  hasValidRdpFixedResolution,
   isRemoteDesktopProtocol,
   resolveHostDefaultConnectProtocol,
   sanitizeRdpConfig,
   sanitizeVncConfig,
   shouldPromptHostProtocolOnConnect,
+  type RdpResolutionDraft,
 } from "../domain/remoteDesktop";
 import { PluginConnectionSection } from "./PluginConnectionSection";
 import { useHostConnectionTest } from "../application/state/useHostConnectionTest";
@@ -247,6 +249,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       } as Host;
     },
   );
+
+  const hasRdpConfig = Boolean(form.rdpConfig);
+  const [resolutionDraft, setResolutionDraft] = useState<RdpResolutionDraft>({});
+  useEffect(() => {
+    setResolutionDraft({});
+  }, [form.id, hasRdpConfig]);
+  const onResolutionDraftChange = (dimension: "width" | "height", value: string) => {
+    setResolutionDraft((prev) => ({ ...prev, [dimension]: value }));
+  };
 
   const [activeSubPanel, setActiveSubPanel] = useState<SubPanel>("none");
 
@@ -909,6 +920,12 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     if (savingHostRef.current) return;
     savingHostRef.current = true;
     try {
+    if (!pluginProtocolActive && (form.protocol === "rdp" || form.rdpConfig?.enabled)
+      && !hasValidRdpFixedResolution(form.rdpConfig, resolutionDraft)) {
+      setActiveProtocolTab("rdp");
+      toast.error(t("hostDetails.rdp.dimensionHint"));
+      return;
+    }
     const flushed = isRemoteDesktopPrimary ? undefined : await totpFlushRef.current?.();
     if (flushed && !flushed.ok) return;
     const hostname = form.hostname.trim()
@@ -1626,6 +1643,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           t={t}
           form={form}
           setForm={setForm}
+          resolutionDraft={resolutionDraft}
+          onResolutionDraftChange={onResolutionDraftChange}
           totpFlushRef={totpFlushRef}
           update={update}
           groupDefaults={effectiveGroupDefaults}
@@ -1689,6 +1708,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
 
         {isRemoteDesktopPrimary && isCurrentTabEnabled && (activeProtocolTab === "rdp" || activeProtocolTab === "vnc") ? (
           <RemoteDesktopOptionsSection
+            resolutionDraft={resolutionDraft}
+            onResolutionDraftChange={onResolutionDraftChange}
             form={form}
             setForm={setForm}
             t={t}

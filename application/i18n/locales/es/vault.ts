@@ -1151,6 +1151,7 @@ export const esVaultMessages: Messages = {
   'hostDetails.rdp.resolutionMode.fixed': 'Tamaño fijo',
   'hostDetails.rdp.width': 'Ancho',
   'hostDetails.rdp.height': 'Alto',
+  'hostDetails.rdp.dimensionHint': 'Introduce un número entero entre 200 y 8192.',
   'hostDetails.rdp.colorDepth': 'Profundidad de color',
   'hostDetails.rdp.audio': 'Salida de audio',
   'hostDetails.rdp.audioDesc': 'Reproducir el audio del escritorio remoto localmente',

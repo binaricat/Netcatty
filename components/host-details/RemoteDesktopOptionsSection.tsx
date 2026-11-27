@@ -38,10 +38,11 @@ import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { HostDetailsSection, HostDetailsSettingRow } from "./HostDetailsSection";
+import { RdpResolutionFields, type RdpResolutionDraftProps } from "./RdpResolutionFields";
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
-interface RemoteDesktopOptionsSectionProps {
+interface RemoteDesktopOptionsSectionProps extends RdpResolutionDraftProps {
   form: Host;
   setForm: React.Dispatch<React.SetStateAction<Host>>;
   t: Translate;
@@ -51,6 +52,8 @@ export const RemoteDesktopOptionsSection: React.FC<RemoteDesktopOptionsSectionPr
   form,
   setForm,
   t,
+  resolutionDraft,
+  onResolutionDraftChange,
 }) => {
   const [advancedOpen, setAdvancedOpen] = useState(() =>
     Boolean(
@@ -99,36 +102,13 @@ export const RemoteDesktopOptionsSection: React.FC<RemoteDesktopOptionsSectionPr
         </HostDetailsSettingRow>
 
         {rdp.resolutionMode === "fixed" && (
-          <div className="grid grid-cols-2 gap-2">
-            <div className="flex items-center justify-between gap-2 bg-transparent px-1 h-10">
-              <span className="text-sm font-medium text-foreground shrink-0">{t("hostDetails.rdp.width")}</span>
-              <Input
-                type="number"
-                min={200}
-                max={8192}
-                value={rdp.width}
-                onChange={(e) => {
-                  const n = Number.parseInt(e.target.value, 10);
-                  if (Number.isFinite(n)) updateRdp("width", n);
-                }}
-                className="h-8 w-20 text-sm text-center font-mono"
-              />
-            </div>
-            <div className="flex items-center justify-between gap-2 bg-transparent px-1 h-10">
-              <span className="text-sm font-medium text-foreground shrink-0">{t("hostDetails.rdp.height")}</span>
-              <Input
-                type="number"
-                min={200}
-                max={8192}
-                value={rdp.height}
-                onChange={(e) => {
-                  const n = Number.parseInt(e.target.value, 10);
-                  if (Number.isFinite(n)) updateRdp("height", n);
-                }}
-                className="h-8 w-20 text-sm text-center font-mono"
-              />
-            </div>
-          </div>
+          <RdpResolutionFields
+            form={form}
+            setForm={setForm}
+            t={t}
+            resolutionDraft={resolutionDraft}
+            onResolutionDraftChange={onResolutionDraftChange}
+          />
         )}
 
         <HostDetailsSettingRow

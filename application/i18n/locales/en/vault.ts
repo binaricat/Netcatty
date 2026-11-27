@@ -1149,6 +1149,7 @@ export const enVaultMessages: Messages = {
   'hostDetails.rdp.resolutionMode.fixed': 'Fixed Size',
   'hostDetails.rdp.width': 'Width',
   'hostDetails.rdp.height': 'Height',
+  'hostDetails.rdp.dimensionHint': 'Enter a whole number from 200 to 8192.',
   'hostDetails.rdp.colorDepth': 'Color Depth',
   'hostDetails.rdp.audio': 'Audio Output',
   'hostDetails.rdp.audioDesc': 'Play remote desktop sound locally',
