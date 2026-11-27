@@ -1828,13 +1828,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         isVisible && "z-10",
         magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl",
       )}
-      style={{
-        ...style,
-        outline: magnifiedSurfaceBounds
-          ? `1px solid ${sessionAppearanceTheme.colors.cursor}`
-          : undefined,
-        outlineOffset: magnifiedSurfaceBounds ? -1 : undefined,
-      }}
+      style={style}
       tabIndex={-1}
       onClick={handlePaneClick}
       onFocusCapture={handlePaneClick}
@@ -1997,6 +1991,18 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         onDetachDragEnd={inActiveWorkspace ? handleDetachDragEnd : undefined}
       />
         </>
+      )}
+      {magnifiedSurfaceBounds && (
+        <div
+          aria-hidden="true"
+          data-section="pane-magnification-stroke"
+          className="pointer-events-none absolute inset-0 z-50"
+          style={{
+            boxSizing: 'border-box',
+            border: `1px solid ${sessionAppearanceTheme.colors.cursor}`,
+            borderRadius: 'inherit',
+          }}
+        />
       )}
     </div>
   );
