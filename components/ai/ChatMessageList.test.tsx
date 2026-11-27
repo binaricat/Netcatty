@@ -671,7 +671,7 @@ test('ChatMessageList renders a non-error iteration limit notice with a Continue
   assert.match(source, /onClick=\{onContinue\}/);
   assert.match(panel, /onContinue=\{handleContinue\}/);
   assert.match(panel, /handleContinue = React.useCallback\(\(\) => handleSend\(t\('ai.chat.continue'\)\)/);
-  assert.match(sidePanel, /const handleSend = useCallback\(async \(textOverride\?: string\)/);
+  assert.match(sidePanel, /const handleSend = useCallback\(async \(\s*textOverride\?: string/);
   assert.match(sidePanel, /const trimmed = \(textOverride \?\? draft\?\.text \?\? ''\)\.trim\(\)/);
 });
 
