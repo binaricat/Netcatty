@@ -24,6 +24,25 @@ export const DEFAULT_RDP_COLOR_DEPTH: RdpColorDepth = 32;
 export const DEFAULT_RDP_RESOLUTION_MODE: RdpResolutionMode = 'dynamic';
 export const DEFAULT_RDP_SECURITY_MODE: RdpSecurityMode = 'auto';
 
+// Editor drafts stay separate from the sanitized config until they are valid.
+export type RdpResolutionDraft = Partial<Record<'width' | 'height', string>>;
+
+export const parseRdpDimensionDraft = (value: string): number | undefined => {
+  if (!value.trim()) return undefined;
+  const dimension = Number(value);
+  return Number.isInteger(dimension) && dimension >= 200 && dimension <= 8192
+    ? dimension
+    : undefined;
+};
+
+export const hasValidRdpFixedResolution = (
+  config: RdpConfig | undefined,
+  draft: RdpResolutionDraft = {},
+): boolean => config?.resolutionMode !== 'fixed' || (
+  parseRdpDimensionDraft(draft.width ?? String(config.width ?? DEFAULT_RDP_WIDTH)) !== undefined
+  && parseRdpDimensionDraft(draft.height ?? String(config.height ?? DEFAULT_RDP_HEIGHT)) !== undefined
+);
+
 export const DEFAULT_VNC_SCALING_MODE: VncScalingMode = 'fit';
 export const DEFAULT_VNC_QUALITY = 6;
 export const DEFAULT_VNC_COMPRESSION_LEVEL = 2;

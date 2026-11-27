@@ -1113,6 +1113,7 @@ export const zhTWVaultMessages: Messages = {
   'hostDetails.rdp.resolutionMode.fixed': '固定尺寸',
   'hostDetails.rdp.width': '寬度',
   'hostDetails.rdp.height': '高度',
+  'hostDetails.rdp.dimensionHint': '請輸入 200 到 8192 之間的整數。',
   'hostDetails.rdp.colorDepth': '色彩深度',
   'hostDetails.rdp.audio': '音訊輸出',
   'hostDetails.rdp.audioDesc': '在本機播放遠端桌面音效',

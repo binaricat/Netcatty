@@ -21,7 +21,7 @@ import {
 } from "../../domain/remoteDesktop";
 import type { Host } from "../../types";
 import { HostDetailsConnectionSections } from "../HostDetailsConnectionSections";
-import { CompanionRemoteDesktopSections } from "../host-details/CompanionRemoteDesktopSections";
+import { CompanionRemoteDesktopInlineFields, CompanionRemoteDesktopSections } from "../host-details/CompanionRemoteDesktopSections";
 import {
   resolvePrimaryProtocolSavePort,
   resolvePrimaryProtocolSwitchPort,
@@ -316,3 +316,28 @@ test("buildHostForProtocolOverride keeps SSH identity for companion RDP/VNC and 
   assert.equal(sshDispatch.host.protocol, "ssh");
   assert.equal(sshDispatch.host.rdpConfig?.defaultConnect, undefined);
 });
+
+for (const resolutionMode of ["fixed", "dynamic", "fit"] as const) {
+  test(`companion RDP shows dimensions only in fixed mode: ${resolutionMode}`, () => {
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <CompanionRemoteDesktopInlineFields
+          protocol="rdp"
+          form={makeHost({ rdpConfig: { enabled: true, resolutionMode, width: 1920, height: 1080 } })}
+          setForm={() => {}}
+          identities={[]}
+          t={(key) => key}
+        />
+      </TooltipProvider>,
+    );
+    for (const dimension of ["width", "height"]) {
+      const label = new RegExp(`hostDetails\\.rdp\\.${dimension}`);
+      if (resolutionMode === "fixed") assert.match(markup, label);
+      else assert.doesNotMatch(markup, label);
+    }
+    if (resolutionMode === "fixed") {
+      assert.match(markup, /inputMode="numeric"[^>]*value="1920"/);
+      assert.match(markup, /inputMode="numeric"[^>]*value="1080"/);
+    }
+  });
+}

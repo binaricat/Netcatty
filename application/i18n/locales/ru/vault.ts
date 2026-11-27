@@ -1167,6 +1167,7 @@ export const ruVaultMessages: Messages = {
   'hostDetails.rdp.resolutionMode.fixed': 'Фиксированный размер',
   'hostDetails.rdp.width': 'Ширина',
   'hostDetails.rdp.height': 'Высота',
+  'hostDetails.rdp.dimensionHint': 'Введите целое число от 200 до 8192.',
   'hostDetails.rdp.colorDepth': 'Глубина цвета',
   'hostDetails.rdp.audio': 'Вывод звука',
   'hostDetails.rdp.audioDesc': 'Воспроизводить звук удалённого рабочего стола локально',
