@@ -1,5 +1,5 @@
 diff --git a/crates/ironrdp-connector/src/connection.rs b/crates/ironrdp-connector/src/connection.rs
-index 04b4c42..52dba24 100644
+index 04b4c42..35c546e 100644
 --- a/crates/ironrdp-connector/src/connection.rs
 +++ b/crates/ironrdp-connector/src/connection.rs
 @@ -5,6 +5,7 @@ use std::borrow::Cow;
@@ -198,7 +198,7 @@ index 04b4c42..52dba24 100644
                      }
                  } else {
                      ClientConnectorState::ChannelConnection {
-@@ -1822,11 +1928,46 @@ impl Sequence for ClientConnector {
+@@ -1822,11 +1928,50 @@ impl Sequence for ClientConnector {
              }
  
              //== RDP Security Commencement ==//
@@ -226,9 +226,13 @@ index 04b4c42..52dba24 100644
 +                self.license_rng
 +                    .fill_secrets(&mut client_random, &mut unused_premaster);
 +
-+                let (security, exchange_pdu) =
-+                    StandardRdpSecurity::new_client(&server_security, client_random, self.message_channel_id)
-+                        .map_err(|err| reason_err!("SecurityExchange", "{err}"))?;
++                let (security, exchange_pdu) = StandardRdpSecurity::new_client(
++                    &server_security,
++                    client_random,
++                    io_channel_id,
++                    self.message_channel_id,
++                )
++                .map_err(|err| reason_err!("SecurityExchange", "{err}"))?;
 +
 +                info!(
 +                    method = ?security.info().encryption_method,
@@ -250,7 +254,7 @@ index 04b4c42..52dba24 100644
  
              //== Secure Settings Exchange ==//
              // Send Client Info PDU (information about supported types of compression, username, password, etc).
-@@ -2135,6 +2276,7 @@ impl Sequence for ClientConnector {
+@@ -2135,6 +2280,7 @@ impl Sequence for ClientConnector {
                                      .with_multitransport_soft_sync(self.soft_sync_negotiated()),
                                      compression_type: self.config.compression_type,
                                      server_rdp_version,
@@ -258,7 +262,7 @@ index 04b4c42..52dba24 100644
                                  },
                              }
                          }
-@@ -2293,7 +2435,14 @@ fn create_gcc_blocks<'a>(
+@@ -2293,7 +2439,14 @@ fn create_gcc_blocks<'a>(
              },
          },
          security: ClientSecurityData {
@@ -274,7 +278,7 @@ index 04b4c42..52dba24 100644
              ext_encryption_methods: 0,
          },
          network: if channels.is_empty() {
-@@ -2868,4 +3017,169 @@ mod tests {
+@@ -2868,4 +3021,169 @@ mod tests {
          .expect("valid GCC Client Cluster Data");
          assert_eq!(blocks.cluster, Some(cluster_data));
      }
@@ -757,10 +761,10 @@ index c577220..8af3d77 100644
  }
 diff --git a/crates/ironrdp-pdu/src/crypto/standard_rdp.rs b/crates/ironrdp-pdu/src/crypto/standard_rdp.rs
 new file mode 100644
-index 0000000..51b0c41
+index 0000000..41e281a
 --- /dev/null
 +++ b/crates/ironrdp-pdu/src/crypto/standard_rdp.rs
-@@ -0,0 +1,1401 @@
+@@ -0,0 +1,1531 @@
 +//! Standard RDP Security Layer ([MS-RDPBCGR] section 5.3).
 +//!
 +//! Supports 40-bit, 56-bit, and 128-bit RC4 (with standard MAC, salted MAC, and
@@ -1179,6 +1183,7 @@ index 0000000..51b0c41
 +pub struct StandardRdpEncryptor {
 +    info: StandardRdpSecurityInfo,
 +    cipher: DirectionCipher,
++    io_channel_id: u16,
 +    message_channel_id: Option<u16>,
 +    encrypt_client_license: Arc<AtomicBool>,
 +    use_salted_checksum: bool,
@@ -1197,6 +1202,8 @@ index 0000000..51b0c41
 +pub struct StandardRdpDecryptor {
 +    info: StandardRdpSecurityInfo,
 +    cipher: DirectionCipher,
++    io_channel_id: u16,
++    message_channel_id: Option<u16>,
 +    encrypt_client_license: Arc<AtomicBool>,
 +}
 +
@@ -1347,6 +1354,7 @@ index 0000000..51b0c41
 +    pub fn new_client(
 +        server_security: &ServerSecurityData,
 +        client_random: [u8; 32],
++        io_channel_id: u16,
 +        message_channel_id: Option<u16>,
 +    ) -> Result<(Self, SecurityExchangePdu), String> {
 +        if server_security.encryption_level == EncryptionLevel::None || server_security.encryption_method.is_empty() {
@@ -1385,6 +1393,7 @@ index 0000000..51b0c41
 +            encryptor: StandardRdpEncryptor {
 +                info,
 +                cipher: encrypt_cipher,
++                io_channel_id,
 +                message_channel_id,
 +                encrypt_client_license: Arc::clone(&encrypt_client_license),
 +                use_salted_checksum: false,
@@ -1392,6 +1401,8 @@ index 0000000..51b0c41
 +            decryptor: StandardRdpDecryptor {
 +                info,
 +                cipher: decrypt_cipher,
++                io_channel_id,
++                message_channel_id,
 +                encrypt_client_license,
 +            },
 +        };
@@ -1426,6 +1437,7 @@ index 0000000..51b0c41
 +        level: EncryptionLevel,
 +        client_random: [u8; 32],
 +        server_random: [u8; 32],
++        io_channel_id: u16,
 +        message_channel_id: Option<u16>,
 +    ) -> (Self, Self) {
 +        let (c_enc, c_dec) = derive_direction_ciphers(method, &client_random, &server_random, false).unwrap();
@@ -1440,6 +1452,7 @@ index 0000000..51b0c41
 +            encryptor: StandardRdpEncryptor {
 +                info,
 +                cipher: c_enc,
++                io_channel_id,
 +                message_channel_id,
 +                encrypt_client_license: Arc::clone(&c_lic),
 +                use_salted_checksum: false,
@@ -1447,6 +1460,8 @@ index 0000000..51b0c41
 +            decryptor: StandardRdpDecryptor {
 +                info,
 +                cipher: c_dec,
++                io_channel_id,
++                message_channel_id,
 +                encrypt_client_license: c_lic,
 +            },
 +        };
@@ -1454,6 +1469,7 @@ index 0000000..51b0c41
 +            encryptor: StandardRdpEncryptor {
 +                info,
 +                cipher: s_enc,
++                io_channel_id,
 +                message_channel_id,
 +                encrypt_client_license: Arc::clone(&s_lic),
 +                use_salted_checksum: false,
@@ -1461,6 +1477,8 @@ index 0000000..51b0c41
 +            decryptor: StandardRdpDecryptor {
 +                info,
 +                cipher: s_dec,
++                io_channel_id,
++                message_channel_id,
 +                encrypt_client_license: s_lic,
 +            },
 +        };
@@ -1470,9 +1488,15 @@ index 0000000..51b0c41
 +
 +/// Checks if a plaintext client `SendDataRequest.user_data` already begins with
 +/// a `BasicSecurityHeader` (`INFO_PKT`, `LICENSE_PKT`, or message-channel PDU).
++///
++/// Restricted strictly to `io_channel_id` and `message_channel_id` because static
++/// virtual-channel payloads start with a 4-byte `ChannelPduHeader.length` (e.g.
++/// 64 = `0x00000040`, 128 = `0x00000080`, 2048 = `0x00000800`) which would
++/// otherwise collide with `INFO_PKT` / `LICENSE_PKT` / `TRANSPORT_RSP`.
 +fn detect_existing_client_security_header(
 +    user_data: &[u8],
 +    channel_id: u16,
++    io_channel_id: u16,
 +    message_channel_id: Option<u16>,
 +) -> Option<BasicSecurityHeaderFlags> {
 +    if user_data.len() < BASIC_SECURITY_HEADER_SIZE {
@@ -1495,6 +1519,9 @@ index 0000000..51b0c41
 +        ) {
 +            return Some(flags);
 +        }
++        return None;
++    }
++    if channel_id != io_channel_id {
 +        return None;
 +    }
 +    if flags == BasicSecurityHeaderFlags::INFO_PKT
@@ -1594,6 +1621,9 @@ index 0000000..51b0c41
 +}
 +
 +fn write_per_len_vec(dst: &mut Vec<u8>, len: usize) -> Result<(), String> {
++    if len > 0x7FFF {
++        return Err(format!("Fast-Path length overflow: {len}"));
++    }
 +    let len_u16 = u16::try_from(len).map_err(|_| format!("Fast-Path length overflow: {len}"))?;
 +    if len_u16 <= 0x7F {
 +        dst.push(u8::try_from(len_u16).unwrap_or(0));
@@ -1643,6 +1673,7 @@ index 0000000..51b0c41
 +                    let existing_flags = detect_existing_client_security_header(
 +                        user_data,
 +                        req.channel_id,
++                        self.io_channel_id,
 +                        self.message_channel_id,
 +                    );
 +
@@ -1697,25 +1728,21 @@ index 0000000..51b0c41
 +        let num_events_inline = first_byte.get_bits(2..6);
 +        let (total_len, _len_size) =
 +            per::read_length(&mut cursor).map_err(|e| format!("invalid Fast-Path input length: {e}"))?;
-+        if usize::from(total_len) > plain_frame.len() {
++        let total_len = usize::from(total_len);
++        let header_consumed = plain_frame.len() - cursor.len();
++        if total_len < header_consumed || total_len > plain_frame.len() {
 +            return Err(String::from("truncated Fast-Path input frame"));
 +        }
-+        let extra_num_events = if num_events_inline == 0 {
-+            if cursor.is_empty() {
-+                return Err(String::from("Fast-Path input missing numEvents byte"));
-+            }
-+            Some(cursor.read_u8())
-+        } else {
-+            None
-+        };
-+        let header_consumed = plain_frame.len() - cursor.len();
-+        let plaintext = &plain_frame[header_consumed..usize::from(total_len)];
++        // Per [MS-RDPBCGR] 2.2.8.1.2 (TS_FP_INPUT_PDU), when `fpInputHeader.numEvents == 0`,
++        // the extended 1-byte `numEvents` field sits AFTER `fipsInformation` and `dataSignature`
++        // and MUST be signed and encrypted together with `fpInputEvents`.
++        let plaintext = &plain_frame[header_consumed..total_len];
++        if num_events_inline == 0 && plaintext.is_empty() {
++            return Err(String::from("Fast-Path input missing numEvents byte"));
++        }
 +
 +        let salted = self.use_salted_checksum && !self.cipher.is_fips();
 +        let mut body = Vec::with_capacity(plaintext.len() + 20);
-+        if let Some(n) = extra_num_events {
-+            body.push(n);
-+        }
 +        encrypt_payload(&mut self.cipher, plaintext, salted, &mut body);
 +
 +        let mut enc_flags = EncryptionFlags::ENCRYPTED;
@@ -1824,7 +1851,9 @@ index 0000000..51b0c41
 +                    let raw_flags = u16::from_le_bytes([user_data[0], user_data[1]]);
 +                    let flags = BasicSecurityHeaderFlags::from_bits_truncate(raw_flags);
 +
-+                    if flags.contains(BasicSecurityHeaderFlags::LICENSE_ENCRYPT_CS) {
++                    if ind.channel_id == self.io_channel_id
++                        && flags.contains(BasicSecurityHeaderFlags::LICENSE_ENCRYPT_CS)
++                    {
 +                        self.encrypt_client_license.store(true, Ordering::Release);
 +                    }
 +
@@ -1835,7 +1864,13 @@ index 0000000..51b0c41
 +                    let salted = flags.contains(BasicSecurityHeaderFlags::SECURE_CHECKSUM);
 +                    let plaintext = decrypt_payload(&mut self.cipher, &user_data[BASIC_SECURITY_HEADER_SIZE..], salted)?;
 +
-+                    let preserved = flags.intersection(PRESERVED_SECURITY_HEADER_FLAGS);
++                    let is_control_channel =
++                        ind.channel_id == self.io_channel_id || Some(ind.channel_id) == self.message_channel_id;
++                    let preserved = if is_control_channel {
++                        flags.intersection(PRESERVED_SECURITY_HEADER_FLAGS)
++                    } else {
++                        BasicSecurityHeaderFlags::empty()
++                    };
 +                    let plain_user_data = if !preserved.is_empty() {
 +                        let mut buf = Vec::with_capacity(BASIC_SECURITY_HEADER_SIZE + plaintext.len());
 +                        buf.extend_from_slice(&preserved.bits().to_le_bytes());
@@ -1899,7 +1934,13 @@ index 0000000..51b0c41
 +            }
 +            let salted = flags.contains(BasicSecurityHeaderFlags::SECURE_CHECKSUM);
 +            let plaintext = decrypt_payload(&mut self.cipher, &user_data[BASIC_SECURITY_HEADER_SIZE..], salted)?;
-+            let preserved = flags.intersection(PRESERVED_SECURITY_HEADER_FLAGS);
++            let is_control_channel =
++                req.channel_id == self.io_channel_id || Some(req.channel_id) == self.message_channel_id;
++            let preserved = if is_control_channel {
++                flags.intersection(PRESERVED_SECURITY_HEADER_FLAGS)
++            } else {
++                BasicSecurityHeaderFlags::empty()
++            };
 +            let plain_user_data = if !preserved.is_empty() {
 +                let mut buf = Vec::with_capacity(BASIC_SECURITY_HEADER_SIZE + plaintext.len());
 +                buf.extend_from_slice(&preserved.bits().to_le_bytes());
@@ -1921,28 +1962,27 @@ index 0000000..51b0c41
 +            let flags = EncryptionFlags::from_bits_retain(first.get_bits(6..8));
 +            let num_events_inline = first.get_bits(2..6);
 +            let (total_len, _) = per::read_length(&mut cursor).map_err(|e| format!("{e}"))?;
-+            let extra_num = if num_events_inline == 0 {
-+                Some(cursor.read_u8())
-+            } else {
-+                None
-+            };
 +            let consumed = wire_frame.len() - cursor.len();
 +            let encrypted = &wire_frame[consumed..usize::from(total_len)];
 +            let salted = flags.contains(EncryptionFlags::SECURE_CHECKSUM);
++            // Per [MS-RDPBCGR] 2.2.8.1.2, when num_events_inline == 0 the extended
++            // numEvents byte is inside the signed & encrypted payload after dataSignature.
 +            let plaintext = decrypt_payload(&mut self.cipher, encrypted, salted)?;
-+            let mut body = Vec::new();
-+            if let Some(n) = extra_num {
-+                body.push(n);
++            if num_events_inline == 0 && plaintext.is_empty() {
++                return Err(String::from("decrypted Fast-Path input missing extended numEvents byte"));
 +            }
-+            body.extend_from_slice(&plaintext);
-+            let tentative = 1 + 1 + body.len();
-+            let new_len = if tentative <= 0x7F { tentative } else { 1 + 2 + body.len() };
++            let tentative = 1 + 1 + plaintext.len();
++            let new_len = if tentative <= 0x7F {
++                tentative
++            } else {
++                1 + 2 + plaintext.len()
++            };
 +            let mut out = Vec::with_capacity(new_len);
 +            let mut plain_first = 0u8;
 +            plain_first.set_bits(2..6, num_events_inline);
 +            out.push(plain_first);
 +            write_per_len_vec(&mut out, new_len)?;
-+            out.extend_from_slice(&body);
++            out.extend_from_slice(&plaintext);
 +            Ok(out)
 +        }
 +    }
@@ -2011,7 +2051,7 @@ index 0000000..51b0c41
 +        assert_eq!(sc_security.server_cert.len(), 184);
 +
 +        let client_random = [0x42u8; 32];
-+        let (sec, exchange_pdu) = StandardRdpSecurity::new_client(sc_security, client_random, None).unwrap();
++        let (sec, exchange_pdu) = StandardRdpSecurity::new_client(sc_security, client_random, 1003, None).unwrap();
 +        assert_eq!(sec.info().encryption_method, EncryptionMethod::BIT_128);
 +        assert_eq!(sec.info().encryption_level, EncryptionLevel::ClientCompatible);
 +        // 512-bit RSA modulus -> 64 bytes ciphertext + 8 bytes zero padding = 72 bytes (0x48)
@@ -2036,7 +2076,7 @@ index 0000000..51b0c41
 +            (EncryptionMethod::FIPS, EncryptionLevel::Fips),
 +        ] {
 +            let (mut client, mut server) =
-+                StandardRdpSecurity::new_pair_for_test(method, level, client_random, server_random, Some(1009));
++                StandardRdpSecurity::new_pair_for_test(method, level, client_random, server_random, 1003, Some(1009));
 +
 +            // 1. ClientInfoPdu (existing BasicSecurityHeader with INFO_PKT)
 +            let mut client_info = vec![0x40, 0x00, 0x00, 0x00];
@@ -2094,6 +2134,22 @@ index 0000000..51b0c41
 +            let mut fp_in_many = vec![0x00, 0x09, 0x10, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]; // 16 events
 +            fp_in_many[1] = u8::try_from(fp_in_many.len()).unwrap();
 +            let enc_fp_many = client.encrypt_frame(&fp_in_many).unwrap();
++            // Verify wire layout per [MS-RDPBCGR] 2.2.8.1.2:
++            // [fpInputHeader(1)][PER len(1)][fipsInfo(4 if FIPS)][dataSignature(8)][encrypted(numEvents(1) || events(6))]
++            assert_eq!(enc_fp_many[0] & 0x3C, 0, "inline numEvents must be 0");
++            assert_ne!(enc_fp_many[0] & 0x80, 0, "FASTPATH_INPUT_ENCRYPTED must be set");
++            let expected_wire_len = if method == EncryptionMethod::FIPS {
++                // 1 + 1 + 4 (fips) + 8 (mac) + 8 (ceil((1+6)/8)*8 padded 3DES block) = 22
++                22
++            } else {
++                // 1 + 1 + 8 (mac) + 7 (1-byte numEvents + 6-byte events) = 17
++                17
++            };
++            assert_eq!(
++                enc_fp_many.len(),
++                expected_wire_len,
++                "FastPath extended numEvents wire layout mismatch for {method:?}"
++            );
 +            let dec_fp_many = server.decryptor.decrypt_client_frame_for_test(&enc_fp_many).unwrap();
 +            assert_eq!(dec_fp_many, fp_in_many);
 +
@@ -2112,12 +2168,89 @@ index 0000000..51b0c41
 +    }
 +
 +    #[test]
++    fn static_virtual_channel_lengths_64_128_2048_not_mistaken_for_security_headers() {
++        // Static virtual channels (e.g. cliprdr / rdpdr on channel 1004) begin with a
++        // 4-byte little-endian ChannelPduHeader.length. Lengths 64 (0x00000040),
++        // 128 (0x00000080), and 2048 (0x00000800) numerically match INFO_PKT,
++        // LICENSE_PKT, and TRANSPORT_RSP with flagsHi=0, so they MUST NOT be stripped
++        // or exempted from encryption.
++        let (mut client, mut server) = StandardRdpSecurity::new_pair_for_test(
++            EncryptionMethod::BIT_128,
++            EncryptionLevel::ClientCompatible,
++            [0x77u8; 32],
++            [0x88u8; 32],
++            1003,
++            Some(1009),
++        );
++
++        let svc_channel_id = 1004;
++        for data_len in [64u32, 128u32, 2048u32] {
++            let mut svc_pdu = Vec::with_capacity(8 + usize::try_from(data_len).unwrap());
++            svc_pdu.extend_from_slice(&data_len.to_le_bytes()); // ChannelPduHeader.length
++            svc_pdu.extend_from_slice(&0x0000_0003u32.to_le_bytes()); // CHANNEL_FLAG_FIRST | CHANNEL_FLAG_LAST
++            svc_pdu.resize(8 + usize::try_from(data_len).unwrap(), 0x5A);
++
++            let plain = make_send_data_request(svc_channel_id, &svc_pdu);
++            let enc = client.encrypt_frame(&plain).unwrap();
++            assert_ne!(enc, plain, "SVC packet with length {data_len} must be encrypted");
++
++            let x224 = decode::<X224<McsMessage<'_>>>(&enc).unwrap().0;
++            let McsMessage::SendDataRequest(req) = x224 else {
++                panic!("expected SendDataRequest");
++            };
++            let wire_flags = BasicSecurityHeaderFlags::from_bits_truncate(u16::from_le_bytes([
++                req.user_data[0],
++                req.user_data[1],
++            ]));
++            assert_eq!(
++                wire_flags,
++                BasicSecurityHeaderFlags::ENCRYPT,
++                "SVC packet with length {data_len} must only set SEC_ENCRYPT, got {wire_flags:?}"
++            );
++
++            let dec = server.decryptor.decrypt_client_frame_for_test(&enc).unwrap();
++            assert_eq!(dec, plain, "SVC packet with length {data_len} must round-trip intact");
++        }
++    }
++
++    #[test]
++    fn fast_path_extended_num_events_is_signed_and_encrypted_after_mac() {
++        // Independently verify [MS-RDPBCGR] 2.2.8.1.2 wire bytes:
++        // [fpInputHeader][len][8-byte dataSignature over (numEvents || events)][RC4(numEvents || events)]
++        let (mut client, mut server) = StandardRdpSecurity::new_pair_for_test(
++            EncryptionMethod::BIT_128,
++            EncryptionLevel::ClientCompatible,
++            [0x91u8; 32],
++            [0xA2u8; 32],
++            1003,
++            None,
++        );
++
++        let events = [0x20u8, 0x1E, 0x20, 0x1F, 0x20, 0x20];
++        let mut plain_fp = vec![0x00, 0x00, 0x10]; // action=0, inline numEvents=0, extended numEvents=16
++        plain_fp.extend_from_slice(&events);
++        plain_fp[1] = u8::try_from(plain_fp.len()).unwrap();
++
++        let enc_fp = client.encrypt_frame(&plain_fp).unwrap();
++        // Header is 2 bytes: fpInputHeader + 1-byte PER length.
++        assert_eq!(enc_fp[0], 0x80); // FASTPATH_INPUT_ENCRYPTED | numEvents=0 | action=0
++        assert_eq!(usize::from(enc_fp[1]), enc_fp.len());
++        // Bytes [2..10] are dataSignature; bytes [10..17] are encrypted (0x10 || events).
++        let raw_payload = &enc_fp[2..];
++        assert_eq!(raw_payload.len(), MAC_SIGNATURE_LEN + 1 + events.len());
++        let decrypted_direct = decrypt_payload(&mut server.decryptor.cipher, raw_payload, false).unwrap();
++        assert_eq!(decrypted_direct[0], 0x10, "first decrypted byte must be extended numEvents");
++        assert_eq!(&decrypted_direct[1..], &events);
++    }
++
++    #[test]
 +    fn encryption_level_low_only_encrypts_client_to_server() {
 +        let (mut client, mut server) = StandardRdpSecurity::new_pair_for_test(
 +            EncryptionMethod::BIT_40,
 +            EncryptionLevel::Low,
 +            [0x33u8; 32],
 +            [0x44u8; 32],
++            1003,
 +            None,
 +        );
 +
@@ -2139,6 +2272,7 @@ index 0000000..51b0c41
 +            EncryptionLevel::ClientCompatible,
 +            [0x55u8; 32],
 +            [0x66u8; 32],
++            1003,
 +            None,
 +        );
 +        server.encryptor.set_use_salted_checksum(true);
@@ -2294,7 +2428,7 @@ index 92ab334..2d78697 100644
  ];
  
 diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
-index ba81260..986b40a 100644
+index ba81260..f05a56e 100644
 --- a/crates/ironrdp-web/src/session.rs
 +++ b/crates/ironrdp-web/src/session.rs
 @@ -33,13 +33,18 @@ use ironrdp::cliprdr::backend::ClipboardMessage;
@@ -2360,7 +2494,7 @@ index ba81260..986b40a 100644
 +            .standard_rdp_security
 +            .as_ref()
 +            .map(StandardRdpSecurity::info);
-+        if let Some(callback) = self.0.borrow().security_info_callback.clone() {
++        if let Some(callback) = self.0.borrow_mut().security_info_callback.take() {
 +            report_security_info(&callback, security.enable_standard_rdp_security, standard_rdp_info);
 +        }
 +

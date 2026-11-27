@@ -1529,6 +1529,8 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
             kind,
           });
           return;
+        } finally {
+          try { builder.free(); } catch { /* ignore */ }
         }
 
         if (disposed) {

@@ -1125,6 +1125,9 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   );
 
   const handleNegotiationFallback = useCallback((nextStage: Exclude<RdpAutoFallbackStage, 'none'>) => {
+    // Clear wsUrl synchronously so RdpCanvasView unmounts immediately and never
+    // starts a stale WASM connect() against the closing WebSocket on this render.
+    setWsUrl(null);
     setAutoFallbackStage(nextStage);
     setStageMessage(
       nextStage === 'rdp'
