@@ -402,7 +402,7 @@ function createBridgeRegistrar(context) {
         const owner = electronModule.BrowserWindow.fromWebContents(event.sender);
         const result = await electronModule.dialog.showOpenDialog(owner || undefined, {
           title: "Select file to import",
-          properties: ["openFile", "showHiddenFiles"],
+          properties: process.platform === "linux" ? ["openFile"] : ["openFile", "showHiddenFiles"],
           filters: [{ name: "All Files", extensions: ["*"] }],
         });
         return result.canceled ? null : result.filePaths[0] ?? null;
@@ -1180,7 +1180,8 @@ function createBridgeRegistrar(context) {
     // Clipboard helpers for renderer fallback paths (e.g. Monaco paste in Electron)
     ipcMain.handle("netcatty:clipboard:readText", async () => {
       try {
-        return clipboard?.readText?.() || "";
+        const text = await clipboard?.readText?.();
+        return typeof text === "string" ? text : "";
       } catch {
         return "";
       }
@@ -1189,7 +1190,7 @@ function createBridgeRegistrar(context) {
     ipcMain.handle("netcatty:clipboard:writeText", async (_event, text) => {
       try {
         if (typeof clipboard?.writeText !== "function") return false;
-        clipboard.writeText(typeof text === "string" ? text : "");
+        await clipboard.writeText(typeof text === "string" ? text : "");
         return true;
       } catch {
         return false;
@@ -1197,15 +1198,15 @@ function createBridgeRegistrar(context) {
     });
 
     ipcMain.handle("netcatty:clipboard:readFiles", async () => {
-      return readClipboardFiles({ clipboard, fsImpl: fs, pathImpl: path });
+      return await readClipboardFiles({ clipboard, fsImpl: fs, pathImpl: path });
     });
 
     ipcMain.handle("netcatty:clipboard:readImage", async () => {
-      return readClipboardImage({ clipboard, fsImpl: fs, tempDirBridge });
+      return await readClipboardImage({ clipboard, fsImpl: fs, tempDirBridge });
     });
 
     ipcMain.handle("netcatty:clipboard:hasImage", async () => {
-      return hasClipboardImage({ clipboard });
+      return await hasClipboardImage({ clipboard });
     });
   
     // Select an application from system file picker
@@ -1288,7 +1289,7 @@ function createBridgeRegistrar(context) {
         title: title || "Select File",
         defaultPath: defaultPath || os.homedir(),
         filters: filters || [{ name: "All Files", extensions: ["*"] }],
-        properties: ["openFile", "showHiddenFiles"],
+        properties: process.platform === "linux" ? ["openFile"] : ["openFile", "showHiddenFiles"],
       });
   
       if (result.canceled || !result.filePaths.length) {

@@ -124,9 +124,8 @@ function setAutoLaunchEnabled(enabled, {
   try {
     app.setLoginItemSettings({
       openAtLogin: wantEnabled,
-      // openAsHidden only applies on macOS App Store builds; Windows relies
-      // on the --hidden arg below, which main.cjs checks on cold start.
-      openAsHidden: wantEnabled,
+      // Windows relies on the --hidden arg below, which main.cjs checks on cold start.
+      // macOS 13+ detects login launches via wasOpenedAtLogin (openAsHidden was removed in Electron 44).
       path: execPath,
       args: wantEnabled ? [HIDDEN_LAUNCH_ARG] : [],
     });

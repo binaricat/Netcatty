@@ -164,7 +164,7 @@
     "clsx": "2.1.1",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^42.11.12",
+    "electron": "^45.5.0",
     "electron-builder": "^26.15.2",
     "esbuild": "0.27.2",
     "eslint": "^9.39.1",
@@ -210,7 +210,7 @@
   "overrides": {
     "cpu-features": "npm:empty-npm-package@1.0.0",
     "axios": "1.13.5",
-    "node-abi": "4.31.0",
+    "node-abi": "4.43.0",
     "@electron/asar": "4.2.0"
   }
 }
