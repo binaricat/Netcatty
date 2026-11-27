@@ -223,7 +223,7 @@ async function serializeWithOptions(
 export async function serializeTerminalForHibernate(
   term: XTerm,
   serializeAddon: SerializeAddon,
-  options: { preferWasm?: boolean; prepare?: () => Promise<void> } = {},
+  options: { preferWasm?: boolean; prepare?: () => Promise<void>; compress?: boolean } = {},
 ): Promise<TerminalHibernateSnapshot> {
   await options.prepare?.();
   const { excludeAltBuffer, excludeModes, alternateScreen } = resolveHibernateSerializeOptions(term);
@@ -294,7 +294,9 @@ export async function serializeTerminalForHibernate(
       );
     }
 
-    const compressedSnapshot = await compressHibernateSnapshot(snapshot);
+    const compressedSnapshot = options.compress === false
+      ? null
+      : await compressHibernateSnapshot(snapshot);
 
     return {
       snapshot,
