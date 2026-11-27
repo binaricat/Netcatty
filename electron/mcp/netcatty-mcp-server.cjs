@@ -25,6 +25,9 @@ const { createPrivacyBoundary } = require("./externalMcpPrivacyBoundary.cjs");
 
 const DEBUG_MCP = process.env.NETCATTY_MCP_DEBUG === "1";
 
+// Avoid uncaught EPIPE crashes when the client closes stderr during teardown.
+process.stderr.on("error", () => {});
+
 function debugLog(...args) {
   if (!DEBUG_MCP) return;
   process.stderr.write(`[netcatty-mcp:debug] ${args.map(arg => {
