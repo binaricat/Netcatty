@@ -90,6 +90,67 @@ function parseClipboardTextFilePaths(text, options = {}) {
   return collectExistingFiles(candidates, options);
 }
 
+async function readClipboardFilesAsync(clipboard, options) {
+  try {
+    const items = await clipboard.read();
+    if (!Array.isArray(items) || items.length === 0) return [];
+
+    for (const item of items) {
+      const types = Array.isArray(item?.types) ? item.types : [];
+      if (typeof item?.getType !== "function") continue;
+
+      // Electron 44+ maps native file references (CF_HDROP on Windows,
+      // NSFilenamesPboardType on macOS, text/uri-list on Linux) to text/uri-list.
+      for (const mime of URI_LIST_FORMATS) {
+        if (!types.includes(mime)) continue;
+        const blob = await item.getType(mime);
+        const text = typeof blob?.text === "function" ? await blob.text() : "";
+        const files = parseClipboardTextFilePaths(text, options);
+        if (files.length > 0) return files;
+      }
+
+      for (const rawFormat of HDROP_FORMATS) {
+        const osMime = `electron application/osclipboard;format="${rawFormat}"`;
+        if (!types.includes(osMime)) continue;
+        const blob = await item.getType(osMime);
+        if (typeof blob?.arrayBuffer !== "function") continue;
+        const files = collectExistingFiles(
+          decodeWindowsHDrop(Buffer.from(await blob.arrayBuffer())),
+          options,
+        );
+        if (files.length > 0) return files;
+      }
+
+      const fileNameWMime = 'electron application/osclipboard;format="FileNameW"';
+      if (types.includes(fileNameWMime)) {
+        const blob = await item.getType(fileNameWMime);
+        if (typeof blob?.arrayBuffer === "function") {
+          const files = collectExistingFiles(
+            decodeWindowsFileNameW(Buffer.from(await blob.arrayBuffer())),
+            options,
+          );
+          if (files.length > 0) return files;
+        }
+      }
+
+      const fileNameMime = 'electron application/osclipboard;format="FileName"';
+      if (types.includes(fileNameMime)) {
+        const blob = await item.getType(fileNameMime);
+        if (typeof blob?.arrayBuffer === "function") {
+          const files = collectExistingFiles(
+            decodeWindowsFileName(Buffer.from(await blob.arrayBuffer())),
+            options,
+          );
+          if (files.length > 0) return files;
+        }
+      }
+    }
+  } catch {
+    return [];
+  }
+  return [];
+}
+
 function readClipboardFiles({
   clipboard,
   fsImpl = fs,
@@ -98,6 +159,12 @@ function readClipboardFiles({
   if (!clipboard) return [];
 
   const options = { fsImpl, pathImpl };
+  // Electron 44+ removed availableFormats/readBuffer and replaced clipboard.read
+  // with the async W3C ClipboardItem[] API.
+  if (typeof clipboard.availableFormats !== "function" && typeof clipboard.read === "function") {
+    return readClipboardFilesAsync(clipboard, options);
+  }
+
   try {
     const formats = typeof clipboard.availableFormats === "function"
       ? clipboard.availableFormats()
@@ -174,18 +241,61 @@ async function readClipboardImage({
   clipboard,
   fsImpl = fs,
   tempDirBridge,
+  nativeImageImpl = null,
   now = () => new Date(),
 } = {}) {
-  if (!clipboard || typeof clipboard.readImage !== "function" || !tempDirBridge?.getTempFilePath) {
+  if (!clipboard || !tempDirBridge?.getTempFilePath) {
     return null;
   }
 
   try {
-    const image = clipboard.readImage();
-    if (!image || (typeof image.isEmpty === "function" && image.isEmpty())) return null;
-    if (typeof image.toPNG !== "function") return null;
+    let content = null;
+    if (typeof clipboard.readImage === "function") {
+      const image = clipboard.readImage();
+      if (!image || (typeof image.isEmpty === "function" && image.isEmpty())) return null;
+      if (typeof image.toPNG !== "function") return null;
+      content = image.toPNG();
+    } else if (typeof clipboard.read === "function") {
+      const items = await clipboard.read();
+      if (!Array.isArray(items) || items.length === 0) return null;
+      let matchedItem = null;
+      let matchedType = null;
+      for (const item of items) {
+        const types = Array.isArray(item?.types) ? item.types : [];
+        if (types.includes("image/png")) {
+          matchedItem = item;
+          matchedType = "image/png";
+          break;
+        }
+        const fallbackType = types.find((type) => typeof type === "string" && type.startsWith("image/"));
+        if (fallbackType && !matchedItem) {
+          matchedItem = item;
+          matchedType = fallbackType;
+        }
+      }
+      if (!matchedItem || !matchedType || typeof matchedItem.getType !== "function") return null;
+      const blob = await matchedItem.getType(matchedType);
+      if (typeof blob?.arrayBuffer !== "function") return null;
+      const rawBuffer = Buffer.from(await blob.arrayBuffer());
+      if (rawBuffer.length === 0) return null;
+      if (matchedType === "image/png") {
+        content = rawBuffer;
+      } else {
+        const ni = nativeImageImpl || (() => {
+          try { return require("electron").nativeImage; } catch { return null; }
+        })();
+        if (ni && typeof ni.createFromBuffer === "function") {
+          const img = ni.createFromBuffer(rawBuffer);
+          if (!img || (typeof img.isEmpty === "function" && img.isEmpty())) return null;
+          content = img.toPNG();
+        } else {
+          content = rawBuffer;
+        }
+      }
+    } else {
+      return null;
+    }
 
-    const content = image.toPNG();
     if (!Buffer.isBuffer(content) || content.length === 0) return null;
 
     const name = createClipboardImageFileName(now());
@@ -202,6 +312,27 @@ async function readClipboardImage({
   }
 }
 
+async function hasClipboardImageAsync(clipboard) {
+  try {
+    if (typeof clipboard.read === "function") {
+      const items = await clipboard.read();
+      if (Array.isArray(items)) {
+        return items.some(
+          (item) => Array.isArray(item?.types)
+            && item.types.some((type) => typeof type === "string" && type.startsWith("image/")),
+        );
+      }
+    }
+    if (typeof clipboard.has === "function") {
+      if (await clipboard.has("image/png")) return true;
+      if (await clipboard.has("image/jpeg")) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 /**
  * Peek whether the OS clipboard currently holds an image without writing a
  * temp file. Used by local terminal paste to decide whether to forward Ctrl+V
@@ -209,7 +340,13 @@ async function readClipboardImage({
  * turns the chord into a clipboard paste event.
  */
 function hasClipboardImage({ clipboard } = {}) {
-  if (!clipboard || typeof clipboard.readImage !== "function") return false;
+  if (!clipboard) return false;
+  if (typeof clipboard.readImage !== "function") {
+    if (typeof clipboard.read === "function" || typeof clipboard.has === "function") {
+      return hasClipboardImageAsync(clipboard);
+    }
+    return false;
+  }
   try {
     if (typeof clipboard.availableFormats === "function") {
       try {

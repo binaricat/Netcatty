@@ -28,7 +28,7 @@ async function stageRendererFileToTemp(file, localPath, fsImpl, signal = null) {
       if (signal?.aborted) throw cancellationError();
       if (done) break;
       if (!value) continue;
-      const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+      const chunk = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
       let chunkOffset = 0;
       while (chunkOffset < chunk.length) {
         if (signal?.aborted) throw cancellationError();

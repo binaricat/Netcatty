@@ -204,7 +204,6 @@ test("setAutoLaunchEnabled(true) registers the hidden launch arg", () => {
 
   assert.deepEqual(capturedSettings, {
     openAtLogin: true,
-    openAsHidden: true,
     path: EXEC_PATH,
     args: [HIDDEN_LAUNCH_ARG],
   });

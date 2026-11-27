@@ -305,3 +305,64 @@ test("hasClipboardImage is false when clipboard API is unavailable", () => {
   assert.equal(hasClipboardImage({ clipboard: null }), false);
   assert.equal(hasClipboardImage({ clipboard: {} }), false);
 });
+
+test("readClipboardFiles supports Electron 44+ async W3C clipboard.read() text/uri-list", async () => {
+  const fsImpl = createFs({
+    "/Users/me/report.pdf": "file",
+    "/Users/me/docs": "directory",
+  });
+  const clipboard = {
+    read: async () => [
+      {
+        types: ["text/uri-list"],
+        getType: async (type) => {
+          assert.equal(type, "text/uri-list");
+          return new Blob(["file:///Users/me/report.pdf\r\nfile:///Users/me/docs\r\n"]);
+        },
+      },
+    ],
+  };
+
+  const files = await readClipboardFiles({ clipboard, fsImpl, pathImpl: require("node:path") });
+  assert.deepEqual(files, [
+    { path: "/Users/me/report.pdf", name: "report.pdf", isDirectory: false, size: 42 },
+    { path: "/Users/me/docs", name: "docs", isDirectory: true, size: 0 },
+  ]);
+});
+
+test("readClipboardImage and hasClipboardImage support Electron 44+ async W3C clipboard.read()", async () => {
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const written = [];
+  const clipboard = {
+    read: async () => [
+      {
+        types: ["text/plain", "image/png"],
+        getType: async (type) => {
+          assert.equal(type, "image/png");
+          return new Blob([pngBytes], { type: "image/png" });
+        },
+      },
+    ],
+  };
+
+  assert.equal(await hasClipboardImage({ clipboard }), true);
+  const saved = await readClipboardImage({
+    clipboard,
+    fsImpl: {
+      promises: {
+        writeFile: async (filePath, buf) => {
+          written.push({ filePath, buf });
+        },
+      },
+    },
+    tempDirBridge: {
+      getTempFilePath: (name) => `/tmp/${name}`,
+    },
+    now: () => new Date(2026, 10, 27, 12, 0, 0, 5),
+  });
+  assert.equal(saved.mediaType, "image/png");
+  assert.equal(saved.size, pngBytes.length);
+  assert.equal(written.length, 1);
+  assert.deepEqual(written[0].buf, pngBytes);
+});
+

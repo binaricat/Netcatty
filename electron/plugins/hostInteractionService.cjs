@@ -631,8 +631,8 @@ class PluginHostInteractionService {
       await context.assertActive(); this.#assertWindow(sender);
       const entry = { context, params };
       this.#audit(entry, "completed");
-      if (params.kind === "clipboard.write") { this.clipboard.writeText(params.text); return { cancelled: false, value: true }; }
-      const text = assertTextBytes(this.clipboard.readText(), LIMITS.clipboardBytes);
+      if (params.kind === "clipboard.write") { await this.clipboard.writeText(params.text); return { cancelled: false, value: true }; }
+      const text = assertTextBytes(await this.clipboard.readText(), LIMITS.clipboardBytes);
       this.quotaManager.chargeBytes(context.runtimeId, "clipboard", Buffer.byteLength(text));
       await context.assertActive();
       return { cancelled: false, value: text };
@@ -653,14 +653,36 @@ class PluginHostInteractionService {
       if (terminalTarget) entry.terminalWatch = this.terminalSelection.watch();
       context.signal?.addEventListener("abort", entry.onAbort, { once: true });
       if (context.signal?.aborted) { entry.onAbort(); return; }
-      try {
-        if (params.kind === "clipboard.read") {
-          entry.previewText = assertTextBytes(this.clipboard.readText(), LIMITS.clipboardBytes);
-          this.quotaManager.chargeBytes(context.runtimeId, "clipboard", Buffer.byteLength(entry.previewText));
-          entry.phase = "preview";
+      const finishPresent = (rawClipboardText) => {
+        if (this.pending.get(entry.id) !== entry) return;
+        try {
+          if (params.kind === "clipboard.read") {
+            entry.previewText = assertTextBytes(rawClipboardText, LIMITS.clipboardBytes);
+            this.quotaManager.chargeBytes(context.runtimeId, "clipboard", Buffer.byteLength(entry.previewText));
+            entry.phase = "preview";
+          }
+          this.#present(entry);
+        } catch { this.#finish(entry, null, fail("unavailable", "Host interaction window is unavailable")); }
+      };
+      if (params.kind === "clipboard.read") {
+        let readResult;
+        try { readResult = this.clipboard.readText(); }
+        catch { this.#finish(entry, null, fail("unavailable", "Host interaction window is unavailable")); return; }
+        if (readResult && typeof readResult.then === "function") {
+          readResult.then(
+            (text) => {
+              if (this.pending.get(entry.id) !== entry) return;
+              if (context.signal?.aborted) { entry.onAbort(); return; }
+              finishPresent(text);
+            },
+            () => { this.#finish(entry, null, fail("unavailable", "Host interaction window is unavailable")); },
+          );
+          return;
         }
-        this.#present(entry);
-      } catch { this.#finish(entry, null, fail("unavailable", "Host interaction window is unavailable")); }
+        finishPresent(readResult);
+        return;
+      }
+      finishPresent(null);
     });
   }
 
@@ -730,7 +752,7 @@ class PluginHostInteractionService {
         if (response.action !== "preview") throw fail("invalidArgument", "Clipboard sharing requires a preview action");
         this.#audit(entry, "preview-confirmed");
         let rawText;
-        try { rawText = this.clipboard.readText(); }
+        try { rawText = await this.clipboard.readText(); }
         catch { throw fail("unavailable", "Host clipboard text is unavailable"); }
         const text = assertTextBytes(rawText, LIMITS.clipboardBytes);
         this.quotaManager.chargeBytes(entry.context.runtimeId, "clipboard", Buffer.byteLength(text));
@@ -758,7 +780,7 @@ class PluginHostInteractionService {
         value = Object.freeze({ text: entry.previewText, ...this.terminalSelection.issue(entry.terminalTarget, entry.context) });
       }
       if (entry.params.kind === "clipboard.write") {
-        try { this.clipboard.writeText(entry.params.text); }
+        try { await this.clipboard.writeText(entry.params.text); }
         catch { throw fail("unavailable", "Host clipboard write failed"); }
       }
       return this.#finish(entry, { cancelled: false, value });
