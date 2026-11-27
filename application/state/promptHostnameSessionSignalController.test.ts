@@ -80,6 +80,14 @@ test('prompt host controller tracks a JumpServer menu split across chunks', () =
   assert.deepEqual(nested, [true]);
 });
 
+test('prompt host controller detects ANSI-styled JumpServer menus and upgrades matching hostnames', () => {
+  const { changes, controller, nested } = createHarness();
+  controller.handleTerminalOutput('ssh-1', '[root@app-01 ~]# ');
+  controller.handleTerminalOutput('ssh-1', 'ssh jump\r\n\x1b[32mOpt\x1b[0m> \r\n[root@app-01 ~]# ');
+  assert.deepEqual(changes, [['ssh-1', 'app-01'], ['ssh-1', 'app-01']]);
+  assert.deepEqual(nested, [false, true]);
+});
+
 test('prompt host controller observes the original host when returning from a target', () => {
   const { changes, controller } = createHarness();
   controller.handleTerminalOutput('ssh-1', '[root@jump.example.com ~]# ');

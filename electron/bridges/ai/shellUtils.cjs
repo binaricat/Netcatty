@@ -341,8 +341,25 @@ function matchesOsc133EmptyPrompt(session, view) {
     && cursor.line === session._osc133PromptLine;
 }
 
+let nextSessionReadinessGeneration = 1;
+
+function getSessionReadinessGeneration(session) {
+  if (!session || typeof session !== "object") return 0;
+  if (typeof session._readinessGeneration !== "number") {
+    session._readinessGeneration = nextSessionReadinessGeneration++;
+  }
+  return session._readinessGeneration;
+}
+
+function bumpSessionReadinessGeneration(session) {
+  if (!session || typeof session !== "object") return 0;
+  session._readinessGeneration = nextSessionReadinessGeneration++;
+  return session._readinessGeneration;
+}
+
 function trackSessionIdlePrompt(session, chunk) {
   if (!session || typeof chunk !== "string" || !chunk) return "";
+  bumpSessionReadinessGeneration(session);
 
   const previousTail = session._promptTrackTail || "";
   const combined = `${previousTail}${chunk}`;
@@ -1440,6 +1457,8 @@ module.exports = {
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,
   trackSessionIdlePrompt,
+  getSessionReadinessGeneration,
+  bumpSessionReadinessGeneration,
   looksLikeIdleAutoLogout,
   isLocalhostHostname,
   extractFirstNonLocalhostUrl,

@@ -165,7 +165,8 @@ const titleHostnameKey = (hostname: string): string =>
 
 /**
  * Resolve the label shown on session tabs and pane headers.
- * Live prompt and Shell titles require all mode; agent mode permits Agent titles only.
+ * Live shell titles require all mode; agent mode permits Agent titles and
+ * nested JumpServer target hostnames.
  */
 export const resolveSessionTabTitle = (
   session: SessionTabLabelSession,

@@ -12,7 +12,7 @@ export type SessionPresentation = {
 type Listener = () => void;
 
 /** Encode undefined / null / present distinctly for useSyncExternalStore snapshots. */
-function encodePresentationField(value: string | null | undefined): string {
+function encodePresentationField(value: string | boolean | null | undefined): string {
   if (value === undefined) return 'u';
   if (value === null) return 'n';
   return `v:${value}`;

@@ -1738,6 +1738,7 @@ async function queryWorkerShellReadiness(sessionId, status) {
       readiness: result.readiness === "busy" || result.readiness === "unknown"
         ? result.readiness
         : null,
+      generation: Number.isFinite(result.generation) ? result.generation : null,
     };
   } catch {
     return null;
@@ -1746,38 +1747,80 @@ async function queryWorkerShellReadiness(sessionId, status) {
   }
 }
 
-async function rehydrateWorkerPromptFromVisibleContext(sessionId, chatSessionId) {
-  if (!terminalWorkerManager?.request || !invokeVaultAgentFn) return false;
-  const readiness = await queryWorkerShellReadiness(sessionId, "connected");
-  if (!readiness) return false;
-  if (readiness.ready) return true;
-  if (readiness.readiness !== "unknown") return false;
+async function rehydrateWorkerPromptFromVisibleContext({
+  sessionId,
+  chatSessionId,
+  scopedSessionIds,
+  isCancelled,
+  cancelPromise,
+}) {
+  const checkPreflightAbort = () => {
+    if (isCancelled?.() || isChatSessionCancelled(chatSessionId)) {
+      return { ok: false, error: "Cancelled", cancelled: true };
+    }
+    if (closingTerminalSessions.has(sessionId)) {
+      return { ok: false, error: `Session "${sessionId}" is closing.`, closing: true };
+    }
+    const scopeErr = validateSessionScope(sessionId, chatSessionId, scopedSessionIds);
+    if (scopeErr) {
+      return { ok: false, error: scopeErr };
+    }
+    return null;
+  };
+  const awaitCancellable = (promise) => {
+    const safePromise = Promise.resolve(promise).catch(() => null);
+    return cancelPromise ? Promise.race([safePromise, cancelPromise]) : safePromise;
+  };
 
-  const visible = await handleReadContext({
+  const initialAbort = checkPreflightAbort();
+  if (initialAbort) return initialAbort;
+  if (!terminalWorkerManager?.request || !invokeVaultAgentFn) {
+    return { ok: true, seeded: false };
+  }
+
+  const readiness = await awaitCancellable(queryWorkerShellReadiness(sessionId, "connected"));
+  const afterProbeAbort = checkPreflightAbort();
+  if (afterProbeAbort) return afterProbeAbort;
+  if (!readiness) return { ok: true, seeded: false };
+  if (readiness.ready) return { ok: true, seeded: true };
+  if (
+    readiness.trackedShell !== true
+    || readiness.readiness !== "unknown"
+    || !Number.isFinite(readiness.generation)
+  ) {
+    return { ok: true, seeded: false };
+  }
+
+  const visible = await awaitCancellable(handleReadContext({
     sessionId,
     chatSessionId,
+    scopedSessionIds,
     range: "tail",
     maxLines: 120,
-  });
+  }));
+  const afterReadAbort = checkPreflightAbort();
+  if (afterReadAbort) return afterReadAbort;
   if (
     visible?.ok !== true
     || visible.alternateScreen === true
     || typeof visible.content !== "string"
     || !visible.content.trim()
   ) {
-    return false;
+    return { ok: true, seeded: false };
   }
 
-  try {
-    const seeded = await terminalWorkerManager.request(
-      "netcatty:ai:seedIdlePrompt",
-      { sessionId, context: visible.content },
-      {},
-    );
-    return seeded?.ok === true && seeded.ready === true;
-  } catch {
-    return false;
-  }
+  const seeded = await awaitCancellable(terminalWorkerManager.request(
+    "netcatty:ai:seedIdlePrompt",
+    {
+      sessionId,
+      context: visible.content,
+      expectedGeneration: readiness.generation,
+    },
+    {},
+  ));
+  const afterSeedAbort = checkPreflightAbort();
+  if (afterSeedAbort) return afterSeedAbort;
+  return { ok: true, seeded: seeded?.ok === true && seeded.ready === true };
 }
 
 function getSessionService() {
@@ -2129,6 +2172,7 @@ async function handleWorkerTerminalExec(params = {}, beforeExecute, options = {}
   }
 
   const chatSessionId = params?.chatSessionId || null;
+  const scopedSessionIds = params?.scopedSessionIds;
   const meta = getSessionMeta(sessionId, chatSessionId) || {};
   const metaProtocol = String(meta.protocol || "").toLowerCase();
   if (metaProtocol === "vnc" || metaProtocol === "rdp") {
@@ -2158,9 +2202,38 @@ async function handleWorkerTerminalExec(params = {}, beforeExecute, options = {}
     };
   }
 
+  let preflightMarker = null;
   try {
     if (!isNetworkDeviceLikeMeta(meta)) {
-      await rehydrateWorkerPromptFromVisibleContext(sessionId, chatSessionId);
+      let cancelledDuringPreflight = false;
+      let resolvePreflightCancel = null;
+      const cancelPromise = new Promise((resolve) => {
+        resolvePreflightCancel = resolve;
+      });
+      if (chatSessionId) {
+        preflightMarker = `__NCMCP_WORKER_PREFLIGHT_${crypto.randomBytes(8).toString("hex")}__`;
+        activePtyExecs.set(preflightMarker, {
+          chatSessionId,
+          cancel: () => {
+            cancelledDuringPreflight = true;
+            resolvePreflightCancel?.(null);
+          },
+        });
+      }
+      const preflight = await rehydrateWorkerPromptFromVisibleContext({
+        sessionId,
+        chatSessionId,
+        scopedSessionIds,
+        isCancelled: () => cancelledDuringPreflight || isChatSessionCancelled(chatSessionId),
+        cancelPromise,
+      });
+      if (preflightMarker) {
+        activePtyExecs.delete(preflightMarker);
+        preflightMarker = null;
+      }
+      if (!preflight.ok) {
+        return { ok: false, error: preflight.error };
+      }
     }
     return await terminalWorkerManager.request("netcatty:ai:exec", {
       sessionId,
@@ -2174,6 +2247,7 @@ async function handleWorkerTerminalExec(params = {}, beforeExecute, options = {}
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   } finally {
+    if (preflightMarker) activePtyExecs.delete(preflightMarker);
     releaseSessionExecution(sessionId, sessionToken);
     executionLock.release();
   }
@@ -2193,6 +2267,7 @@ async function handleWorkerJobStart(params = {}, beforeExecute) {
   }
 
   const chatSessionId = params?.chatSessionId || null;
+  const scopedSessionIds = params?.scopedSessionIds;
   const meta = getSessionMeta(sessionId, chatSessionId) || {};
   const metaProtocol = String(meta.protocol || "").toLowerCase();
   if (metaProtocol === "vnc" || metaProtocol === "rdp") {
@@ -2212,7 +2287,15 @@ async function handleWorkerJobStart(params = {}, beforeExecute) {
     }
   }
 
-  const pendingStart = { chatSessionId, cancelled: false };
+  let resolvePreflightCancel = null;
+  const cancelPromise = new Promise((resolve) => {
+    resolvePreflightCancel = resolve;
+  });
+  const pendingStart = {
+    chatSessionId,
+    cancelled: false,
+    onCancel: () => resolvePreflightCancel?.(null),
+  };
   let pendingForSession = pendingWorkerJobStarts.get(sessionId);
   if (!pendingForSession) {
     pendingForSession = new Set();
@@ -2222,7 +2305,20 @@ async function handleWorkerJobStart(params = {}, beforeExecute) {
 
   try {
     if (!isNetworkDeviceLikeMeta(meta)) {
-      await rehydrateWorkerPromptFromVisibleContext(sessionId, chatSessionId);
+      const preflight = await rehydrateWorkerPromptFromVisibleContext({
+        sessionId,
+        chatSessionId,
+        scopedSessionIds,
+        isCancelled: () => pendingStart.cancelled || isChatSessionCancelled(chatSessionId),
+        cancelPromise,
+      });
+      if (!preflight.ok) {
+        return {
+          ok: false,
+          error: preflight.error,
+          ...(preflight.cancelled || preflight.closing ? { status: "cancelled" } : {}),
+        };
+      }
     }
     const result = await terminalWorkerManager.request("netcatty:ai:jobStart", {
       sessionId,
@@ -2382,7 +2478,10 @@ function cancelWorkerBackgroundJobsForSession(chatSessionId) {
   if (!chatSessionId) return;
   for (const pendingStarts of pendingWorkerJobStarts.values()) {
     for (const pendingStart of pendingStarts) {
-      if (pendingStart.chatSessionId === chatSessionId) pendingStart.cancelled = true;
+      if (pendingStart.chatSessionId === chatSessionId) {
+        pendingStart.cancelled = true;
+        pendingStart.onCancel?.();
+      }
     }
   }
   for (const [jobId, job] of workerBackgroundJobs) {
@@ -2417,6 +2516,7 @@ async function cancelWorkerBackgroundJobsForTerminalSession(sessionId) {
   if (!sessionId) return;
   for (const pendingStart of pendingWorkerJobStarts.get(sessionId) || []) {
     pendingStart.cancelled = true;
+    pendingStart.onCancel?.();
   }
   const matchingJobs = [];
   const pending = [];

@@ -57,7 +57,8 @@ export function createPromptHostnameSessionSignalController({
       const tail = combined.slice(-tailLimit);
       tails.set(sessionId, tail);
       if (
-        (combined.includes('Opt>') || combined.includes('[Host]>'))
+        !jumpServerSessions.has(sessionId)
+        && combined.includes('>')
         && combined.split(/\r\n|\r|\n/u).some((line) => isJumpServerMenuPrompt(line))
       ) {
         jumpServerSessions.add(sessionId);
@@ -75,13 +76,13 @@ export function createPromptHostnameSessionSignalController({
       const detectedKey = normalizedHostname(detected);
       if (!detectedKey) return;
 
+      const fromJumpServer = jumpServerSessions.has(sessionId);
+      const publishKey = `${detectedKey}\0${fromJumpServer ? '1' : '0'}`;
       // Observe the prompt, not whether its hostname matches an IP or DNS alias.
       // The domain title policy decides if this presentation is shown.
-      if (published.get(sessionId) === detectedKey) return;
-      published.set(sessionId, detectedKey);
-      onChange(sessionId, detected, {
-        fromJumpServer: jumpServerSessions.has(sessionId),
-      });
+      if (published.get(sessionId) === publishKey) return;
+      published.set(sessionId, publishKey);
+      onChange(sessionId, detected, { fromJumpServer });
     },
   };
 }
