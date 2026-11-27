@@ -6,6 +6,7 @@ const net = require("node:net");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
 const { StdioClientTransport } = require("@modelcontextprotocol/sdk/client/stdio.js");
 
@@ -84,6 +85,7 @@ function startBridge({ token, authDelayMs = 0, onGetContext = null }) {
           }
           if (msg.method === "netcatty/getContext" && onGetContext) {
             const action = onGetContext(msg, socket);
+            if (action === "hold") return;
             if (action === "hold-and-close") {
               socket.destroy();
               return;
@@ -96,7 +98,8 @@ function startBridge({ token, authDelayMs = 0, onGetContext = null }) {
           });
         };
         if (msg.method === "auth/verify" && authDelayMs > 0) {
-          setTimeout(respond, authDelayMs);
+          const timer = setTimeout(respond, authDelayMs);
+          timer.unref?.();
         } else {
           respond();
         }
@@ -114,6 +117,9 @@ function startBridge({ token, authDelayMs = 0, onGetContext = null }) {
     ready,
     get connections() {
       return connections;
+    },
+    get activeSockets() {
+      return sockets.size;
     },
     destroySockets() {
       for (const socket of sockets) socket.destroy();
@@ -431,4 +437,230 @@ test("managed stdio calls that race bridge shutdown stay not-connected", {
   assert.equal(stillAlive.isError, true);
   assert.match(errorText(stillAlive), /Not connected to Netcatty/);
   assert.equal(second.connections, 0);
+});
+
+async function waitForExit(proc, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      resolve({ code: proc.exitCode, signal: proc.signalCode });
+      return;
+    }
+    const timer = setTimeout(() => {
+      proc.off("exit", onExit);
+      reject(new Error(`process ${proc.pid} did not exit within ${timeoutMs}ms`));
+    }, timeoutMs);
+    const onExit = (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal });
+    };
+    proc.once("exit", onExit);
+  });
+}
+
+async function waitForCondition(predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 15));
+  }
+  throw new Error(`condition not met within ${timeoutMs}ms`);
+}
+
+test("external stdio MCP server exits cleanly on stdin EOF while bridge stays open", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mcp-eof-"));
+  const discoveryPath = path.join(tmp, "discovery.json");
+  const bridge = startBridge({ token: "eof-token" });
+  const port = await bridge.ready;
+  writeDiscovery(discoveryPath, { port, token: "eof-token" });
+
+  const child = spawn(process.execPath, [EXTERNAL_SERVER], {
+    env: childEnv({ NETCATTY_EXTERNAL_MCP_DISCOVERY_FILE: discoveryPath }),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const stderr = [];
+  child.stderr.on("data", (chunk) => stderr.push(String(chunk)));
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+    }
+    await bridge.close().catch(() => {});
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  // Wait for TCP auth to finish so the ref'd TCP socket is live before closing stdin.
+  await waitForCondition(
+    () => bridge.activeSockets === 1 && bridge.calls.some((call) => call.method === "auth/verify"),
+  );
+
+  // Close stdin without sending SIGTERM/SIGKILL -- mirrors MCP client disconnect
+  // and Windows .cmd wrapper teardown where killing cmd.exe does not kill Netcatty.exe.
+  child.stdin.end();
+
+  const { code, signal } = await waitForExit(child, 5000);
+  assert.equal(signal, null, `expected clean exit without signal, stderr:\n${stderr.join("")}`);
+  assert.equal(code, 0, `expected exit code 0, stderr:\n${stderr.join("")}`);
+  await waitForCondition(() => bridge.activeSockets === 0);
+});
+
+test("managed stdio MCP server exits cleanly on stdin EOF while bridge stays open", async (t) => {
+  const bridge = startBridge({ token: "managed-eof-token" });
+  const port = await bridge.ready;
+
+  const child = spawn(process.execPath, [MANAGED_SERVER], {
+    env: childEnv({
+      NETCATTY_MCP_PORT: String(port),
+      NETCATTY_MCP_TOKEN: "managed-eof-token",
+    }),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const stderr = [];
+  child.stderr.on("data", (chunk) => stderr.push(String(chunk)));
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+    }
+    await bridge.close().catch(() => {});
+  });
+
+  await waitForCondition(
+    () => bridge.activeSockets === 1 && bridge.calls.some((call) => call.method === "auth/verify"),
+  );
+
+  child.stdin.end();
+
+  const { code, signal } = await waitForExit(child, 5000);
+  assert.equal(signal, null, `expected clean exit without signal, stderr:\n${stderr.join("")}`);
+  assert.equal(code, 0, `expected exit code 0, stderr:\n${stderr.join("")}`);
+  await waitForCondition(() => bridge.activeSockets === 0);
+});
+
+test("external stdio MCP server exits cleanly on stdin EOF even when startup auth stalls", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mcp-eof-startup-"));
+  const discoveryPath = path.join(tmp, "discovery.json");
+  // Hold auth/verify far longer than the exit budget so passing proves stdin
+  // EOF was observed before server.connect(transport) rather than after auth.
+  const bridge = startBridge({ token: "startup-eof-token", authDelayMs: 6000 });
+  const port = await bridge.ready;
+  writeDiscovery(discoveryPath, { port, token: "startup-eof-token" });
+
+  const child = spawn(process.execPath, [EXTERNAL_SERVER], {
+    env: childEnv({ NETCATTY_EXTERNAL_MCP_DISCOVERY_FILE: discoveryPath }),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const stderr = [];
+  child.stderr.on("data", (chunk) => stderr.push(String(chunk)));
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+    }
+    await bridge.close().catch(() => {});
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const started = Date.now();
+  child.stdin.end();
+
+  const { code, signal } = await waitForExit(child, 3500);
+  assert.ok(Date.now() - started < 4500, "child should exit before stalled startup auth completes");
+  assert.equal(signal, null, `expected clean exit without signal, stderr:\n${stderr.join("")}`);
+  assert.equal(code, 0, `expected exit code 0, stderr:\n${stderr.join("")}`);
+  assert.doesNotMatch(stderr.join(""), /Authenticated with TCP bridge/);
+  await waitForCondition(() => bridge.activeSockets === 0);
+});
+
+test("stdio MCP server exits cleanly with exit 0 when debug logging races closed stderr", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mcp-eof-stderr-"));
+  const discoveryPath = path.join(tmp, "discovery.json");
+  const bridge = startBridge({ token: "stderr-eof-token" });
+  const port = await bridge.ready;
+  writeDiscovery(discoveryPath, { port, token: "stderr-eof-token" });
+
+  const child = spawn(process.execPath, [EXTERNAL_SERVER], {
+    env: childEnv({
+      NETCATTY_EXTERNAL_MCP_DISCOVERY_FILE: discoveryPath,
+      NETCATTY_MCP_DEBUG: "1",
+    }),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+    }
+    await bridge.close().catch(() => {});
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  await waitForCondition(
+    () => bridge.activeSockets === 1 && bridge.calls.some((call) => call.method === "auth/verify"),
+  );
+
+  // Destroy stderr and stdout read ends to simulate abrupt client crash with
+  // debug logging enabled, then close stdin.
+  child.stderr.destroy();
+  child.stdout.destroy();
+  child.stdin.end();
+
+  const { code, signal } = await waitForExit(child, 5000);
+  assert.equal(signal, null);
+  assert.equal(code, 0);
+  await waitForCondition(() => bridge.activeSockets === 0);
+});
+
+test("stdio MCP server exits cleanly on stdin EOF while an RPC call is in flight", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mcp-eof-inflight-"));
+  const discoveryPath = path.join(tmp, "discovery.json");
+  const bridge = startBridge({
+    token: "inflight-eof-token",
+    onGetContext: () => "hold",
+  });
+  const port = await bridge.ready;
+  writeDiscovery(discoveryPath, { port, token: "inflight-eof-token" });
+
+  const child = spawn(process.execPath, [EXTERNAL_SERVER], {
+    env: childEnv({ NETCATTY_EXTERNAL_MCP_DISCOVERY_FILE: discoveryPath }),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const stderr = [];
+  child.stderr.on("data", (chunk) => stderr.push(String(chunk)));
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+    }
+    await bridge.close().catch(() => {});
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  await waitForCondition(
+    () => bridge.activeSockets === 1 && bridge.calls.some((call) => call.method === "auth/verify"),
+  );
+
+  // Initialize MCP session and issue a tool call whose bridge RPC stays pending.
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "eof-inflight-test", version: "1" },
+    },
+  })}\n`);
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "notifications/initialized",
+  })}\n`);
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: { name: "get_environment", arguments: {} },
+  })}\n`);
+
+  await waitForCondition(() => bridge.calls.some((call) => call.method === "netcatty/getContext"));
+  child.stdin.end();
+
+  const { code, signal } = await waitForExit(child, 5000);
+  assert.equal(signal, null, `expected clean exit without signal, stderr:\n${stderr.join("")}`);
+  assert.equal(code, 0, `expected exit code 0, stderr:\n${stderr.join("")}`);
+  await waitForCondition(() => bridge.activeSockets === 0);
 });
