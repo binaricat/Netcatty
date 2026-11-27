@@ -199,6 +199,48 @@ test("readCursorLogicalTailForReadiness fails closed on mid-line edits, text bel
   assert.equal(readCursorLogicalTailForReadiness(wrappedBelow as never).text, "");
 });
 
+test("readCursorLogicalTailForReadiness discards truncated or evicted preceding wrapped lines", () => {
+  // 67-row unfinished command whose truncated suffix starts with a host-like header,
+  // followed by a bare `# ` continuation line: must NOT emit the cut-off suffix as a header.
+  const longWrappedRows: Array<{ text: string; isWrapped?: boolean }> = [
+    { text: "echo 'start        ", isWrapped: false },
+    { text: "padding-row-1      ", isWrapped: true },
+    { text: "user@host: /project", isWrapped: true },
+  ];
+  for (let i = 0; i < 64; i += 1) {
+    longWrappedRows.push({ text: "x".repeat(20), isWrapped: true });
+  }
+  longWrappedRows.push({ text: "# ", isWrapped: false });
+
+  const overCap = createCursorTerm(longWrappedRows, {
+    cols: 20,
+    baseY: 0,
+    cursorY: longWrappedRows.length - 1,
+    cursorX: 2,
+  });
+  assert.equal(readCursorLogicalTailForReadiness(overCap as never).text, "# ");
+
+  // Scrollback-evicted preceding wrapped line (`row 0` has `isWrapped: true`) above bare `# `.
+  const evictedPreceding = createCursorTerm(
+    [
+      { text: "user@host: /project", isWrapped: true },
+      { text: "# ", isWrapped: false },
+    ],
+    { cols: 80, baseY: 0, cursorY: 1, cursorX: 2 },
+  );
+  assert.equal(readCursorLogicalTailForReadiness(evictedPreceding as never).text, "# ");
+
+  // Complete single-line prompt below a truncated log line is still preserved cleanly.
+  const completePromptAfterLongLog = createCursorTerm(
+    [
+      ...longWrappedRows.slice(0, -1),
+      { text: "user@host:~$ ", isWrapped: false },
+    ],
+    { cols: 20, baseY: 0, cursorY: longWrappedRows.length - 1, cursorX: 13 },
+  );
+  assert.equal(readCursorLogicalTailForReadiness(completePromptAfterLongLog as never).text, "user@host:~$ ");
+});
+
 function cellsForAscii(text: string, trailingCell?: MockCell): MockCell[] {
   const cells = Array.from(text, (ch) => ({ code: ch.charCodeAt(0), width: 1 }));
   if (trailingCell) cells.push(trailingCell);

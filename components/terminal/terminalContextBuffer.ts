@@ -141,18 +141,23 @@ export function readCursorLogicalTailForReadiness(
   for (let logicalIdx = 0; logicalIdx < maxLogicalLines && row >= 0; logicalIdx += 1) {
     let startRow = row;
     let wrappedCount = 0;
+    let truncated = false;
     while (startRow > 0 && buffer.getLine(startRow)?.isWrapped === true) {
       wrappedCount += 1;
       if (wrappedCount > maxWrappedRows) {
-        if (logicalIdx === 0) {
-          return { text: "", cursorLine, cursorAtLineEnd: true, hasContentBelowCursor: false };
-        }
+        truncated = true;
         break;
       }
       startRow -= 1;
     }
-    if (logicalIdx === 0 && startRow === 0 && buffer.getLine(0)?.isWrapped === true) {
-      return { text: "", cursorLine, cursorAtLineEnd: true, hasContentBelowCursor: false };
+    if (truncated || (startRow === 0 && buffer.getLine(0)?.isWrapped === true)) {
+      if (logicalIdx === 0) {
+        return { text: "", cursorLine, cursorAtLineEnd: true, hasContentBelowCursor: false };
+      }
+      // Never emit a cut-off or scrollback-evicted wrapped suffix as an
+      // independent logical line: its surviving tail could look like a
+      // two-line prompt header above a bare `$`/`#` continuation line.
+      break;
     }
 
     let combined = "";
