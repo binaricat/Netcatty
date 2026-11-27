@@ -420,6 +420,9 @@ function ensureTrayPanelWindow() {
   trayPanelReady = false;
   trayPanelShowWhenReady = false;
 
+  const { resolvePreloadPath, resolvePreloadWebPreferences } = require("../preloadPath.cjs");
+  const trayPreload = resolvePreloadPath(path.join(__dirname, ".."));
+
   trayPanelWindow = new BrowserWindow({
     width: TRAY_PANEL_WIDTH,
     height: TRAY_PANEL_HEIGHT,
@@ -440,19 +443,15 @@ function ensureTrayPanelWindow() {
     // the CSS radius (#2505 / Electron #46468).
     ...windowsCssRoundedOverlayChromeOptions(),
     ...(process.platform === "darwin" ? { visualEffectState: "active" } : {}),
-    webPreferences: (() => {
-      const { resolvePreloadPath, resolvePreloadWebPreferences } = require("../preloadPath.cjs");
-      const trayPreload = resolvePreloadPath(path.join(__dirname, ".."));
-      return {
-        preload: trayPreload,
-        contextIsolation: true,
-        nodeIntegration: false,
-        ...resolvePreloadWebPreferences(trayPreload),
-        spellcheck: false,
-        // Tray must not inherit Chromium page-zoom from the main window origin.
-        zoomFactor: 1,
-      };
-    })(),
+    webPreferences: {
+      preload: trayPreload,
+      contextIsolation: true,
+      nodeIntegration: false,
+      ...resolvePreloadWebPreferences(trayPreload),
+      spellcheck: false,
+      // Tray must not inherit Chromium page-zoom from the main window origin.
+      zoomFactor: 1,
+    },
   });
 
   require("./windowManager.cjs").applyTrayPanelBackgroundBlur(trayPanelWindow);

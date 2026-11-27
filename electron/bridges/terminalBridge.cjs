@@ -15,25 +15,15 @@ const { ensureNodePtySpawnHelperExecutable } = require("./nodePtySpawnHelperPerm
 const { createTerminalFlowPauseArbiter } = require("./terminalFlowPauseArbiter.cjs");
 const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
 
+ensureNodePtySpawnHelperExecutable();
+
 const terminalFlowPauseArbiter = createTerminalFlowPauseArbiter();
 const trackedFlowPauseSenders = new WeakSet();
 
-let cachedPty = null;
-function getPty() {
-  if (!cachedPty) {
-    ensureNodePtySpawnHelperExecutable();
-    cachedPty = require("node-pty");
-  }
-  return cachedPty;
-}
-
-let cachedSerialPort = null;
-function getSerialPort() {
-  if (!cachedSerialPort) {
-    ({ SerialPort: cachedSerialPort } = require("serialport"));
-  }
-  return cachedSerialPort;
-}
+const pty = require("node-pty");
+const { SerialPort } = require("serialport");
+function getPty() { return pty; }
+function getSerialPort() { return SerialPort; }
 const { createSerialTransport } = require("./serialNamedPipe.cjs");
 const {
   configureTerminalSessionDataEmitter,
