@@ -15,6 +15,7 @@ const { getCatalogToolDescription } = require("./catalogToolMetadata.cjs");
 const { NETCATTY_MCP_SERVER_INSTRUCTIONS } = require("./netcattyMcpInstructions.cjs");
 const { registerProgressiveMcpTools } = require("./progressiveMcpTools.cjs");
 const { normalizeMcpJsonRpcMessage } = require("./normalizeMcpCallArguments.cjs");
+const { createMcpStdioLifecycle } = require("./mcpStdioLifecycle.cjs");
 
 function catalogDescription(toolName, fallback) {
   return getCatalogToolDescription(toolName) || fallback;
@@ -123,9 +124,17 @@ function guardWriteOperation(command, { skipBlocklist = false } = {}) {
 }
 
 let tcpSocket = null;
+let connectingSocket = null;
 let pendingRequests = new Map(); // id -> { resolve, reject, sock }
 let nextRpcId = 1;
 let tcpBuffer = "";
+
+function rejectAllPending(message) {
+  for (const [id, pending] of pendingRequests) {
+    pendingRequests.delete(id);
+    pending.reject(new Error(message));
+  }
+}
 
 // `destroyed` stays false after the peer FIN has already moved readyState to
 // "closed". Writing in that window hits writeAfterFIN and rejects the call
@@ -154,11 +163,33 @@ function rejectPendingOnSocket(sock, externalMessage) {
 
 function connectTcp() {
   return new Promise((resolve, reject) => {
+    if (lifecycle.isShuttingDown()) {
+      reject(new Error("MCP server is shutting down"));
+      return;
+    }
+    let settled = false;
+    const finishResolve = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const finishReject = (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
     const sock = net.createConnection({ host: "127.0.0.1", port: NETCATTY_MCP_PORT }, () => {
+      if (connectingSocket === sock) connectingSocket = null;
+      if (lifecycle.isShuttingDown()) {
+        sock.destroy();
+        finishReject(new Error("MCP server is shutting down"));
+        return;
+      }
       tcpSocket = sock;
       debugLog("Connected to TCP bridge", { port: NETCATTY_MCP_PORT });
-      resolve();
+      finishResolve();
     });
+    connectingSocket = sock;
     sock.setEncoding("utf-8");
     const MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10 MB
     sock.on("data", (chunk) => {
@@ -196,15 +227,18 @@ function connectTcp() {
       }
     });
     sock.on("error", (err) => {
+      if (connectingSocket === sock) connectingSocket = null;
       debugLog("TCP socket error", { message: err?.message || String(err) });
-      reject(err);
+      finishReject(err);
       // External in-flight calls stay rejected and are not replayed.
       // Managed children do not reread discovery, so a call that races the
       // dead socket fails as not-connected rather than "TCP connection lost".
       rejectPendingOnSocket(sock, "TCP connection lost");
     });
     sock.on("close", () => {
+      if (connectingSocket === sock) connectingSocket = null;
       debugLog("TCP socket closed");
+      finishReject(new Error("TCP connection closed"));
       rejectPendingOnSocket(sock, "TCP connection closed");
       if (tcpSocket === sock) tcpSocket = null;
     });
@@ -251,9 +285,14 @@ function refreshExternalEndpoint() {
 }
 
 function dropActiveSocket() {
+  const pendingSock = connectingSocket;
+  connectingSocket = null;
   const sock = tcpSocket;
   tcpSocket = null;
   tcpBuffer = "";
+  if (pendingSock && pendingSock !== sock && !pendingSock.destroyed) {
+    pendingSock.destroy();
+  }
   if (sock && !sock.destroyed) sock.destroy();
 }
 
@@ -358,9 +397,21 @@ if (process.env.NETCATTY_MCP_DELEGATED_TOOLS !== undefined) {
   registerMcpTools(server, toolDependencies, listMcpTools().filter((tool) => allowed.has(tool.mcpTool)));
 } else registerProgressiveMcpTools(server, toolDependencies);
 
+const lifecycle = createMcpStdioLifecycle({
+  onLog: debugLog,
+  onShutdown: async () => {
+    dropActiveSocket();
+    rejectAllPending("MCP server shutting down");
+    await server.close().catch(() => {});
+  },
+});
+
 // ── Start ──
 
 async function main() {
+  lifecycle.attach();
+  if (lifecycle.isShuttingDown()) return;
+
   debugLog("Starting MCP server", {
     port: NETCATTY_MCP_PORT,
     hasToken: Boolean(NETCATTY_MCP_TOKEN),
@@ -382,15 +433,19 @@ async function main() {
     process.stderr.write("[netcatty-mcp] Authenticated with TCP bridge\n");
   }
 
+  if (lifecycle.isShuttingDown()) return;
+
   const transport = new StdioServerTransport();
   // Protocol.connect keeps this callback and runs it before request dispatch.
   transport.onmessage = (message) => {
     normalizeMcpJsonRpcMessage(message);
   };
+  lifecycle.bindTransport(transport);
   await server.connect(transport);
 }
 
 main().catch((err) => {
+  if (lifecycle.isShuttingDown()) return;
   process.stderr.write(`[netcatty-mcp] Fatal: ${err.message}\n`);
   process.exit(1);
 });
