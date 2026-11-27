@@ -71,8 +71,12 @@ const PROMPT_SUFFIX_WINDOW_PER_PROMPT_CHAR = 8;
 // scrollback and leaves the visible screen intact.
 // eslint-disable-next-line no-control-regex
 const SCREEN_CLEAR_CONTROL_REGEX = /\u001B(?:c|\[2J)/g;
+// Only trigger rendered fallback when the tail actually contains a redraw,
+// cursor, or erase control (bare CR, BS, or CSI cursor/erase A-H/J/K/f).
+// SGR colors (`\x1b[32m`), OSC titles, and bracketed paste modes must stay
+// off this path so colored log floods do not invoke TerminalTextRenderer.
 // eslint-disable-next-line no-control-regex
-const REDRAW_CONTROL_REGEX = /\r(?!\n)|[\u0008\u001B\u009B]/;
+const REDRAW_CONTROL_REGEX = /\r(?!\n)|\u0008|(?:\u001B\[|\u009B)[0-9;]*[A-HJKf]/;
 
 function sliceAfterLastScreenClear(text) {
   let lastEnd = 0;

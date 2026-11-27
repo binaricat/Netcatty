@@ -93,6 +93,16 @@ test("prompt suffix check does not scan the whole buffer on every call", () => {
   assert.ok(elapsedMs < 250, `50 checks took ${elapsedMs.toFixed(0)} ms`);
 });
 
+test("prompt suffix check skips rendered fallback on SGR-colored log floods", () => {
+  const coloredLogs = "\x1b[32mINFO\x1b[0m \x1b[36mrequest completed\x1b[0m\r\n".repeat(120);
+  const started = process.hrtime.bigint();
+  for (let i = 0; i < 5000; i += 1) {
+    assert.equal(hasExpectedPromptSuffix(coloredLogs, "root@3160T:~# "), false);
+  }
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.ok(elapsedMs < 500, `5000 colored-log checks took ${elapsedMs.toFixed(0)} ms`);
+});
+
 test("screen-derived multiline prompts match raw CR+EL redraws while rejecting unsafe states", () => {
   const seededPrompt = "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ";
   const rawRedraw = "^C\r\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\r\n# \r\x1b[K# ";
