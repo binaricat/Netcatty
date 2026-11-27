@@ -48,6 +48,21 @@ test('RemoteDesktopToolbar does not expose SFTP button on graphical remote deskt
   assert.doesNotMatch(withSftpProp, /data-testid="remote-desktop-sftp-btn"/);
 });
 
+test('RemoteDesktopToolbar fullscreen wrapper passes clicks through except at the hover strip and visible pill', () => {
+  const html = renderToolbar({ isFullscreen: true });
+  const layers = html.match(/^<div class="([^"]+)"><div class="([^"]+)"><\/div><div class="([^"]+)">/);
+  assert.ok(layers, 'fullscreen wrapper should contain the trigger strip and toolbar bar');
+  const [, wrapperClass, triggerClass, barClass] = layers;
+
+  assert.match(wrapperClass, /\bpointer-events-none\b/);
+  assert.doesNotMatch(wrapperClass, /\bpointer-events-auto\b/);
+  assert.match(wrapperClass, /\bleft-0 right-0\b/);
+  assert.match(triggerClass, /\bpointer-events-auto\b/);
+  assert.match(triggerClass, /\bh-3\b/);
+  assert.match(barClass, /-translate-y-full opacity-0 pointer-events-none/);
+  assert.doesNotMatch(barClass, /\bpointer-events-auto\b/);
+});
+
 test('RemoteDesktopToolbar renders live clipboard transfer progress pills for all phases', () => {
   const staged = renderToolbar({
     clipboardTransfer: {

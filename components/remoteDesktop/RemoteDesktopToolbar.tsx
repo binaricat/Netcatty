@@ -700,6 +700,7 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
   const [customHeightInput, setCustomHeightInput] = useState(() => String(fixedResolution?.height || resolution?.height || 1080));
   const barRef = useRef<HTMLDivElement | null>(null);
   const localFileInputRef = useRef<HTMLInputElement | null>(null);
+  const hoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isRdp = protocol === 'rdp';
 
   const canPickResolution = Boolean(onSelectResolutionPreset && (isRdp || supportsDynamicResize));
@@ -715,6 +716,8 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
     setCustomHeightInput(String(clampedH));
     onSelectResolutionPreset(clampedW, clampedH);
   };
+
+  useEffect(() => () => clearTimeout(hoverHideTimerRef.current), [isFullscreen]);
 
   useEffect(() => {
     const el = barRef.current;
@@ -2298,17 +2301,23 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
 
   return (
     <div
-      className="pointer-events-auto absolute left-0 right-0 top-0 z-30 flex justify-center pt-1.5"
-      onMouseEnter={() => setHoverReveal(true)}
-      onMouseLeave={() => setHoverReveal(false)}
+      className="pointer-events-none absolute left-0 right-0 top-0 z-30 flex justify-center pt-1.5"
+      onMouseEnter={() => {
+        clearTimeout(hoverHideTimerRef.current);
+        setHoverReveal(true);
+      }}
+      onMouseLeave={() => {
+        // Allow travel from the trigger strip onto the animating pill.
+        hoverHideTimerRef.current = setTimeout(() => setHoverReveal(false), 150);
+      }}
     >
       {/* Top-edge hover trigger strip */}
-      <div className="absolute inset-x-0 top-0 h-3" />
+      <div className="pointer-events-auto absolute inset-x-0 top-0 h-3" />
       <div
         className={cn(
           'transition-all duration-150',
           pinnedFullscreen || hoverReveal
-            ? 'translate-y-0 opacity-100'
+            ? 'translate-y-0 opacity-100 pointer-events-auto'
             : '-translate-y-full opacity-0 pointer-events-none',
         )}
       >
