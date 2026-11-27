@@ -1898,6 +1898,45 @@ async function rehydrateWorkerPromptFromVisibleContext({
   return { ok: true, seeded: seeded?.ok === true && seeded.ready === true };
 }
 
+async function runWorkerPromptRehydrationPreflight({
+  sessionId,
+  chatSessionId,
+  scopedSessionIds,
+}) {
+  if (!chatSessionId && !Array.isArray(scopedSessionIds)) {
+    return { ok: true, seeded: false };
+  }
+  let cancelledDuringPreflight = false;
+  let resolvePreflightCancel = null;
+  let preflightMarker = null;
+  const cancelPromise = new Promise((resolve) => {
+    resolvePreflightCancel = resolve;
+  });
+  if (chatSessionId) {
+    preflightMarker = `__NCMCP_WORKER_PREFLIGHT_${crypto.randomBytes(8).toString("hex")}__`;
+    activePtyExecs.set(preflightMarker, {
+      chatSessionId,
+      cancel: () => {
+        cancelledDuringPreflight = true;
+        resolvePreflightCancel?.(null);
+      },
+    });
+  }
+  try {
+    return await rehydrateWorkerPromptFromVisibleContext({
+      sessionId,
+      chatSessionId,
+      scopedSessionIds,
+      isCancelled: () => cancelledDuringPreflight || isChatSessionCancelled(chatSessionId),
+      cancelPromise,
+    });
+  } finally {
+    if (preflightMarker) {
+      activePtyExecs.delete(preflightMarker);
+    }
+  }
+}
+
 function getSessionService() {
   if (!sessionService) {
     const { createSessionService } = require("../capabilities/services/sessionService.cjs");
@@ -2277,35 +2316,13 @@ async function handleWorkerTerminalExec(params = {}, beforeExecute, options = {}
     };
   }
 
-  let preflightMarker = null;
   try {
     if (!isNetworkDeviceLikeMeta(meta)) {
-      let cancelledDuringPreflight = false;
-      let resolvePreflightCancel = null;
-      const cancelPromise = new Promise((resolve) => {
-        resolvePreflightCancel = resolve;
-      });
-      if (chatSessionId) {
-        preflightMarker = `__NCMCP_WORKER_PREFLIGHT_${crypto.randomBytes(8).toString("hex")}__`;
-        activePtyExecs.set(preflightMarker, {
-          chatSessionId,
-          cancel: () => {
-            cancelledDuringPreflight = true;
-            resolvePreflightCancel?.(null);
-          },
-        });
-      }
-      const preflight = await rehydrateWorkerPromptFromVisibleContext({
+      const preflight = await runWorkerPromptRehydrationPreflight({
         sessionId,
         chatSessionId,
         scopedSessionIds,
-        isCancelled: () => cancelledDuringPreflight || isChatSessionCancelled(chatSessionId),
-        cancelPromise,
       });
-      if (preflightMarker) {
-        activePtyExecs.delete(preflightMarker);
-        preflightMarker = null;
-      }
       if (!preflight.ok) {
         return { ok: false, error: preflight.error };
       }
@@ -2322,7 +2339,6 @@ async function handleWorkerTerminalExec(params = {}, beforeExecute, options = {}
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   } finally {
-    if (preflightMarker) activePtyExecs.delete(preflightMarker);
     releaseSessionExecution(sessionId, sessionToken);
     executionLock.release();
   }
@@ -3365,6 +3381,7 @@ module.exports = {
   reserveSessionExecution,
   releaseSessionExecution,
   getSessionBusyError,
+  rehydrateWorkerPromptForExec: runWorkerPromptRehydrationPreflight,
   dispatchBuiltinRpc: dispatch,
   EXTERNAL_MCP_CHAT_SESSION_ID,
 };

@@ -68,6 +68,22 @@ async function proxyCattyExecToWorker({
 
   try {
     beforeExecute();
+    if (
+      !isNetworkDeviceLike(meta)
+      && typeof mcpServerBridge.rehydrateWorkerPromptForExec === "function"
+    ) {
+      const preflight = await mcpServerBridge.rehydrateWorkerPromptForExec({
+        sessionId,
+        chatSessionId,
+      });
+      if (!preflight.ok) {
+        return { ok: false, error: preflight.error };
+      }
+      if (mcpServerBridge.getPermissionMode?.() === "observer") {
+        return { ok: false, error: "Execution blocked: permission mode is 'observer'" };
+      }
+      beforeExecute();
+    }
     return await terminalWorkerManager.request("netcatty:ai:exec", {
       sessionId,
       command,
