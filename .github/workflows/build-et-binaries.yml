@@ -48,6 +48,9 @@ concurrency:
   group: build-et-binaries-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   ET_REF: ${{ inputs.et_ref || 'et-v6.2.10' }}
 
