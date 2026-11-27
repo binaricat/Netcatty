@@ -74,6 +74,11 @@ test("progressive MCP catalog assigns every non-core catalog tool exactly once",
   assert.doesNotThrow(() => buildProgressiveMcpCatalog());
 });
 
+test("remote desktop screen reading is deferred rather than core", () => {
+  assert.deepEqual(DEFERRED_MCP_TOOLSETS.remote_desktop, ["remote_desktop_read_screen"]);
+  assert.equal(CORE_MCP_TOOL_NAMES.includes("remote_desktop_read_screen"), false);
+});
+
 test("progressive MCP registration initially exposes exactly 15 core tools", () => {
   const server = createFakeServer();
   const result = registerProgressiveMcpTools(server, createDeps());
@@ -116,6 +121,7 @@ test("loading all makes every catalog MCP tool available", async () => {
   assert.equal(result.loadedCatalogToolCount, catalogNames.length);
   assert.equal(result.visibleToolCount, catalogNames.length + 1);
   assert.equal(result.remainingCatalogToolCount, 0);
+  assert.equal(server.handlers.has("remote_desktop_read_screen"), true);
   assert.deepEqual(
     new Set(server.registrations),
     new Set([MCP_TOOL_LOADER_NAME, ...catalogNames]),

@@ -12,14 +12,18 @@ if not defined APP_EXE if exist "%SCRIPT_DIR%..\..\..\..\netcatty.exe" set "APP_
 if defined APP_EXE (
   set "ELECTRON_RUN_AS_NODE=1"
   "%APP_EXE%" "%SERVER_SCRIPT%" %*
-  exit /b %ERRORLEVEL%
+  goto :runtime_exit
 )
 
 where node >nul 2>nul
 if not errorlevel 1 (
   node "%SERVER_SCRIPT%" %*
-  exit /b %ERRORLEVEL%
+  goto :runtime_exit
 )
 
 echo Failed to locate the bundled Netcatty runtime for netcatty-external-mcp. 1>&2
 exit /b 1
+
+:runtime_exit
+rem Read ERRORLEVEL outside the IF blocks to avoid expansion before the runtime runs.
+exit /b %ERRORLEVEL%
