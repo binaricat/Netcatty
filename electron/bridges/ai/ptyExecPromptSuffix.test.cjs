@@ -92,3 +92,56 @@ test("prompt suffix check does not scan the whole buffer on every call", () => {
   const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
   assert.ok(elapsedMs < 250, `50 checks took ${elapsedMs.toFixed(0)} ms`);
 });
+
+test("screen-derived multiline prompts match raw CR+EL redraws while rejecting unsafe states", () => {
+  const seededPrompt = "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ";
+  const rawRedraw = "^C\r\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\r\n# \r\x1b[K# ";
+  assert.equal(hasExpectedPromptSuffix(rawRedraw, seededPrompt), true);
+
+  // ANSI-styled header with trailing spaces on the header line and repeated CR+EL redraws.
+  const styledRedraw =
+    "\x1b[?2004h\x1b[32m[root@k8s-10-1-64-1 ~]\x1b[0m br0 = 10.1.64.1   \r\r\n# \r\x1b[K# \r\x1b[2K# ";
+  assert.equal(hasExpectedPromptSuffix(styledRedraw, seededPrompt), true);
+
+  // Pending input after redraw must not match.
+  assert.equal(
+    hasExpectedPromptSuffix("[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\r\n# \r\x1b[K# ls", seededPrompt),
+    false,
+  );
+
+  // Missing trailing space on expected prompt must still not match.
+  assert.equal(
+    hasExpectedPromptSuffix(rawRedraw, "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#"),
+    false,
+  );
+
+  // Mid-line cursor (text remains to the right of cursor) must not match.
+  assert.equal(
+    hasExpectedPromptSuffix("[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\r\n# ls\x1b[2D", seededPrompt),
+    false,
+  );
+
+  // Non-empty text below cursor (primary-screen menu) must not match.
+  assert.equal(
+    hasExpectedPromptSuffix("[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\n# \r\nMenu\x1b[1A\x1b[3G", seededPrompt),
+    false,
+  );
+
+  // Alternate screen active must not match.
+  assert.equal(
+    hasExpectedPromptSuffix(`${rawRedraw}\x1b[?1049hvim`, seededPrompt),
+    false,
+  );
+
+  // Pre-clear header line must not combine with a post-clear bare marker.
+  assert.equal(
+    hasExpectedPromptSuffix("[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\n\x1b[2J\x1b[H# ", seededPrompt),
+    false,
+  );
+
+  // Bare marker without header must not match.
+  assert.equal(
+    hasExpectedPromptSuffix("output\r\n# \r\x1b[K# ", seededPrompt),
+    false,
+  );
+});

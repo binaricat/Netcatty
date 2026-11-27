@@ -80,6 +80,43 @@ test("worker can rehydrate idle readiness from the visible terminal context", ()
   assert.deepEqual(session.stream.writes, [], "seeding readiness must never write to the PTY");
 });
 
+test("cancelling during live-shell probe after seeding multiline JumpServer prompt finishes on CR+EL redraw", async () => {
+  const pty = new FakePty();
+  const session = { protocol: 'ssh', stream: pty, shellKind: 'posix', _promptTrackTail: '', lastIdlePrompt: '' };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([['jump-ssh', session]]) });
+
+  const probe = ipcMain.handlers.get('netcatty:ai:shellReadiness')(createFakeEvent(), { sessionId: 'jump-ssh' });
+  const seeded = ipcMain.handlers.get('netcatty:ai:seedIdlePrompt')(createFakeEvent(), {
+    sessionId: 'jump-ssh',
+    context: "Last login\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ",
+    expectedGeneration: probe.generation,
+  });
+  assert.equal(seeded.ready, true);
+  assert.equal(seeded.prompt, "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ");
+
+  const startedAt = Date.now();
+  const execPromise = ipcMain.handlers.get('netcatty:ai:exec')(createFakeEvent(), {
+    sessionId: 'jump-ssh',
+    chatSessionId: 'chat-jump-cancel',
+    command: 'pwd',
+    commandTimeoutMs: 5000,
+  });
+
+  // Wait until the live-shell probe write hits the PTY.
+  await extractMarker(pty.writes);
+
+  // Cancel while the live-shell probe is still awaiting a reply.
+  ipcMain.listeners.get('netcatty:ai:exec:cancel')(createFakeEvent(), { chatSessionId: 'chat-jump-cancel' });
+  // Simulate the remote JumpServer target redrawing its multiline prompt with CR+EL after Ctrl+C.
+  pty.emit('data', "^C\r\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\r\n# \r\x1b[K# ");
+
+  const result = await execPromise;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Cancelled");
+  assert.ok(Date.now() - startedAt < 2000, "cancel should finish immediately on redrawn prompt, not wait for forced cancel");
+});
+
 test("worker rejects stale readiness snapshots after PTY output or user input", () => {
   const outputSession = { protocol: 'ssh', stream: new FakePty(), shellKind: 'posix', _promptTrackTail: '', lastIdlePrompt: '' };
   const inputSession = { protocol: 'ssh', stream: new FakePty(), shellKind: 'posix', _promptTrackTail: '', lastIdlePrompt: '' };
