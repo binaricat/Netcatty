@@ -19,6 +19,7 @@ jobs:
       - name: Checkout format helpers
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           sparse-checkout: |
             scripts/issue-format.cjs
           sparse-checkout-cone-mode: false

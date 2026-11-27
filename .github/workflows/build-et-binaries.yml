@@ -63,6 +63,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Restore cached PR build
         id: et-build-cache
         if: github.event_name == 'pull_request'
@@ -116,6 +118,8 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Restore cached PR build
         id: et-build-cache
         if: github.event_name == 'pull_request'
@@ -172,6 +176,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Restore cached PR build
         id: et-build-cache
         if: github.event_name == 'pull_request'
@@ -213,6 +219,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Restore cached PR build
         id: et-build-cache
         if: github.event_name == 'pull_request'
@@ -276,6 +284,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:

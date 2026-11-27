@@ -120,6 +120,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Resolve bundled mosh-client release
         id: resolve
@@ -147,6 +149,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Resolve bundled et-client release
         id: resolve
@@ -215,6 +219,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -518,6 +524,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Restore Electron download cache
         uses: actions/cache@v6
@@ -671,6 +679,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Restore Electron download cache
         uses: actions/cache@v6
@@ -756,6 +766,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Validate release tag
         shell: bash
@@ -1011,6 +1023,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Download macOS artifacts
         uses: actions/download-artifact@v8
