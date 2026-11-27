@@ -1205,6 +1205,90 @@ function registerHandlers(ipcMain, shell, electronModule, terminalWorkerManager)
   ipcMain.handle("netcatty:tempdir:createUploadPath", (_event, payload = {}) => (
     getTransferTempFilePath(payload.transferId, payload.fileName)
   ));
+
+  const activeUploadStages = new Map();
+  const cleanupUploadStage = async (stageId, { deleteFile = false } = {}) => {
+    const stage = activeUploadStages.get(stageId);
+    if (!stage) return;
+    activeUploadStages.delete(stageId);
+    try {
+      if (stage.sender && stage.onDestroyed) {
+        stage.sender.removeListener?.("destroyed", stage.onDestroyed);
+      }
+    } catch {
+      // ignore
+    }
+    await stage.handle?.close?.().catch(() => {});
+    if (deleteFile && stage.localPath) {
+      await fs.promises.unlink(stage.localPath).catch(() => {});
+    }
+  };
+
+  ipcMain.handle("netcatty:tempdir:stageUploadOpen", async (event, payload = {}) => {
+    const localPath = getTransferTempFilePath(payload.transferId, payload.fileName);
+    const handle = await fs.promises.open(localPath, "wx", 0o600);
+    const stageId = crypto.randomUUID();
+    const sender = event?.sender;
+    const senderId = sender?.id ?? null;
+    const onDestroyed = () => {
+      void cleanupUploadStage(stageId, { deleteFile: true });
+    };
+    activeUploadStages.set(stageId, {
+      handle,
+      localPath,
+      sender,
+      senderId,
+      onDestroyed,
+      bytesWritten: 0,
+    });
+    sender?.once?.("destroyed", onDestroyed);
+    return { stageId, localPath };
+  });
+
+  ipcMain.handle("netcatty:tempdir:stageUploadWrite", async (event, payload = {}) => {
+    const stage = activeUploadStages.get(payload.stageId);
+    if (!stage || (stage.senderId !== null && stage.senderId !== event?.sender?.id)) {
+      throw new Error("Upload staging handle is closed or invalid");
+    }
+    const raw = payload.chunk;
+    if (!raw || typeof raw.byteLength !== "number") {
+      return { bytesWritten: 0 };
+    }
+    const buf = Buffer.isBuffer(raw)
+      ? raw
+      : Buffer.from(raw.buffer, raw.byteOffset ?? 0, raw.byteLength);
+    let offset = 0;
+    while (offset < buf.length) {
+      const remaining = buf.length - offset;
+      const result = await stage.handle.write(buf, offset, remaining, stage.bytesWritten);
+      const written = result?.bytesWritten;
+      if (!Number.isSafeInteger(written) || written <= 0 || written > remaining) {
+        throw new Error("Unable to stage the complete upload file");
+      }
+      offset += written;
+      stage.bytesWritten += written;
+    }
+    return { bytesWritten: buf.length };
+  });
+
+  ipcMain.handle("netcatty:tempdir:stageUploadClose", async (event, payload = {}) => {
+    const stage = activeUploadStages.get(payload.stageId);
+    if (!stage || (stage.senderId !== null && stage.senderId !== event?.sender?.id)) {
+      throw new Error("Upload staging handle is closed or invalid");
+    }
+    const localPath = stage.localPath;
+    await cleanupUploadStage(payload.stageId, { deleteFile: false });
+    return { localPath };
+  });
+
+  ipcMain.handle("netcatty:tempdir:stageUploadAbort", async (event, payload = {}) => {
+    const stage = activeUploadStages.get(payload.stageId);
+    if (!stage || (stage.senderId !== null && stage.senderId !== event?.sender?.id)) {
+      return { success: false };
+    }
+    await cleanupUploadStage(payload.stageId, { deleteFile: true });
+    return { success: true };
+  });
   
   ipcMain.handle("netcatty:tempdir:open", async () => {
     const tempDir = getTempDir();

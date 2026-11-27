@@ -87,6 +87,7 @@ if (!app || !BrowserWindow) {
 const path = require("node:path");
 const os = require("node:os");
 const fs = require("node:fs");
+const { Readable } = require("node:stream");
 const { execFile } = require("node:child_process");
 // Separate profile selection from renderer loading. In particular, source
 // builds serving dist/ still need a non-production profile.
@@ -261,13 +262,30 @@ if (process.env.NETCATTY_NO_SANDBOX === "1") {
 }
 // Avoid Chromium spare renderers that inflate baseline memory for little gain.
 app.commandLine.appendSwitch("disable-features", "SpareRendererForSitePerProcess");
-// Aggressive GPU enablement can break some environments; opt out with NETCATTY_COMPAT_GPU=1.
+// Reduce V8 heap/bytecode overhead across main and renderer processes without
+// disabling TurboFan or WebAssembly (required for IronRDP WASM).
+if (process.env.NETCATTY_DISABLE_V8_MEMORY_FLAGS !== "1") {
+  const existingJsFlags = app.commandLine.getSwitchValue("js-flags");
+  const memoryJsFlags = "--optimize-for-size --max-semi-space-size=2 --flush-bytecode";
+  app.commandLine.appendSwitch(
+    "js-flags",
+    existingJsFlags ? `${existingJsFlags} ${memoryJsFlags}` : memoryJsFlags,
+  );
+}
+// Aggressive GPU enablement can inflate GPU memory or trigger driver leaks
+// (e.g. Windows Intel Iris Xe zero-copy D3D11 staging textures); opt out with
+// NETCATTY_COMPAT_GPU=1 or opt in to forced GPU rasterization/zero-copy with
+// NETCATTY_AGGRESSIVE_GPU=1.
 if (process.env.NETCATTY_COMPAT_GPU !== "1") {
-  // Force hardware acceleration even on blocklisted GPUs (macs sometimes fall back to software)
+  // Keep hardware WebGL2 available even on blocklisted GPUs.
   app.commandLine.appendSwitch("ignore-gpu-blocklist");
   app.commandLine.appendSwitch("ignore-gpu-blacklist"); // Some Chromium builds use this alias; keep both for safety
-  app.commandLine.appendSwitch("enable-gpu-rasterization");
-  app.commandLine.appendSwitch("enable-zero-copy");
+  app.commandLine.appendSwitch("gpu-rasterization-msaa-sample-count", "0");
+  app.commandLine.appendSwitch("skia-resource-cache-limit-mb", "16");
+  if (process.env.NETCATTY_AGGRESSIVE_GPU === "1") {
+    app.commandLine.appendSwitch("enable-gpu-rasterization");
+    app.commandLine.appendSwitch("enable-zero-copy");
+  }
 }
 
 // Linux: Chromium only auto-selects gnome-libsecret / kwallet from
@@ -340,7 +358,8 @@ if (levelDbGuardResult.status === "recovered") {
   }
   app.exit(1);
 }
-const preload = path.join(__dirname, "preload.cjs");
+const { resolvePreloadPath } = require("./preloadPath.cjs");
+const preload = resolvePreloadPath(__dirname);
 const isMac = process.platform === "darwin";
 const appIconManager = require("./bridges/appIconManager.cjs");
 const appPath = path.join(__dirname, "..");
@@ -466,14 +485,25 @@ function registerAppProtocol() {
           fullPath = path.resolve(distPath, "index.html");
         }
 
-        const file = await fs.promises.readFile(fullPath);
-        return new Response(file, {
+        const stat = await fs.promises.stat(fullPath);
+        if (!stat.isFile()) {
+          return notFound();
+        }
+
+        const headers = {
+          ...APP_PROTOCOL_HEADERS,
+          "Cache-Control": resolveAppProtocolCacheControl(fullPath, distPath),
+          "Content-Type": resolveContentType(fullPath),
+          "Content-Length": String(stat.size),
+        };
+
+        const body = stat.size >= 256 * 1024 && typeof Readable?.toWeb === "function"
+          ? Readable.toWeb(fs.createReadStream(fullPath))
+          : await fs.promises.readFile(fullPath);
+
+        return new Response(body, {
           status: 200,
-          headers: {
-            ...APP_PROTOCOL_HEADERS,
-            "Cache-Control": resolveAppProtocolCacheControl(fullPath, distPath),
-            "Content-Type": resolveContentType(fullPath),
-          },
+          headers,
         });
       } catch (err) {
         return notFound();

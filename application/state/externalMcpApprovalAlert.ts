@@ -1,21 +1,12 @@
 import type { ApprovalRequest } from '../../infrastructure/ai/shared/approvalGate';
-import cattyToolSpecs from '../../infrastructure/ai/harness/generated/cattyToolSpecs.json';
+import toolNameIndex from '../../infrastructure/ai/harness/generated/toolNameIndex.json';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import {
   readExternalMcpApprovalAlertMode,
   type ExternalMcpApprovalAlertMode,
 } from './useExternalMcpToggleState';
 
-type CatalogToolSpec = {
-  toolName?: string;
-  rpcMethod?: string | null;
-};
-
-const mcpToolNameByRpcMethod = new Map<string, string>();
-for (const spec of cattyToolSpecs as CatalogToolSpec[]) {
-  if (!spec.rpcMethod || !spec.toolName || mcpToolNameByRpcMethod.has(spec.rpcMethod)) continue;
-  mcpToolNameByRpcMethod.set(spec.rpcMethod, spec.toolName);
-}
+const mcpToolNameByRpcMethod = toolNameIndex.sidebarByRpcMethod as Record<string, string>;
 
 /**
  * Name shown on the External MCP approval card.
@@ -25,7 +16,7 @@ for (const spec of cattyToolSpecs as CatalogToolSpec[]) {
 export function externalMcpApprovalToolLabel(toolName: string | undefined): string {
   const raw = toolName?.trim() || '';
   if (!raw) return '';
-  return mcpToolNameByRpcMethod.get(raw) || raw;
+  return mcpToolNameByRpcMethod[raw] || raw;
 }
 
 export type ExternalMcpApprovalNotification = {

@@ -1417,6 +1417,11 @@ function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
   const ensureMacLanAccess = options.ensureMacLocalNetworkAccess || ensureMacLocalNetworkAccess;
   const trackedMonitorOwners = new WeakSet();
+  const isWorkerRunning = () => (
+    terminalWorkerManager && typeof terminalWorkerManager.isRunning === "function"
+      ? terminalWorkerManager.isRunning()
+      : Boolean(terminalWorkerManager)
+  );
   for (const [channel, handler] of Object.entries(monitorHandlers)) {
     ipcMain.handle(channel, (event, payload) => {
       const owner = event.sender.id;
@@ -1424,11 +1429,25 @@ function registerHandlers(ipcMain, options = {}) {
         trackedMonitorOwners.add(event.sender);
         event.sender.once("destroyed", () => {
           if (terminalWorkerManager) {
+            if (!isWorkerRunning()) return;
             void terminalWorkerManager.request("netcatty:monitor:owner-close", owner, { webContentsId: owner }).catch(() => {});
           } else monitorService.removeOwner(owner);
         });
       }
       if (terminalWorkerManager) {
+        if (!isWorkerRunning()) {
+          if (channel === "netcatty:monitor:update" && (!Array.isArray(payload) || payload.length === 0)) {
+            return handler(event, payload);
+          }
+          if (
+            channel === "netcatty:monitor:snapshot"
+            || channel === "netcatty:monitor:stop-all"
+            || channel === "netcatty:monitor:retry"
+            || channel === "netcatty:monitor:owner-close"
+          ) {
+            return handler(event, payload);
+          }
+        }
         if (channel === "netcatty:monitor:update" && Array.isArray(payload)) {
           return (async () => {
             // macOS TN3179: probe LAN access from the main process for all SSH and

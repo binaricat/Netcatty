@@ -1,8 +1,11 @@
-import { MonitorPanels } from './MonitorPanels';
 import { MonitorNavButton } from './MonitorNavButton';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Combobox } from "../ui/combobox";
 import React, { useCallback } from "react";
+
+const LazyMonitorPanels = React.lazy(() =>
+  import("./MonitorPanels").then((mod) => ({ default: mod.MonitorPanels })),
+);
 import { deleteVaultKey } from "../../application/defaultKeyPassphrases";
 import { VaultGroupDeletionConfirmationChangedError } from "../../application/state/useVaultGroupDeletion";
 import { usePluginImporterCommit } from "../../application/state/usePluginImporterCommit";
@@ -1537,7 +1540,16 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 </Suspense>
               </LazyLoadBoundary>
             )}
-            {currentSection === "monitor" && <MonitorPanels hosts={hosts} customGroups={customGroups} onConnect={onConnect} />}
+            {currentSection === "monitor" && (
+              <LazyLoadBoundary
+                name="Monitor"
+                resetKey="monitor"
+              >
+                <Suspense fallback={<VaultSectionLoading />}>
+                  <LazyMonitorPanels hosts={hosts} customGroups={customGroups} onConnect={onConnect} />
+                </Suspense>
+              </LazyLoadBoundary>
+            )}
             {currentSection === "port" && (
               <LazyLoadBoundary
                 name="Port forwarding"

@@ -1181,3 +1181,65 @@ test("failed workspace disposal releases active protection for manual cleanup in
   assert.deepEqual(await tempDirBridge.clearTempDir(), { deletedCount: 1, failedCount: 0 });
   assert.deepEqual(fs.readdirSync(managed), [".netcatty-managed-temp"]);
 });
+
+test("IPC upload staging writes chunks, cleans up on abort, and unlinks on sender destruction", async t => {
+  const { EventEmitter } = require("node:events");
+  const root = fs.realpathSync(await fs.promises.mkdtemp(path.join(require("node:os").tmpdir(), "netcatty-stage-ipc-")));
+  const previous = tempDirBridge.getCustomTempDir();
+  tempDirBridge.applyCustomTempDir(root);
+  t.after(async () => {
+    tempDirBridge.applyCustomTempDir(previous);
+    await fs.promises.rm(root, { recursive: true, force: true });
+  });
+
+  const handlers = new Map();
+  tempDirBridge.registerHandlers(
+    { handle(channel, fn) { handlers.set(channel, fn); } },
+    {},
+  );
+  const sender = Object.assign(new EventEmitter(), { id: 901 });
+  const event = { sender };
+
+  // 1. Happy path: open -> write -> write -> close
+  const opened = await handlers.get("netcatty:tempdir:stageUploadOpen")(event, {
+    transferId: "tx-ok",
+    fileName: "hello.bin",
+  });
+  await handlers.get("netcatty:tempdir:stageUploadWrite")(event, {
+    stageId: opened.stageId,
+    chunk: Uint8Array.from([1, 2, 3]),
+  });
+  await handlers.get("netcatty:tempdir:stageUploadWrite")(event, {
+    stageId: opened.stageId,
+    chunk: Uint8Array.from([4, 5]),
+  });
+  const closed = await handlers.get("netcatty:tempdir:stageUploadClose")(event, {
+    stageId: opened.stageId,
+  });
+  assert.equal(closed.localPath, opened.localPath);
+  assert.deepEqual(await fs.promises.readFile(closed.localPath), Buffer.from([1, 2, 3, 4, 5]));
+
+  // 2. Abort path removes temp file
+  const abortedOpen = await handlers.get("netcatty:tempdir:stageUploadOpen")(event, {
+    transferId: "tx-abort",
+    fileName: "abort.bin",
+  });
+  await handlers.get("netcatty:tempdir:stageUploadWrite")(event, {
+    stageId: abortedOpen.stageId,
+    chunk: Uint8Array.from([9, 9]),
+  });
+  await handlers.get("netcatty:tempdir:stageUploadAbort")(event, {
+    stageId: abortedOpen.stageId,
+  });
+  await assert.rejects(fs.promises.stat(abortedOpen.localPath), { code: "ENOENT" });
+
+  // 3. Sender destruction automatically cleans up open stage handle & file
+  const leakedOpen = await handlers.get("netcatty:tempdir:stageUploadOpen")(event, {
+    transferId: "tx-destroy",
+    fileName: "leaked.bin",
+  });
+  sender.emit("destroyed");
+  await new Promise(resolve => setTimeout(resolve, 30));
+  await assert.rejects(fs.promises.stat(leakedOpen.localPath), { code: "ENOENT" });
+});
+

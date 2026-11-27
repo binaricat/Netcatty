@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const { safeSend } = require("./ipcUtils.cjs");
 const perfTrace = require("../perfTrace.cjs");
 
-const V8_CACHE_OPTIONS = "bypassHeatCheck";
+const V8_CACHE_OPTIONS = "code";
 
 function getGlobalShortcutBridge() {
   return require("./globalShortcutBridge.cjs");

@@ -60,8 +60,22 @@ function getBridge(): FigSpecBridge | undefined {
 }
 
 // Cache by command and target OS: one renderer can contain both Linux and
-// macOS sessions, whose option names and meanings can differ.
+// macOS sessions, whose option names and meanings can differ. Bounded with LRU
+// eviction so long-lived sessions visiting many CLI tools stay memory-bounded.
+const FIG_SPEC_CACHE_MAX_ENTRIES = 80;
 const specCache = new Map<string, FigSpec>();
+
+function setSpecCacheEntry(cacheKey: string, spec: FigSpec): void {
+  if (specCache.has(cacheKey)) {
+    specCache.delete(cacheKey);
+  }
+  specCache.set(cacheKey, spec);
+  while (specCache.size > FIG_SPEC_CACHE_MAX_ENTRIES) {
+    const oldestKey = specCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    specCache.delete(oldestKey);
+  }
+}
 
 // In-flight loading promises to avoid duplicate loads for the same target OS.
 const inFlightLoads = new Map<string, Promise<FigSpec | null>>();
@@ -119,7 +133,11 @@ export async function getAvailableSpecs(hostOs?: FigHostOs): Promise<string[]> {
 export async function loadSpec(commandName: string, hostOs?: FigHostOs): Promise<FigSpec | null> {
   const cacheKey = specCacheKey(commandName, hostOs);
   const cached = specCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    specCache.delete(cacheKey);
+    specCache.set(cacheKey, cached);
+    return cached;
+  }
 
   const existing = inFlightLoads.get(cacheKey);
   if (existing) return existing;
@@ -136,7 +154,7 @@ export async function loadSpec(commandName: string, hostOs?: FigHostOs): Promise
 
       const spec = await bridge.loadFigSpec(commandName, hostOs);
       if (spec) {
-        specCache.set(cacheKey, spec);
+        setSpecCacheEntry(cacheKey, spec);
         rememberLoadedSpecName(commandName, hostOs);
       }
       // Don't cache null — the load may have failed transiently (bridge not ready, etc.)

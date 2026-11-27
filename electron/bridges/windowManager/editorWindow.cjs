@@ -5,6 +5,9 @@ const { randomUUID } = require("node:crypto");
 const {
   windowsFramelessContentChromeOptions,
 } = require("./windowsWindowChrome.cjs");
+const {
+  resolvePreloadWebPreferences,
+} = require("../../preloadPath.cjs");
 
 const EDITOR_WIDTH = 1100;
 const EDITOR_HEIGHT = 760;
@@ -229,7 +232,7 @@ function createEditorWindowApi(ctx) {
           preload,
           contextIsolation: true,
           nodeIntegration: false,
-          sandbox: false,
+          ...resolvePreloadWebPreferences(preload),
           spellcheck: false,
           backgroundThrottling: false,
           v8CacheOptions: ctx.V8_CACHE_OPTIONS,

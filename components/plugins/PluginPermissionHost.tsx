@@ -3,7 +3,9 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { describePluginPermission } from '@/domain/pluginPermissionDescriptions.cjs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Button } from '../ui/button';
-import globalAgentToolSpecs from '../../infrastructure/ai/harness/generated/globalAgentToolSpecs.json';
+import toolNameIndex from '../../infrastructure/ai/harness/generated/toolNameIndex.json';
+
+const globalToolNameByCapabilityId = toolNameIndex.globalByCapabilityId as Record<string, string>;
 
 /** Rendered only by the trusted app, never inside a plugin view. */
 export function PluginPermissionHost() {
@@ -14,7 +16,7 @@ export function PluginPermissionHost() {
   const description = describePluginPermission(prompt.permission, resolvedLocale);
   const resources = prompt.resources.filter((resource) => resource !== '*' && !resource.startsWith('selected:'));
   const action = prompt.displayContext?.action;
-  const operation = action && (globalAgentToolSpecs.find((tool) => tool.capabilityId === action.capabilityId)?.toolName ?? action.capabilityId);
+  const operation = action && (globalToolNameByCapabilityId[action.capabilityId] ?? action.capabilityId);
   const selections = prompt.displayContext?.selections ?? [];
   return <Dialog open onOpenChange={(open) => { if (!open) void respond('cancel'); }}>
     <DialogContent data-host-security-surface="" className="max-h-[85vh] overflow-y-auto sm:max-w-[480px]">

@@ -280,6 +280,65 @@ const resolveKittyKeyboardModeState = (
   return kittyKeyboardStates.resolve(owner, ctx.deferWebglUntilReplayComplete === true);
 };
 
+type DetachedDisposedKittyBroadcastState = {
+  sessionId: string;
+  kittyProtocolEnabled: boolean;
+  kittyMode: KittyKeyboardModeState;
+  applicationCursorMode: boolean;
+  win32InputMode: boolean;
+  nativeKittyPreservesShiftEnter: boolean;
+  backspaceBehavior: Host["backspaceBehavior"];
+  sessionRef: MutableRefObject<string | null>;
+  statusRef: MutableRefObject<TerminalSession["status"]>;
+  terminalSettingsRef: MutableRefObject<TerminalSettings | undefined>;
+  passwordPromptActiveRef?: MutableRefObject<boolean>;
+  broadcastPasswordBypassRef?: MutableRefObject<boolean>;
+  terminalBackend: TerminalBackendApi;
+  encodedKeys: Set<string>;
+  legacySuppressedKeys: Set<string>;
+  win32ShiftEnterTextKeys: Set<string>;
+};
+
+/**
+ * Keeps broadcast input working while a connected terminal is hibernated
+ * without closing over `createXTermRuntime`, `term`, or any DOM/buffer state.
+ */
+const registerDetachedDisposedKittyBroadcastHandler = (
+  state: DetachedDisposedKittyBroadcastState,
+): void => {
+  const detachedHandler = createKittyKeyboardBroadcastHandler({
+    resolveOptions: () => ({
+      kittyProtocolEnabled: state.kittyProtocolEnabled,
+      kittyMode: state.kittyMode,
+      applicationCursorMode: state.applicationCursorMode,
+      encodedKeys: state.encodedKeys,
+      legacySuppressedKeys: state.legacySuppressedKeys,
+      win32InputMode: state.win32InputMode,
+      shiftEnterSettings: state.terminalSettingsRef.current,
+      nativeKittyPreservesShiftEnter: state.nativeKittyPreservesShiftEnter,
+      win32ShiftEnterTextKeys: state.win32ShiftEnterTextKeys,
+    }),
+    getSessionId: () => state.sessionRef.current,
+    isSensitiveInput: () => state.passwordPromptActiveRef?.current === true
+      && state.broadcastPasswordBypassRef?.current !== true,
+    isConnected: () => state.statusRef.current === "connected",
+    isRuntimeDisposed: () => true,
+    interruptSession: state.terminalBackend.interruptSession
+      ? (id) => state.terminalBackend.interruptSession?.(id)
+      : undefined,
+    writeDisposed: (id, data, writeOptions) => state.terminalBackend.writeToSession(
+      id,
+      mapTerminalBackspaceInput(data, state.backspaceBehavior),
+      {
+        sensitive: state.passwordPromptActiveRef?.current === true
+          || writeOptions?.sensitive === true,
+      },
+    ),
+    writeActive: () => {},
+  });
+  registerKittyKeyboardBroadcastHandler(state.sessionId, detachedHandler);
+};
+
 export type XTermRuntime = {
   term: XTerm;
   fitAddon: FitAddon;
@@ -3356,7 +3415,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       writeWin32InputModeEvent(event, logicalData, writeOptions);
     },
   });
-  registerKittyKeyboardBroadcastHandler(
+  const disposeKittyKeyboardBroadcast = registerKittyKeyboardBroadcastHandler(
     ctx.sessionId,
     // Forward the dispatch options (#3488): source-prompt fan-outs tag their
     // payload with sourceSensitive / beforeUrgentInterrupt, and dropping the
@@ -3666,6 +3725,28 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     invalidatePendingPasteDraft,
     dispose: () => {
       runtimeDisposed = true;
+      disposeKittyKeyboardBroadcast();
+      if (ctx.statusRef.current === "connected" && ctx.sessionRef.current) {
+        registerDetachedDisposedKittyBroadcastHandler({
+          sessionId: ctx.sessionId,
+          kittyProtocolEnabled: kittyKeyboardProtocolEnabled,
+          kittyMode: kittyKeyboardMode,
+          applicationCursorMode: Boolean(term.modes?.applicationCursorKeysMode),
+          win32InputMode: Boolean(term.modes?.win32InputMode),
+          nativeKittyPreservesShiftEnter: !kittyKeyboardProtocolEnabled
+            && nativeKittyKeyboardPreservesShiftEnter(readNativeKittyKeyboardFlags(term)),
+          backspaceBehavior: ctx.host.backspaceBehavior,
+          sessionRef: ctx.sessionRef,
+          statusRef: ctx.statusRef,
+          terminalSettingsRef: ctx.terminalSettingsRef,
+          passwordPromptActiveRef: ctx.passwordPromptActiveRef,
+          broadcastPasswordBypassRef: ctx.broadcastPasswordBypassRef,
+          terminalBackend: ctx.terminalBackend,
+          encodedKeys: broadcastEncodedKeys,
+          legacySuppressedKeys: broadcastLegacySuppressedKeys,
+          win32ShiftEnterTextKeys: broadcastWin32ShiftEnterTextKeys,
+        });
+      }
       disposeLinePasteHandler?.();
       disposePasteWriteReceipts?.();
       pendingLinePastes.clear();

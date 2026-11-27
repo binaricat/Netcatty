@@ -8499,9 +8499,23 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:transfer:cleanup",
       "netcatty:transfer:same-host-copy-dir",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    let pendingWorkerConcurrencyLimit = null;
+    terminalWorkerManager.onWorkerStarted?.(() => {
+      if (pendingWorkerConcurrencyLimit !== null) {
+        void terminalWorkerManager.request("netcatty:transfer:set-concurrency", {
+          limit: pendingWorkerConcurrencyLimit,
+        }).catch(() => {});
+      }
+    });
     ipcMain.handle("netcatty:transfer:set-concurrency", async (_event, payload) => {
       const limit = setGlobalTransferConcurrency(payload?.limit);
-      await terminalWorkerManager.request("netcatty:transfer:set-concurrency", { limit }).catch(() => {});
+      pendingWorkerConcurrencyLimit = limit;
+      const workerRunning = typeof terminalWorkerManager.isRunning === "function"
+        ? terminalWorkerManager.isRunning()
+        : true;
+      if (workerRunning) {
+        await terminalWorkerManager.request("netcatty:transfer:set-concurrency", { limit }).catch(() => {});
+      }
       return { success: true, limit };
     });
     // With skipAdmission, cancel latches pendingCancel inside the worker process.
