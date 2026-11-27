@@ -1,0 +1,2553 @@
+diff --git a/crates/ironrdp-connector/src/connection.rs b/crates/ironrdp-connector/src/connection.rs
+index 04b4c42..52dba24 100644
+--- a/crates/ironrdp-connector/src/connection.rs
++++ b/crates/ironrdp-connector/src/connection.rs
+@@ -5,6 +5,7 @@ use std::borrow::Cow;
+ use std::sync::Arc;
+ 
+ use ironrdp_core::{Encode, WriteBuf, decode, encode_vec};
++use ironrdp_pdu::crypto::standard_rdp::StandardRdpSecurity;
+ use ironrdp_pdu::rdp::capability_sets::WindowSupportLevel;
+ use ironrdp_pdu::rdp::server_redirection::ServerRedirectionPdu;
+ use ironrdp_pdu::rdp::session_info::ServerAutoReconnect;
+@@ -208,6 +209,10 @@ pub struct ConnectionResult {
+     ///
+     /// [MS-RDPBCGR]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/379a020e-9925-4b4f-98f3-7d634e10b411
+     pub server_rdp_version: gcc::RdpVersion,
++    /// Active Standard RDP Security cipher context when RC4 or FIPS was negotiated.
++    ///
++    /// `None` for Enhanced RDP Security (TLS/CredSSP/Entra) and `ENCRYPTION_LEVEL_NONE`.
++    pub standard_rdp_security: Option<StandardRdpSecurity>,
+ }
+ 
+ impl ConnectionResult {
+@@ -283,6 +288,10 @@ pub enum ClientConnectorState {
+         io_channel_id: u16,
+         channel_connection: ChannelConnectionSequence,
+     },
++    SecurityExchange {
++        io_channel_id: u16,
++        user_channel_id: u16,
++    },
+     SecureSettingsExchange {
+         io_channel_id: u16,
+         user_channel_id: u16,
+@@ -396,6 +405,7 @@ impl State for ClientConnectorState {
+             Self::BasicSettingsExchangeSendInitial { .. } => "BasicSettingsExchangeSendInitial",
+             Self::BasicSettingsExchangeWaitResponse { .. } => "BasicSettingsExchangeWaitResponse",
+             Self::ChannelConnection { .. } => "ChannelConnection",
++            Self::SecurityExchange { .. } => "SecurityExchange",
+             Self::SecureSettingsExchange { .. } => "SecureSettingsExchange",
+             Self::ConnectTimeAutoDetection { .. } => "ConnectTimeAutoDetection",
+             Self::LicensingExchange { .. } => "LicensingExchange",
+@@ -477,6 +487,10 @@ pub struct ClientConnector {
+     remote_guard_kerberos: bool,
+     /// Set via [`ClientConnector::with_license_rng`].
+     license_rng: Arc<dyn LicenseRng>,
++    /// Server `SC_SECURITY` block awaiting `SecurityExchange` after channel join.
++    pending_standard_security: Option<gcc::ServerSecurityData>,
++    /// Active Standard RDP Security cipher context once `SecurityExchange` has completed.
++    standard_rdp_security: Option<StandardRdpSecurity>,
+ }
+ 
+ impl ClientConnector {
+@@ -505,6 +519,8 @@ impl ClientConnector {
+             #[cfg(feature = "remote-guard")]
+             remote_guard_kerberos: false,
+             license_rng: Arc::new(DefaultLicenseRng),
++            pending_standard_security: None,
++            standard_rdp_security: None,
+         }
+     }
+ 
+@@ -1172,6 +1188,7 @@ impl ClientConnector {
+         // `multitransport_response_channel`, which weighs the outcome against
+         // Soft-Sync. Either way the outcome is consumed and the handshake
+         // proceeds.
++        let output_start = output.filled().len();
+         let total_written = if let Some(response_channel) = response_channel {
+             let response = result
+                 .response_pdu(request_id, soft_sync)
+@@ -1182,6 +1199,24 @@ impl ClientConnector {
+             0
+         };
+ 
++        let total_written = if total_written > 0
++            && let Some(sec) = self.standard_rdp_security.as_mut()
++        {
++            let prefix = (output_start > 0).then(|| output.filled()[..output_start].to_vec());
++            let plain_out = output.filled()[output_start..].to_vec();
++            let encrypted_out = sec
++                .encrypt_frames(&plain_out)
++                .map_err(|err| reason_err!("StandardRdpSecurity", "{err}"))?;
++            output.clear();
++            if let Some(prefix) = prefix {
++                output.write_slice(&prefix);
++            }
++            output.write_slice(&encrypted_out);
++            encrypted_out.len()
++        } else {
++            total_written
++        };
++
+         // Back to reading. The server may send another request or the Demand
+         // Active; nothing here needs to predict which.
+         self.state = ClientConnectorState::MultitransportBootstrapping {
+@@ -1512,6 +1547,7 @@ impl Sequence for ClientConnector {
+             }
+             ClientConnectorState::BasicSettingsExchangeWaitResponse { .. } => Some(&ironrdp_pdu::X224_HINT),
+             ClientConnectorState::ChannelConnection { channel_connection, .. } => channel_connection.next_pdu_hint(),
++            ClientConnectorState::SecurityExchange { .. } => None,
+             ClientConnectorState::SecureSettingsExchange { .. } => None,
+             ClientConnectorState::ConnectTimeAutoDetection { .. } => {
+                 // Wait for input only when a message channel was negotiated, so
+@@ -1549,6 +1585,56 @@ impl Sequence for ClientConnector {
+         input: &[u8],
+         received_at: Option<MonotonicInstant>,
+         output: &mut WriteBuf,
++    ) -> ConnectorResult<Written> {
++        let was_encrypted_before = self.standard_rdp_security.is_some();
++        let decrypted_storage;
++        let plain_input = if !input.is_empty()
++            && let Some(sec) = self.standard_rdp_security.as_mut()
++        {
++            decrypted_storage = sec
++                .decrypt_frame(input)
++                .map_err(|err| reason_err!("StandardRdpSecurity", "{err}"))?;
++            decrypted_storage.as_slice()
++        } else {
++            input
++        };
++
++        let output_start = output.filled().len();
++        let written = self.step_inner(plain_input, received_at, output)?;
++
++        // Encrypt outbound frames emitted after SecurityExchange has already completed.
++        // The SecurityExchangePdu itself is sent in plaintext during the transition step
++        // (when `was_encrypted_before` is false).
++        if was_encrypted_before && written.size().is_some() {
++            let sec_opt = match &mut self.state {
++                ClientConnectorState::Connected { result } => result.standard_rdp_security.as_mut(),
++                _ => self.standard_rdp_security.as_mut(),
++            };
++            if let Some(sec) = sec_opt {
++                let prefix = (output_start > 0).then(|| output.filled()[..output_start].to_vec());
++                let plain_out = output.filled()[output_start..].to_vec();
++                let encrypted_out = sec
++                    .encrypt_frames(&plain_out)
++                    .map_err(|err| reason_err!("StandardRdpSecurity", "{err}"))?;
++                output.clear();
++                if let Some(prefix) = prefix {
++                    output.write_slice(&prefix);
++                }
++                output.write_slice(&encrypted_out);
++                return Written::from_size(encrypted_out.len());
++            }
++        }
++
++        Ok(written)
++    }
++}
++
++impl ClientConnector {
++    fn step_inner(
++        &mut self,
++        input: &[u8],
++        received_at: Option<MonotonicInstant>,
++        output: &mut WriteBuf,
+     ) -> ConnectorResult<Written> {
+         // A PDU on the message channel is none of the PDUs these phases wait for on the I/O
+         // channel (a licensing PDU, a Share Control PDU); it is answered or ignored, and the
+@@ -1746,6 +1832,19 @@ impl Sequence for ClientConnector {
+                     return Err(general_err!("can't satisfy server security settings"));
+                 }
+ 
++                if server_gcc_blocks.security != gcc::ServerSecurityData::no_security() {
++                    let selected = server_gcc_blocks.security.encryption_method;
++                    if !client_gcc_blocks.security.encryption_methods.contains(selected)
++                        || selected.bits().count_ones() != 1
++                    {
++                        return Err(reason_err!(
++                            "BasicSettingsExchange",
++                            "server selected unsupported Standard RDP encryption method {selected:?}",
++                        ));
++                    }
++                    self.pending_standard_security = Some(server_gcc_blocks.security);
++                }
++
+                 self.message_channel_id = server_gcc_blocks
+                     .message_channel
+                     .as_ref()
+@@ -1807,9 +1906,16 @@ impl Sequence for ClientConnector {
+                 {
+                     debug_assert!(channel_connection.state.is_terminal());
+ 
+-                    ClientConnectorState::SecureSettingsExchange {
+-                        io_channel_id,
+-                        user_channel_id,
++                    if self.pending_standard_security.is_some() {
++                        ClientConnectorState::SecurityExchange {
++                            io_channel_id,
++                            user_channel_id,
++                        }
++                    } else {
++                        ClientConnectorState::SecureSettingsExchange {
++                            io_channel_id,
++                            user_channel_id,
++                        }
+                     }
+                 } else {
+                     ClientConnectorState::ChannelConnection {
+@@ -1822,11 +1928,46 @@ impl Sequence for ClientConnector {
+             }
+ 
+             //== RDP Security Commencement ==//
+-            // With standard RDP security and ENCRYPTION_LEVEL_NONE, no Security Exchange PDU is
+-            // sent (MS-RDPBCGR 5.3.2). IronRDP only supports that no-encryption path; RC4/FIPS
+-            // would require a Security Exchange here and is rejected earlier when the server's
+-            // SC_SECURITY block is not ServerSecurityData::no_security().
+-            //==============================//
++            // With standard RDP security and encryption enabled (40/56/128-bit RC4 or FIPS),
++            // generate the 32-byte client random, RSA-encrypt it with the server's certificate,
++            // send the Security Exchange PDU, and activate directional packet encryption.
++            ClientConnectorState::SecurityExchange {
++                io_channel_id,
++                user_channel_id,
++            } => {
++                debug!("RDP Security Commencement (Security Exchange)");
++
++                let server_security = self
++                    .pending_standard_security
++                    .take()
++                    .ok_or_else(|| general_err!("missing SC_SECURITY data for Security Exchange"))?;
++
++                let mut client_random = [0u8; 32];
++                let mut unused_premaster = [0u8; 48];
++                self.license_rng
++                    .fill_secrets(&mut client_random, &mut unused_premaster);
++
++                let (security, exchange_pdu) =
++                    StandardRdpSecurity::new_client(&server_security, client_random, self.message_channel_id)
++                        .map_err(|err| reason_err!("SecurityExchange", "{err}"))?;
++
++                info!(
++                    method = ?security.info().encryption_method,
++                    level = ?security.info().encryption_level,
++                    "Initialized Standard RDP Security encryption",
++                );
++
++                let written = encode_send_data_request(user_channel_id, io_channel_id, &exchange_pdu, output)?;
++                self.standard_rdp_security = Some(security);
++
++                (
++                    Written::from_size(written)?,
++                    ClientConnectorState::SecureSettingsExchange {
++                        io_channel_id,
++                        user_channel_id,
++                    },
++                )
++            }
+ 
+             //== Secure Settings Exchange ==//
+             // Send Client Info PDU (information about supported types of compression, username, password, etc).
+@@ -2135,6 +2276,7 @@ impl Sequence for ClientConnector {
+                                     .with_multitransport_soft_sync(self.soft_sync_negotiated()),
+                                     compression_type: self.config.compression_type,
+                                     server_rdp_version,
++                                    standard_rdp_security: self.standard_rdp_security.take(),
+                                 },
+                             }
+                         }
+@@ -2293,7 +2435,14 @@ fn create_gcc_blocks<'a>(
+             },
+         },
+         security: ClientSecurityData {
+-            encryption_methods: EncryptionMethod::empty(),
++            encryption_methods: if selected_protocol.is_standard_rdp_security() {
++                EncryptionMethod::BIT_40
++                    | EncryptionMethod::BIT_56
++                    | EncryptionMethod::BIT_128
++                    | EncryptionMethod::FIPS
++            } else {
++                EncryptionMethod::empty()
++            },
+             ext_encryption_methods: 0,
+         },
+         network: if channels.is_empty() {
+@@ -2868,4 +3017,169 @@ mod tests {
+         .expect("valid GCC Client Cluster Data");
+         assert_eq!(blocks.cluster, Some(cluster_data));
+     }
++
++    #[test]
++    fn standard_rdp_gcc_advertises_rc4_and_fips_and_has_consistent_per_length() {
++        use ironrdp_core::encode_vec;
++
++        let mut config = test_config();
++        config.enable_tls = false;
++        config.enable_credssp = false;
++        config.enable_standard_rdp_security = true;
++
++        let blocks = create_gcc_blocks(
++            &config,
++            None,
++            nego::SecurityProtocol::empty(),
++            false,
++            core::iter::empty(),
++        )
++        .expect("valid Standard RDP GCC blocks");
++
++        assert_eq!(
++            blocks.security.encryption_methods,
++            gcc::EncryptionMethod::BIT_40
++                | gcc::EncryptionMethod::BIT_56
++                | gcc::EncryptionMethod::BIT_128
++                | gcc::EncryptionMethod::FIPS
++        );
++        assert_eq!(blocks.security.encryption_methods.bits(), 0x0000_001B);
++
++        // Enhanced security (SSL/HYBRID) must continue to send empty encryption_methods.
++        let tls_blocks = create_gcc_blocks(
++            &config,
++            None,
++            nego::SecurityProtocol::SSL,
++            true,
++            core::iter::empty(),
++        )
++        .expect("valid TLS GCC blocks");
++        assert_eq!(tls_blocks.security, gcc::ClientSecurityData::no_security());
++
++        // Verify ConferenceCreateRequest PER connectPDU length matches exact trailing bytes.
++        let req = gcc::ConferenceCreateRequest::new(blocks).expect("ConferenceCreateRequest");
++        let encoded = encode_vec(&req).expect("encode ConferenceCreateRequest");
++        // Byte 0: CHOICE(0), Bytes 1..7: PER OID (len=5, 0x00, 0x14, 0x7c, 0x00, 0x01), Bytes 7..9: PER connectPDU length
++        assert_eq!(encoded[0], 0x00);
++        assert_eq!(&encoded[1..7], &[5, 0, 20, 124, 0, 1]);
++        assert_ne!(encoded[7] & 0x80, 0, "expected 2-byte PER length");
++        let declared_connect_pdu_len = (usize::from(encoded[7] & 0x7F) << 8) | usize::from(encoded[8]);
++        assert_eq!(
++            declared_connect_pdu_len,
++            encoded.len() - 9,
++            "ConnectData.connectPDU length must equal exact remaining bytes"
++        );
++    }
++
++    #[test]
++    fn connector_drives_windows_2003r2_standard_rdp_security_exchange_and_encrypted_client_info() {
++        use core::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
++        use std::sync::Arc;
++
++        use ironrdp_core::{WriteBuf, decode};
++        use ironrdp_pdu::rdp::headers::{BasicSecurityHeader, BasicSecurityHeaderFlags};
++        use ironrdp_pdu::x224::X224;
++        use ironrdp_pdu::mcs;
++
++        use super::{ClientConnector, LicenseRng, Sequence as _, State as _};
++
++        #[derive(Debug)]
++        struct FixedRng;
++        impl LicenseRng for FixedRng {
++            fn fill_secrets(&self, client_random: &mut [u8; 32], premaster_secret: &mut [u8; 48]) {
++                client_random.fill(0x42);
++                premaster_secret.fill(0x24);
++            }
++        }
++
++        let mut config = test_config();
++        config.enable_tls = false;
++        config.enable_credssp = false;
++        config.enable_standard_rdp_security = true;
++
++        let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 3389));
++        let mut connector = ClientConnector::new(config, addr).with_license_rng(Arc::new(FixedRng));
++
++        // 1. Connection Initiation Request
++        let mut buf = WriteBuf::new();
++        connector.step_no_input(&mut buf).expect("send X.224 CR");
++
++        // 2. Real 2003R2 X.224 Connection Confirm (PROTOCOL_RDP = 0)
++        let x224_cc = [
++            0x03, 0x00, 0x00, 0x13, 0x0e, 0xd0, 0x00, 0x00, 0x12, 0x34, 0x00, 0x02, 0x00, 0x08, 0x00, 0x00, 0x00,
++            0x00, 0x00,
++        ];
++        buf.clear();
++        connector.step(&x224_cc, None, &mut buf).expect("process X.224 CC");
++        assert!(connector.should_perform_security_upgrade());
++        connector.mark_security_upgrade_as_done();
++
++        // 3. Basic Settings Exchange: Send MCS Connect-Initial
++        buf.clear();
++        connector.step_no_input(&mut buf).expect("send Connect-Initial");
++
++        // 4. Real 2003R2 MCS Connect-Response (SC_SECURITY = 128-bit RC4, ClientCompatible, 512-bit RSA cert)
++        const WIN2003_CONNECT_RESPONSE_HEX: &str = concat!(
++            "0300015102f0807f668201450a0100020100301a020122020103020100020101020100020101020300fff80201020482011f",
++            "000500147c00012a14760a01010001c0004d63446e8108010c0c000400080000000000030c1000eb030400ec03ed03ee03ef",
++            "03020cec00020000000200000020000000b800000023286d5fcf9e721276aef900cd57357ad5a7994d36c54536c329ae4378",
++            "0b4f6601000000010000000100000006005c005253413148000000000200003f000000010001005534e90f476b234d5136a9",
++            "e51bbcc948e7637149c89e493bfb2779e2f152f0ad6ffba9e852cffd756b2cf1e779ad63e4d9fc7400ca1a9348d72e240fcd",
++            "25a6be00000000000000000800480086bb2e368312a7f431b4590216ea1cc7c650faa0ba6167da818e828a85e7330f679cfc",
++            "99fa9155627628071ef2cf56e5ea7f64e1586a03b85d4463cd6264675f0000000000000000"
++        );
++        let connect_resp: Vec<u8> = (0..WIN2003_CONNECT_RESPONSE_HEX.len())
++            .step_by(2)
++            .map(|i| u8::from_str_radix(&WIN2003_CONNECT_RESPONSE_HEX[i..i + 2], 16).unwrap())
++            .collect();
++        buf.clear();
++        connector
++            .step(&connect_resp, None, &mut buf)
++            .expect("process 2003R2 Connect-Response");
++
++        // 5. Channel Connection (drive steps until SecurityExchange)
++        let attach_confirm = [0x03, 0x00, 0x00, 0x0b, 0x02, 0xf0, 0x80, 0x2e, 0x00, 0x00, 0x07];
++        let mut server_replies: std::collections::VecDeque<Vec<u8>> = std::collections::VecDeque::from([
++            attach_confirm.to_vec(),
++            vec![0x03, 0x00, 0x00, 0x0f, 0x02, 0xf0, 0x80, 0x3e, 0x00, 0x00, 0x07, 0x03, 0xf0, 0x03, 0xf0],
++            vec![0x03, 0x00, 0x00, 0x0f, 0x02, 0xf0, 0x80, 0x3e, 0x00, 0x00, 0x07, 0x03, 0xeb, 0x03, 0xeb],
++            vec![0x03, 0x00, 0x00, 0x0f, 0x02, 0xf0, 0x80, 0x3e, 0x00, 0x00, 0x07, 0x03, 0xec, 0x03, 0xec],
++            vec![0x03, 0x00, 0x00, 0x0f, 0x02, 0xf0, 0x80, 0x3e, 0x00, 0x00, 0x07, 0x03, 0xed, 0x03, 0xed],
++            vec![0x03, 0x00, 0x00, 0x0f, 0x02, 0xf0, 0x80, 0x3e, 0x00, 0x00, 0x07, 0x03, 0xee, 0x03, 0xee],
++            vec![0x03, 0x00, 0x00, 0x0f, 0x02, 0xf0, 0x80, 0x3e, 0x00, 0x00, 0x07, 0x03, 0xef, 0x03, 0xef],
++        ]);
++        while connector.state.name() == "ChannelConnection" {
++            buf.clear();
++            if connector.next_pdu_hint().is_some() {
++                let reply = server_replies.pop_front().expect("more channel confirm replies");
++                connector.step(&reply, None, &mut buf).expect("channel step with reply");
++            } else {
++                connector.step_no_input(&mut buf).expect("channel step no input");
++            }
++        }
++
++        // 6. SecurityExchange: must emit plaintext SecurityExchangePdu with 72-byte RSA blob
++        assert_eq!(connector.state.name(), "SecurityExchange");
++        buf.clear();
++        connector.step_no_input(&mut buf).expect("send SecurityExchange");
++        let sec_ex_mcs = decode::<X224<mcs::McsMessage<'_>>>(buf.filled()).unwrap().0;
++        let mcs::McsMessage::SendDataRequest(req) = sec_ex_mcs else {
++            panic!("expected SendDataRequest for SecurityExchange");
++        };
++        let sec_ex_pdu = decode::<ironrdp_pdu::crypto::standard_rdp::SecurityExchangePdu>(req.user_data.as_ref())
++            .expect("decode SecurityExchangePdu");
++        assert_eq!(sec_ex_pdu.encrypted_client_random.len(), 72);
++
++        // 7. SecureSettingsExchange: ClientInfoPdu MUST be encrypted (INFO_PKT | ENCRYPT)
++        assert_eq!(connector.state.name(), "SecureSettingsExchange");
++        buf.clear();
++        connector.step_no_input(&mut buf).expect("send encrypted ClientInfo");
++        let ci_mcs = decode::<X224<mcs::McsMessage<'_>>>(buf.filled()).unwrap().0;
++        let mcs::McsMessage::SendDataRequest(ci_req) = ci_mcs else {
++            panic!("expected SendDataRequest for ClientInfo");
++        };
++        let hdr = decode::<BasicSecurityHeader>(&ci_req.user_data[..4]).unwrap();
++        assert!(hdr.flags.contains(BasicSecurityHeaderFlags::INFO_PKT));
++        assert!(hdr.flags.contains(BasicSecurityHeaderFlags::ENCRYPT));
++    }
+ }
+diff --git a/crates/ironrdp-pdu/src/crypto/des.rs b/crates/ironrdp-pdu/src/crypto/des.rs
+new file mode 100644
+index 0000000..b916ffc
+--- /dev/null
++++ b/crates/ironrdp-pdu/src/crypto/des.rs
+@@ -0,0 +1,244 @@
++#![expect(
++    clippy::as_conversions,
++    reason = "bit-width truncating casts in FIPS 46-3 DES bit permutations are intentional"
++)]
++//! Pure-Rust FIPS 46-3 DES and 3DES-EDE3-CBC implementation for Standard RDP FIPS security.
++
++const INITIAL_PERM: [u8; 64] = [
++    58, 50, 42, 34, 26, 18, 10, 2, 60, 52, 44, 36, 28, 20, 12, 4, 62, 54, 46, 38, 30, 22, 14, 6, 64, 56, 48, 40, 32,
++    24, 16, 8, 57, 49, 41, 33, 25, 17, 9, 1, 59, 51, 43, 35, 27, 19, 11, 3, 61, 53, 45, 37, 29, 21, 13, 5, 63, 55, 47,
++    39, 31, 23, 15, 7,
++];
++
++const FINAL_PERM: [u8; 64] = [
++    40, 8, 48, 16, 56, 24, 64, 32, 39, 7, 47, 15, 55, 23, 63, 31, 38, 6, 46, 14, 54, 22, 62, 30, 37, 5, 45, 13, 53, 21,
++    61, 29, 36, 4, 44, 12, 52, 20, 60, 28, 35, 3, 43, 11, 51, 19, 59, 27, 34, 2, 42, 10, 50, 18, 58, 26, 33, 1, 41, 9,
++    49, 17, 57, 25,
++];
++
++const EXPANSION: [u8; 48] = [
++    32, 1, 2, 3, 4, 5, 4, 5, 6, 7, 8, 9, 8, 9, 10, 11, 12, 13, 12, 13, 14, 15, 16, 17, 16, 17, 18, 19, 20, 21, 20, 21,
++    22, 23, 24, 25, 24, 25, 26, 27, 28, 29, 28, 29, 30, 31, 32, 1,
++];
++
++const PERM_P: [u8; 32] = [
++    16, 7, 20, 21, 29, 12, 28, 17, 1, 15, 23, 26, 5, 18, 31, 10, 2, 8, 24, 14, 32, 27, 3, 9, 19, 13, 30, 6, 22, 11, 4,
++    25,
++];
++
++const PC1: [u8; 56] = [
++    57, 49, 41, 33, 25, 17, 9, 1, 58, 50, 42, 34, 26, 18, 10, 2, 59, 51, 43, 35, 27, 19, 11, 3, 60, 52, 44, 36, 63, 55,
++    47, 39, 31, 23, 15, 7, 62, 54, 46, 38, 30, 22, 14, 6, 61, 53, 45, 37, 29, 21, 13, 5, 28, 20, 12, 4,
++];
++
++const PC2: [u8; 48] = [
++    14, 17, 11, 24, 1, 5, 3, 28, 15, 6, 21, 10, 23, 19, 12, 4, 26, 8, 16, 7, 27, 20, 13, 2, 41, 52, 31, 37, 47, 55, 30,
++    40, 51, 45, 33, 48, 44, 49, 39, 56, 34, 53, 46, 42, 50, 36, 29, 32,
++];
++
++const SHIFTS: [u32; 16] = [1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1];
++
++const SBOX: [[u8; 64]; 8] = [
++    [
++        14, 4, 13, 1, 2, 15, 11, 8, 3, 10, 6, 12, 5, 9, 0, 7, 0, 15, 7, 4, 14, 2, 13, 1, 10, 6, 12, 11, 9, 5, 3, 8, 4,
++        1, 14, 8, 13, 6, 2, 11, 15, 12, 9, 7, 3, 10, 5, 0, 15, 12, 8, 2, 4, 9, 1, 7, 5, 11, 3, 14, 10, 0, 6, 13,
++    ],
++    [
++        15, 1, 8, 14, 6, 11, 3, 4, 9, 7, 2, 13, 12, 0, 5, 10, 3, 13, 4, 7, 15, 2, 8, 14, 12, 0, 1, 10, 6, 9, 11, 5, 0,
++        14, 7, 11, 10, 4, 13, 1, 5, 8, 12, 6, 9, 3, 2, 15, 13, 8, 10, 1, 3, 15, 4, 2, 11, 6, 7, 12, 0, 5, 14, 9,
++    ],
++    [
++        10, 0, 9, 14, 6, 3, 15, 5, 1, 13, 12, 7, 11, 4, 2, 8, 13, 7, 0, 9, 3, 4, 6, 10, 2, 8, 5, 14, 12, 11, 15, 1, 13,
++        6, 4, 9, 8, 15, 3, 0, 11, 1, 2, 12, 5, 10, 14, 7, 1, 10, 13, 0, 6, 9, 8, 7, 4, 15, 14, 3, 11, 5, 2, 12,
++    ],
++    [
++        7, 13, 14, 3, 0, 6, 9, 10, 1, 2, 8, 5, 11, 12, 4, 15, 13, 8, 11, 5, 6, 15, 0, 3, 4, 7, 2, 12, 1, 10, 14, 9, 10,
++        6, 9, 0, 12, 11, 7, 13, 15, 1, 3, 14, 5, 2, 8, 4, 3, 15, 0, 6, 10, 1, 13, 8, 9, 4, 5, 11, 12, 7, 2, 14,
++    ],
++    [
++        2, 12, 4, 1, 7, 10, 11, 6, 8, 5, 3, 15, 13, 0, 14, 9, 14, 11, 2, 12, 4, 7, 13, 1, 5, 0, 15, 10, 3, 9, 8, 6, 4,
++        2, 1, 11, 10, 13, 7, 8, 15, 9, 12, 5, 6, 3, 0, 14, 11, 8, 12, 7, 1, 14, 2, 13, 6, 15, 0, 9, 10, 4, 5, 3,
++    ],
++    [
++        12, 1, 10, 15, 9, 2, 6, 8, 0, 13, 3, 4, 14, 7, 5, 11, 10, 15, 4, 2, 7, 12, 9, 5, 6, 1, 13, 14, 0, 11, 3, 8, 9,
++        14, 15, 5, 2, 8, 12, 3, 7, 0, 4, 10, 1, 13, 11, 6, 4, 3, 2, 12, 9, 5, 15, 10, 11, 14, 1, 7, 6, 0, 8, 13,
++    ],
++    [
++        4, 11, 2, 14, 15, 0, 8, 13, 3, 12, 9, 7, 5, 10, 6, 1, 13, 0, 11, 7, 4, 9, 1, 10, 14, 3, 5, 12, 2, 15, 8, 6, 1,
++        4, 11, 13, 12, 3, 7, 14, 10, 15, 6, 8, 0, 5, 9, 2, 6, 11, 13, 8, 1, 4, 10, 7, 9, 5, 0, 15, 14, 2, 3, 12,
++    ],
++    [
++        13, 2, 8, 4, 6, 15, 11, 1, 10, 9, 3, 14, 5, 0, 12, 7, 1, 15, 13, 8, 10, 3, 7, 4, 12, 5, 6, 11, 0, 14, 9, 2, 7,
++        11, 4, 1, 9, 12, 14, 2, 0, 6, 10, 13, 15, 3, 5, 8, 2, 1, 14, 7, 4, 10, 8, 13, 15, 12, 9, 0, 3, 5, 6, 11,
++    ],
++];
++
++fn permute(input: u64, input_bits: u32, table: &[u8]) -> u64 {
++    let mut out = 0u64;
++    for &pos in table {
++        let shift = input_bits - u32::from(pos);
++        out = (out << 1) | ((input >> shift) & 1);
++    }
++    out
++}
++
++#[derive(Clone)]
++struct DesKey {
++    subkeys: [u64; 16],
++}
++
++impl DesKey {
++    fn new(key: [u8; 8]) -> Self {
++        let key_u64 = u64::from_be_bytes(key);
++        let perm = permute(key_u64, 64, &PC1);
++        let mut c = ((perm >> 28) & 0x0FFF_FFFF) as u32;
++        let mut d = (perm & 0x0FFF_FFFF) as u32;
++        let mut subkeys = [0u64; 16];
++
++        for (i, &shift) in SHIFTS.iter().enumerate() {
++            c = ((c << shift) | (c >> (28 - shift))) & 0x0FFF_FFFF;
++            d = ((d << shift) | (d >> (28 - shift))) & 0x0FFF_FFFF;
++            let cd = (u64::from(c) << 28) | u64::from(d);
++            subkeys[i] = permute(cd, 56, &PC2);
++        }
++
++        Self { subkeys }
++    }
++
++    fn crypt_block(&self, block: u64, decrypt: bool) -> u64 {
++        let ip = permute(block, 64, &INITIAL_PERM);
++        let mut left = (ip >> 32) as u32;
++        let mut right = ip as u32;
++
++        for round in 0..16 {
++            let subkey = if decrypt {
++                self.subkeys[15 - round]
++            } else {
++                self.subkeys[round]
++            };
++            let expanded = permute(u64::from(right), 32, &EXPANSION) ^ subkey;
++            let mut s_out = 0u32;
++            for (i, sbox) in SBOX.iter().enumerate() {
++                let shift = 42 - i * 6;
++                let bits = ((expanded >> shift) & 0x3F) as usize;
++                let row = ((bits & 0x20) >> 4) | (bits & 0x01);
++                let col = (bits >> 1) & 0x0F;
++                s_out = (s_out << 4) | u32::from(sbox[row * 16 + col]);
++            }
++            let f = permute(u64::from(s_out), 32, &PERM_P) as u32;
++            let next_right = left ^ f;
++            left = right;
++            right = next_right;
++        }
++
++        let pre_final = (u64::from(right) << 32) | u64::from(left);
++        permute(pre_final, 64, &FINAL_PERM)
++    }
++}
++
++/// Stateful 3DES-EDE3-CBC cipher whose IV chains continuously across RDP packets
++/// per [MS-RDPBCGR] 5.3.6.1.3.
++#[derive(Clone)]
++pub(crate) struct TripleDesCbc {
++    k1: DesKey,
++    k2: DesKey,
++    k3: DesKey,
++    iv: u64,
++}
++
++impl TripleDesCbc {
++    pub(crate) fn new(key: &[u8; 24], iv: &[u8; 8]) -> Self {
++        let mut k1 = [0u8; 8];
++        let mut k2 = [0u8; 8];
++        let mut k3 = [0u8; 8];
++        k1.copy_from_slice(&key[0..8]);
++        k2.copy_from_slice(&key[8..16]);
++        k3.copy_from_slice(&key[16..24]);
++        Self {
++            k1: DesKey::new(k1),
++            k2: DesKey::new(k2),
++            k3: DesKey::new(k3),
++            iv: u64::from_be_bytes(*iv),
++        }
++    }
++
++    /// Encrypts `data` in place. `data.len()` must be a multiple of 8.
++    pub(crate) fn encrypt_in_place(&mut self, data: &mut [u8]) {
++        debug_assert!(data.len().is_multiple_of(8));
++        for chunk in data.chunks_exact_mut(8) {
++            let mut block_bytes = [0u8; 8];
++            block_bytes.copy_from_slice(chunk);
++            let xored = u64::from_be_bytes(block_bytes) ^ self.iv;
++            let e1 = self.k1.crypt_block(xored, false);
++            let d2 = self.k2.crypt_block(e1, true);
++            let e3 = self.k3.crypt_block(d2, false);
++            self.iv = e3;
++            chunk.copy_from_slice(&e3.to_be_bytes());
++        }
++    }
++
++    /// Decrypts `data` in place. `data.len()` must be a multiple of 8.
++    pub(crate) fn decrypt_in_place(&mut self, data: &mut [u8]) {
++        debug_assert!(data.len().is_multiple_of(8));
++        for chunk in data.chunks_exact_mut(8) {
++            let mut block_bytes = [0u8; 8];
++            block_bytes.copy_from_slice(chunk);
++            let ct = u64::from_be_bytes(block_bytes);
++            let d3 = self.k3.crypt_block(ct, true);
++            let e2 = self.k2.crypt_block(d3, false);
++            let d1 = self.k1.crypt_block(e2, true);
++            let pt = d1 ^ self.iv;
++            self.iv = ct;
++            chunk.copy_from_slice(&pt.to_be_bytes());
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn des_nist_known_answer() {
++        // FIPS 46-3 / NIST SP 800-17 standard test vector:
++        // Key: 0133457799BBCDFF, Plaintext: 0123456789ABCDEF -> Ciphertext: 85E813540F0AB405
++        let key = DesKey::new([0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1]);
++        let pt = 0x0123_4567_89AB_CDEFu64;
++        let ct = key.crypt_block(pt, false);
++        assert_eq!(ct, 0x85E8_1354_0F0A_B405u64);
++        assert_eq!(key.crypt_block(ct, true), pt);
++    }
++
++    #[test]
++    fn tdes_cbc_roundtrip_and_chaining() {
++        // NIST SP 800-67 / known 3DES-EDE3-CBC vector:
++        let key: [u8; 24] = [
++            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x45, 0x67,
++            0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23,
++        ];
++        let iv: [u8; 8] = [0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF];
++        let plaintext = b"Now is the time for all ";
++        // Expected 3DES-EDE3-CBC output cross-verified against `openssl enc -des-ede3-cbc -nopad`:
++        let expected: [u8; 24] = [
++            0xF3, 0xC0, 0xFF, 0x02, 0x6C, 0x02, 0x30, 0x89, 0x65, 0x6F, 0xBB, 0x16, 0x9D, 0xEF, 0x7E, 0xDB, 0x30, 0xBA,
++            0x36, 0x07, 0x5D, 0x6F, 0x01, 0x76,
++        ];
++
++        let mut enc = TripleDesCbc::new(&key, &iv);
++        let mut buf = plaintext.to_vec();
++        enc.encrypt_in_place(&mut buf);
++        assert_eq!(buf.as_slice(), expected.as_slice());
++
++        // Verify continuous CBC chaining across two separate packet calls matches single-shot.
++        let mut enc_split = TripleDesCbc::new(&key, &iv);
++        let mut p1 = plaintext[0..8].to_vec();
++        let mut p2 = plaintext[8..24].to_vec();
++        enc_split.encrypt_in_place(&mut p1);
++        enc_split.encrypt_in_place(&mut p2);
++        assert_eq!([p1.as_slice(), p2.as_slice()].concat().as_slice(), expected.as_slice());
++
++        let mut dec = TripleDesCbc::new(&key, &iv);
++        dec.decrypt_in_place(&mut buf);
++        assert_eq!(buf.as_slice(), plaintext.as_slice());
++    }
++}
+diff --git a/crates/ironrdp-pdu/src/crypto/mod.rs b/crates/ironrdp-pdu/src/crypto/mod.rs
+index aa76b1e..3690385 100644
+--- a/crates/ironrdp-pdu/src/crypto/mod.rs
++++ b/crates/ironrdp-pdu/src/crypto/mod.rs
+@@ -1,2 +1,4 @@
++pub(crate) mod des;
+ pub(crate) mod rc4;
+ pub(crate) mod rsa;
++pub mod standard_rdp;
+diff --git a/crates/ironrdp-pdu/src/crypto/rsa.rs b/crates/ironrdp-pdu/src/crypto/rsa.rs
+index c577220..8af3d77 100644
+--- a/crates/ironrdp-pdu/src/crypto/rsa.rs
++++ b/crates/ironrdp-pdu/src/crypto/rsa.rs
+@@ -57,12 +57,46 @@ pub(crate) fn encrypt_with_public_key(message: &[u8], public_key_der: &[u8]) ->
+             format!("RSA public key modulus is shorter than {MIN_MODULUS_BITS} bits"),
+         ));
+     }
++    let modulus_bytes = usize::try_from(n.bits().div_ceil(8))
++        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "RSA modulus length overflow"))?;
+     let e = BigUint::from_bytes_be(e);
+     let m = BigUint::from_bytes_le(message);
+     let c = m.modpow(&e, &n);
+ 
+     let mut result = c.to_bytes_le();
+-    result.resize(result.len() + 8, 0u8);
++    result.resize(modulus_bytes + 8, 0u8);
++
++    Ok(result)
++}
++
++/// Encrypts `message` using a raw little-endian RSA modulus (with MS-RDPBCGR
++/// 8-byte trailing zero padding) and 32-bit public exponent, returning the
++/// little-endian ciphertext padded to `modulus_bytes + 8` bytes.
++pub(crate) fn encrypt_with_modulus_exponent(
++    message: &[u8],
++    modulus_le_with_padding: &[u8],
++    exponent: u32,
++) -> io::Result<Vec<u8>> {
++    if modulus_le_with_padding.len() <= 8 {
++        return Err(io::Error::new(
++            io::ErrorKind::InvalidData,
++            "RSA proprietary modulus is too short",
++        ));
++    }
++    let modulus_raw = &modulus_le_with_padding[..modulus_le_with_padding.len() - 8];
++    let n = BigUint::from_bytes_le(modulus_raw);
++    if n.bits() < MIN_MODULUS_BITS {
++        return Err(io::Error::new(
++            io::ErrorKind::InvalidData,
++            format!("RSA public key modulus is shorter than {MIN_MODULUS_BITS} bits"),
++        ));
++    }
++    let e = BigUint::from(exponent);
++    let m = BigUint::from_bytes_le(message);
++    let c = m.modpow(&e, &n);
++
++    let mut result = c.to_bytes_le();
++    result.resize(modulus_raw.len() + 8, 0u8);
+ 
+     Ok(result)
+ }
+diff --git a/crates/ironrdp-pdu/src/crypto/standard_rdp.rs b/crates/ironrdp-pdu/src/crypto/standard_rdp.rs
+new file mode 100644
+index 0000000..51b0c41
+--- /dev/null
++++ b/crates/ironrdp-pdu/src/crypto/standard_rdp.rs
+@@ -0,0 +1,1401 @@
++//! Standard RDP Security Layer ([MS-RDPBCGR] section 5.3).
++//!
++//! Supports 40-bit, 56-bit, and 128-bit RC4 (with standard MAC, salted MAC, and
++//! 4096-packet key updates) as well as FIPS (3DES-EDE3-CBC + HMAC-SHA1) across
++//! both Slow-Path (MCS SendData) and Fast-Path Input/Output frames.
++
++use core::fmt;
++use core::sync::atomic::{AtomicBool, Ordering};
++use std::borrow::Cow;
++use std::sync::Arc;
++
++use bit_field::BitField as _;
++use ironrdp_core::{
++    Decode, DecodeResult, Encode, EncodeResult, ReadCursor, WriteCursor, cast_length, decode, encode_vec,
++    ensure_fixed_part_size, ensure_size, invalid_field_err,
++};
++use md5::Digest as _;
++use sha1::Digest as _;
++
++use crate::crypto::des::TripleDesCbc;
++use crate::crypto::rc4::Rc4;
++use crate::crypto::rsa::{encrypt_with_modulus_exponent, encrypt_with_public_key};
++use crate::fast_path::{EncryptionFlags, FastPathHeader};
++use crate::gcc::{EncryptionLevel, EncryptionMethod, ServerSecurityData};
++use crate::mcs::{McsMessage, SendDataIndication, SendDataRequest};
++use crate::per;
++use crate::rdp::headers::{BASIC_SECURITY_HEADER_SIZE, BasicSecurityHeader, BasicSecurityHeaderFlags};
++use crate::rdp::server_license::{ServerCertificate, cert::CertificateType};
++use crate::x224::X224;
++
++const PAD1: [u8; 40] = [0x36; 40];
++const PAD2: [u8; 48] = [0x5C; 48];
++const SALT_40_56: [u8; 3] = [0xD1, 0x26, 0x9E];
++const FIPS_INITIAL_IV: [u8; 8] = [0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF];
++const FIPS_HEADER_LENGTH: u16 = 0x0010;
++const FIPS_VERSION_1: u8 = 0x01;
++const MAC_SIGNATURE_LEN: usize = 8;
++const FIPS_INFO_LEN: usize = 4;
++const KEY_UPDATE_INTERVAL: u32 = 4096;
++
++/// Payload-type flags in `BasicSecurityHeader` that are also expected by
++/// IronRDP's plaintext decoders (unlike pure `SEC_ENCRYPT` on ShareControl / SVC).
++const PRESERVED_SECURITY_HEADER_FLAGS: BasicSecurityHeaderFlags = BasicSecurityHeaderFlags::from_bits_truncate(
++    BasicSecurityHeaderFlags::INFO_PKT.bits()
++        | BasicSecurityHeaderFlags::LICENSE_PKT.bits()
++        | BasicSecurityHeaderFlags::REDIRECTION_PKT.bits()
++        | BasicSecurityHeaderFlags::AUTODETECT_REQ.bits()
++        | BasicSecurityHeaderFlags::AUTODETECT_RSP.bits()
++        | BasicSecurityHeaderFlags::HEARTBEAT.bits()
++        | BasicSecurityHeaderFlags::TRANSPORT_REQ.bits()
++        | BasicSecurityHeaderFlags::TRANSPORT_RSP.bits(),
++);
++
++#[rustfmt::skip]
++const FIPS_REVERSE_TABLE: [u8; 256] = [
++    0x00, 0x80, 0x40, 0xc0, 0x20, 0xa0, 0x60, 0xe0, 0x10, 0x90, 0x50, 0xd0, 0x30, 0xb0, 0x70, 0xf0,
++    0x08, 0x88, 0x48, 0xc8, 0x28, 0xa8, 0x68, 0xe8, 0x18, 0x98, 0x58, 0xd8, 0x38, 0xb8, 0x78, 0xf8,
++    0x04, 0x84, 0x44, 0xc4, 0x24, 0xa4, 0x64, 0xe4, 0x14, 0x94, 0x54, 0xd4, 0x34, 0xb4, 0x74, 0xf4,
++    0x0c, 0x8c, 0x4c, 0xcc, 0x2c, 0xac, 0x6c, 0xec, 0x1c, 0x9c, 0x5c, 0xdc, 0x3c, 0xbc, 0x7c, 0xfc,
++    0x02, 0x82, 0x42, 0xc2, 0x22, 0xa2, 0x62, 0xe2, 0x12, 0x92, 0x52, 0xd2, 0x32, 0xb2, 0x72, 0xf2,
++    0x0a, 0x8a, 0x4a, 0xca, 0x2a, 0xaa, 0x6a, 0xea, 0x1a, 0x9a, 0x5a, 0xda, 0x3a, 0xba, 0x7a, 0xfa,
++    0x06, 0x86, 0x46, 0xc6, 0x26, 0xa6, 0x66, 0xe6, 0x16, 0x96, 0x56, 0xd6, 0x36, 0xb6, 0x76, 0xf6,
++    0x0e, 0x8e, 0x4e, 0xce, 0x2e, 0xae, 0x6e, 0xee, 0x1e, 0x9e, 0x5e, 0xde, 0x3e, 0xbe, 0x7e, 0xfe,
++    0x01, 0x81, 0x41, 0xc1, 0x21, 0xa1, 0x61, 0xe1, 0x11, 0x91, 0x51, 0xd1, 0x31, 0xb1, 0x71, 0xf1,
++    0x09, 0x89, 0x49, 0xc9, 0x29, 0xa9, 0x69, 0xe9, 0x19, 0x99, 0x59, 0xd9, 0x39, 0xb9, 0x79, 0xf9,
++    0x05, 0x85, 0x45, 0xc5, 0x25, 0xa5, 0x65, 0xe5, 0x15, 0x95, 0x55, 0xd5, 0x35, 0xb5, 0x75, 0xf5,
++    0x0d, 0x8d, 0x4d, 0xcd, 0x2d, 0xad, 0x6d, 0xed, 0x1d, 0x9d, 0x5d, 0xdd, 0x3d, 0xbd, 0x7d, 0xfd,
++    0x03, 0x83, 0x43, 0xc3, 0x23, 0xa3, 0x63, 0xe3, 0x13, 0x93, 0x53, 0xd3, 0x33, 0xb3, 0x73, 0xf3,
++    0x0b, 0x8b, 0x4b, 0xcb, 0x2b, 0xab, 0x6b, 0xeb, 0x1b, 0x9b, 0x5b, 0xdb, 0x3b, 0xbb, 0x7b, 0xfb,
++    0x07, 0x87, 0x47, 0xc7, 0x27, 0xa7, 0x67, 0xe7, 0x17, 0x97, 0x57, 0xd7, 0x37, 0xb7, 0x77, 0xf7,
++    0x0f, 0x8f, 0x4f, 0xcf, 0x2f, 0xaf, 0x6f, 0xef, 0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff,
++];
++
++#[rustfmt::skip]
++const FIPS_ODDPARITY_TABLE: [u8; 256] = [
++    0x01, 0x01, 0x02, 0x02, 0x04, 0x04, 0x07, 0x07, 0x08, 0x08, 0x0b, 0x0b, 0x0d, 0x0d, 0x0e, 0x0e,
++    0x10, 0x10, 0x13, 0x13, 0x15, 0x15, 0x16, 0x16, 0x19, 0x19, 0x1a, 0x1a, 0x1c, 0x1c, 0x1f, 0x1f,
++    0x20, 0x20, 0x23, 0x23, 0x25, 0x25, 0x26, 0x26, 0x29, 0x29, 0x2a, 0x2a, 0x2c, 0x2c, 0x2f, 0x2f,
++    0x31, 0x31, 0x32, 0x32, 0x34, 0x34, 0x37, 0x37, 0x38, 0x38, 0x3b, 0x3b, 0x3d, 0x3d, 0x3e, 0x3e,
++    0x40, 0x40, 0x43, 0x43, 0x45, 0x45, 0x46, 0x46, 0x49, 0x49, 0x4a, 0x4a, 0x4c, 0x4c, 0x4f, 0x4f,
++    0x51, 0x51, 0x52, 0x52, 0x54, 0x54, 0x57, 0x57, 0x58, 0x58, 0x5b, 0x5b, 0x5d, 0x5d, 0x5e, 0x5e,
++    0x61, 0x61, 0x62, 0x62, 0x64, 0x64, 0x67, 0x67, 0x68, 0x68, 0x6b, 0x6b, 0x6d, 0x6d, 0x6e, 0x6e,
++    0x70, 0x70, 0x73, 0x73, 0x75, 0x75, 0x76, 0x76, 0x79, 0x79, 0x7a, 0x7a, 0x7c, 0x7c, 0x7f, 0x7f,
++    0x80, 0x80, 0x83, 0x83, 0x85, 0x85, 0x86, 0x86, 0x89, 0x89, 0x8a, 0x8a, 0x8c, 0x8c, 0x8f, 0x8f,
++    0x91, 0x91, 0x92, 0x92, 0x94, 0x94, 0x97, 0x97, 0x98, 0x98, 0x9b, 0x9b, 0x9d, 0x9d, 0x9e, 0x9e,
++    0xa1, 0xa1, 0xa2, 0xa2, 0xa4, 0xa4, 0xa7, 0xa7, 0xa8, 0xa8, 0xab, 0xab, 0xad, 0xad, 0xae, 0xae,
++    0xb0, 0xb0, 0xb3, 0xb3, 0xb5, 0xb5, 0xb6, 0xb6, 0xb9, 0xb9, 0xba, 0xba, 0xbc, 0xbc, 0xbf, 0xbf,
++    0xc1, 0xc1, 0xc2, 0xc2, 0xc4, 0xc4, 0xc7, 0xc7, 0xc8, 0xc8, 0xcb, 0xcb, 0xcd, 0xcd, 0xce, 0xce,
++    0xd0, 0xd0, 0xd3, 0xd3, 0xd5, 0xd5, 0xd6, 0xd6, 0xd9, 0xd9, 0xda, 0xda, 0xdc, 0xdc, 0xdf, 0xdf,
++    0xe0, 0xe0, 0xe3, 0xe3, 0xe5, 0xe5, 0xe6, 0xe6, 0xe9, 0xe9, 0xea, 0xea, 0xec, 0xec, 0xef, 0xef,
++    0xf1, 0xf1, 0xf2, 0xf2, 0xf4, 0xf4, 0xf7, 0xf7, 0xf8, 0xf8, 0xfb, 0xfb, 0xfd, 0xfd, 0xfe, 0xfe,
++];
++
++/// [MS-RDPBCGR] 2.2.1.10.1 Client Security Exchange PDU.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct SecurityExchangePdu {
++    pub flags: BasicSecurityHeaderFlags,
++    pub encrypted_client_random: Vec<u8>,
++}
++
++impl SecurityExchangePdu {
++    const NAME: &'static str = "SecurityExchangePdu";
++    const FIXED_PART_SIZE: usize = BASIC_SECURITY_HEADER_SIZE + 4;
++
++    pub fn new(encrypted_client_random: Vec<u8>) -> Self {
++        Self {
++            flags: BasicSecurityHeaderFlags::EXCHANGE_PKT,
++            encrypted_client_random,
++        }
++    }
++}
++
++impl Encode for SecurityExchangePdu {
++    fn encode(&self, dst: &mut WriteCursor<'_>) -> EncodeResult<()> {
++        ensure_size!(in: dst, size: self.size());
++        BasicSecurityHeader { flags: self.flags }.encode(dst)?;
++        dst.write_u32(cast_length!("encryptedClientRandomLen", self.encrypted_client_random.len(), in: dst)?);
++        dst.write_slice(&self.encrypted_client_random);
++        Ok(())
++    }
++
++    fn name(&self) -> &'static str {
++        Self::NAME
++    }
++
++    fn size(&self) -> usize {
++        Self::FIXED_PART_SIZE + self.encrypted_client_random.len()
++    }
++}
++
++impl<'de> Decode<'de> for SecurityExchangePdu {
++    fn decode(src: &mut ReadCursor<'de>) -> DecodeResult<Self> {
++        ensure_fixed_part_size!(in: src);
++        let security_header = BasicSecurityHeader::decode(src)?;
++        if !security_header.flags.contains(BasicSecurityHeaderFlags::EXCHANGE_PKT) {
++            return Err(invalid_field_err!(
++                "securityHeader",
++                "expected SEC_EXCHANGE_PKT flag in SecurityExchangePdu",
++                in: src
++            ));
++        }
++        let len: usize = cast_length!("encryptedClientRandomLen", src.read_u32(), in: src)?;
++        ensure_size!(in: src, size: len);
++        let encrypted_client_random = src.read_slice(len).to_vec();
++        Ok(Self {
++            flags: security_header.flags,
++            encrypted_client_random,
++        })
++    }
++}
++
++fn salted_hash(salt: &[u8; 48], input: &[u8], salt1: &[u8; 32], salt2: &[u8; 32]) -> [u8; 16] {
++    let mut sha = sha1::Sha1::new();
++    sha.update(input);
++    sha.update(salt);
++    sha.update(salt1);
++    sha.update(salt2);
++    let sha_digest = sha.finalize();
++
++    let mut md5 = md5::Md5::new();
++    md5.update(salt);
++    md5.update(sha_digest);
++    let digest = md5.finalize();
++    let mut out = [0u8; 16];
++    out.copy_from_slice(&digest);
++    out
++}
++
++fn final_hash(key: &[u8], client_random: &[u8; 32], server_random: &[u8; 32]) -> [u8; 16] {
++    let mut md5 = md5::Md5::new();
++    md5.update(key);
++    md5.update(client_random);
++    md5.update(server_random);
++    let digest = md5.finalize();
++    let mut out = [0u8; 16];
++    out.copy_from_slice(&digest);
++    out
++}
++
++fn hmac_sha1_8(key: &[u8], data: &[u8], use_count: u32) -> [u8; 8] {
++    // RFC 2104 HMAC-SHA1 with 64-byte block size
++    let mut key_block = [0u8; 64];
++    if key.len() > 64 {
++        let mut h = sha1::Sha1::new();
++        h.update(key);
++        key_block[..20].copy_from_slice(&h.finalize());
++    } else {
++        key_block[..key.len()].copy_from_slice(key);
++    }
++
++    let mut ipad = [0x36u8; 64];
++    let mut opad = [0x5Cu8; 64];
++    for i in 0..64 {
++        ipad[i] ^= key_block[i];
++        opad[i] ^= key_block[i];
++    }
++
++    let mut inner = sha1::Sha1::new();
++    inner.update(ipad);
++    inner.update(data);
++    inner.update(use_count.to_le_bytes());
++    let inner_digest = inner.finalize();
++
++    let mut outer = sha1::Sha1::new();
++    outer.update(opad);
++    outer.update(inner_digest);
++    let full = outer.finalize();
++
++    let mut out = [0u8; 8];
++    out.copy_from_slice(&full[..8]);
++    out
++}
++
++fn fips_expand_key_bits(input: &[u8; 21]) -> [u8; 24] {
++    let mut buf = [0u8; 21];
++    for (dst, &src) in buf.iter_mut().zip(input.iter()) {
++        *dst = FIPS_REVERSE_TABLE[usize::from(src)];
++    }
++
++    let mut out = [0u8; 24];
++    let mut b = 0usize;
++    for slot in &mut out {
++        let p = b / 8;
++        let r = b % 8;
++        if r <= 1 {
++            *slot = (buf[p] << r) & 0xFE;
++        } else {
++            let c = (buf[p] << r) | (buf[p + 1] >> (8 - r));
++            *slot = c & 0xFE;
++        }
++        b += 7;
++    }
++
++    for byte in &mut out {
++        *byte = FIPS_ODDPARITY_TABLE[usize::from(FIPS_REVERSE_TABLE[usize::from(*byte)])];
++    }
++    out
++}
++
++#[derive(Clone)]
++struct Rc4DirectionState {
++    method: EncryptionMethod,
++    key_len: usize,
++    mac_key: [u8; 16],
++    initial_key: [u8; 16],
++    current_key: [u8; 16],
++    cipher: Rc4,
++    use_count: u32,
++    checksum_use_count: u32,
++}
++
++impl Rc4DirectionState {
++    fn new(method: EncryptionMethod, key_len: usize, mac_key: [u8; 16], initial_key: [u8; 16]) -> Self {
++        let cipher = Rc4::new(&initial_key[..key_len]);
++        Self {
++            method,
++            key_len,
++            mac_key,
++            initial_key,
++            current_key: initial_key,
++            cipher,
++            use_count: 0,
++            checksum_use_count: 0,
++        }
++    }
++
++    fn update_session_key(&mut self) {
++        let mut sha = sha1::Sha1::new();
++        sha.update(&self.initial_key[..self.key_len]);
++        sha.update(PAD1);
++        sha.update(&self.current_key[..self.key_len]);
++        let sha_digest = sha.finalize();
++
++        let mut md5 = md5::Md5::new();
++        md5.update(&self.initial_key[..self.key_len]);
++        md5.update(PAD2);
++        md5.update(sha_digest);
++        let md5_digest = md5.finalize();
++        self.current_key.copy_from_slice(&md5_digest);
++
++        let mut tmp_rc4 = Rc4::new(&self.current_key[..self.key_len]);
++        let encrypted_key = tmp_rc4.process(&self.current_key[..self.key_len]);
++        self.current_key[..self.key_len].copy_from_slice(&encrypted_key);
++
++        if self.method == EncryptionMethod::BIT_40 {
++            self.current_key[..3].copy_from_slice(&SALT_40_56);
++        } else if self.method == EncryptionMethod::BIT_56 {
++            self.current_key[0] = SALT_40_56[0];
++        }
++
++        self.cipher = Rc4::new(&self.current_key[..self.key_len]);
++        self.use_count = 0;
++    }
++
++    fn compute_mac(&self, plaintext: &[u8], salted: bool, count: u32) -> [u8; 8] {
++        let len_le = u32::try_from(plaintext.len()).unwrap_or(u32::MAX).to_le_bytes();
++        let mut sha = sha1::Sha1::new();
++        sha.update(&self.mac_key[..self.key_len]);
++        sha.update(PAD1);
++        sha.update(len_le);
++        sha.update(plaintext);
++        if salted {
++            sha.update(count.to_le_bytes());
++        }
++        let sha_digest = sha.finalize();
++
++        let mut md5 = md5::Md5::new();
++        md5.update(&self.mac_key[..self.key_len]);
++        md5.update(PAD2);
++        md5.update(sha_digest);
++        let full = md5.finalize();
++        let mut out = [0u8; 8];
++        out.copy_from_slice(&full[..8]);
++        out
++    }
++
++    fn encrypt(&mut self, plaintext: &[u8], salted: bool) -> ([u8; 8], Vec<u8>) {
++        if self.use_count >= KEY_UPDATE_INTERVAL {
++            self.update_session_key();
++        }
++        let mac = self.compute_mac(plaintext, salted, self.checksum_use_count);
++        let ciphertext = self.cipher.process(plaintext);
++        self.use_count = self.use_count.wrapping_add(1);
++        self.checksum_use_count = self.checksum_use_count.wrapping_add(1);
++        (mac, ciphertext)
++    }
++
++    fn decrypt(&mut self, ciphertext: &[u8], expected_mac: &[u8; 8], salted: bool) -> Result<Vec<u8>, String> {
++        if self.use_count >= KEY_UPDATE_INTERVAL {
++            self.update_session_key();
++        }
++        let count_for_mac = self.checksum_use_count;
++        let plaintext = self.cipher.process(ciphertext);
++        self.use_count = self.use_count.wrapping_add(1);
++        self.checksum_use_count = self.checksum_use_count.wrapping_add(1);
++        let computed_mac = self.compute_mac(&plaintext, salted, count_for_mac);
++        if computed_mac != *expected_mac {
++            return Err(String::from("Standard RDP RC4 MAC verification failed"));
++        }
++        Ok(plaintext)
++    }
++}
++
++#[derive(Clone)]
++struct FipsDirectionState {
++    sign_key: [u8; 20],
++    cipher: TripleDesCbc,
++    use_count: u32,
++}
++
++impl FipsDirectionState {
++    fn new(sign_key: [u8; 20], des_key: [u8; 24]) -> Self {
++        Self {
++            sign_key,
++            cipher: TripleDesCbc::new(&des_key, &FIPS_INITIAL_IV),
++            use_count: 0,
++        }
++    }
++
++    fn encrypt(&mut self, plaintext: &[u8]) -> (u8, [u8; 8], Vec<u8>) {
++        let pad_len = (8 - (plaintext.len() % 8)) % 8;
++        let mac = hmac_sha1_8(&self.sign_key, plaintext, self.use_count);
++        let mut buf = Vec::with_capacity(plaintext.len() + pad_len);
++        buf.extend_from_slice(plaintext);
++        buf.resize(plaintext.len() + pad_len, 0u8);
++        self.cipher.encrypt_in_place(&mut buf);
++        self.use_count = self.use_count.wrapping_add(1);
++        (u8::try_from(pad_len).unwrap_or(0), mac, buf)
++    }
++
++    fn decrypt(&mut self, ciphertext: &[u8], pad_len: u8, expected_mac: &[u8; 8]) -> Result<Vec<u8>, String> {
++        if ciphertext.is_empty() || !ciphertext.len().is_multiple_of(8) {
++            return Err(format!(
++                "FIPS ciphertext length {} is not a non-zero multiple of 8",
++                ciphertext.len()
++            ));
++        }
++        let pad = usize::from(pad_len);
++        if pad >= 8 || pad > ciphertext.len() {
++            return Err(format!("invalid FIPS pad length {pad_len}"));
++        }
++        let mut buf = ciphertext.to_vec();
++        self.cipher.decrypt_in_place(&mut buf);
++        let unpadded_len = buf.len() - pad;
++        let count_for_mac = self.use_count;
++        self.use_count = self.use_count.wrapping_add(1);
++        let computed = hmac_sha1_8(&self.sign_key, &buf[..unpadded_len], count_for_mac);
++        if computed != *expected_mac {
++            return Err(String::from("Standard RDP FIPS HMAC-SHA1 verification failed"));
++        }
++        buf.truncate(unpadded_len);
++        Ok(buf)
++    }
++}
++
++#[derive(Clone)]
++enum DirectionCipher {
++    Rc4(Rc4DirectionState),
++    Fips(FipsDirectionState),
++}
++
++impl DirectionCipher {
++    fn is_fips(&self) -> bool {
++        matches!(self, Self::Fips(_))
++    }
++}
++
++/// Negotiated Standard RDP Security summary for diagnostics and UI indicators.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct StandardRdpSecurityInfo {
++    pub encryption_method: EncryptionMethod,
++    pub encryption_level: EncryptionLevel,
++}
++
++/// Outbound (client -> server) frame encryptor for Standard RDP Security.
++pub struct StandardRdpEncryptor {
++    info: StandardRdpSecurityInfo,
++    cipher: DirectionCipher,
++    message_channel_id: Option<u16>,
++    encrypt_client_license: Arc<AtomicBool>,
++    use_salted_checksum: bool,
++}
++
++impl fmt::Debug for StandardRdpEncryptor {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("StandardRdpEncryptor")
++            .field("encryption_method", &self.info.encryption_method)
++            .field("encryption_level", &self.info.encryption_level)
++            .finish()
++    }
++}
++
++/// Inbound (server -> client) frame decryptor for Standard RDP Security.
++pub struct StandardRdpDecryptor {
++    info: StandardRdpSecurityInfo,
++    cipher: DirectionCipher,
++    encrypt_client_license: Arc<AtomicBool>,
++}
++
++impl fmt::Debug for StandardRdpDecryptor {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("StandardRdpDecryptor")
++            .field("encryption_method", &self.info.encryption_method)
++            .field("encryption_level", &self.info.encryption_level)
++            .finish()
++    }
++}
++
++/// Full bidirectional Standard RDP Security state produced after Security Exchange.
++pub struct StandardRdpSecurity {
++    encryptor: StandardRdpEncryptor,
++    decryptor: StandardRdpDecryptor,
++}
++
++impl fmt::Debug for StandardRdpSecurity {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("StandardRdpSecurity")
++            .field("encryption_method", &self.encryptor.info.encryption_method)
++            .field("encryption_level", &self.encryptor.info.encryption_level)
++            .finish()
++    }
++}
++
++fn derive_direction_ciphers(
++    method: EncryptionMethod,
++    client_random: &[u8; 32],
++    server_random: &[u8; 32],
++    is_server: bool,
++) -> Result<(DirectionCipher, DirectionCipher), String> {
++    if method == EncryptionMethod::FIPS {
++        let mut client_encrypt_key_t = [0u8; 21];
++        let mut sha = sha1::Sha1::new();
++        sha.update(&client_random[16..32]);
++        sha.update(&server_random[16..32]);
++        client_encrypt_key_t[..20].copy_from_slice(&sha.finalize());
++        client_encrypt_key_t[20] = client_encrypt_key_t[0];
++
++        let mut client_decrypt_key_t = [0u8; 21];
++        let mut sha = sha1::Sha1::new();
++        sha.update(&client_random[0..16]);
++        sha.update(&server_random[0..16]);
++        client_decrypt_key_t[..20].copy_from_slice(&sha.finalize());
++        client_decrypt_key_t[20] = client_decrypt_key_t[0];
++
++        let mut sign_key = [0u8; 20];
++        let mut sha = sha1::Sha1::new();
++        sha.update(&client_decrypt_key_t[..20]);
++        sha.update(&client_encrypt_key_t[..20]);
++        sign_key.copy_from_slice(&sha.finalize());
++
++        let c2s_key = fips_expand_key_bits(&client_encrypt_key_t);
++        let s2c_key = fips_expand_key_bits(&client_decrypt_key_t);
++
++        let (enc_key, dec_key) = if is_server {
++            (s2c_key, c2s_key)
++        } else {
++            (c2s_key, s2c_key)
++        };
++
++        return Ok((
++            DirectionCipher::Fips(FipsDirectionState::new(sign_key, enc_key)),
++            DirectionCipher::Fips(FipsDirectionState::new(sign_key, dec_key)),
++        ));
++    }
++
++    let key_len = match method {
++        EncryptionMethod::BIT_40 | EncryptionMethod::BIT_56 => 8,
++        EncryptionMethod::BIT_128 => 16,
++        _ => return Err(format!("unsupported Standard RDP encryption method: {method:?}")),
++    };
++
++    let mut pre_master_secret = [0u8; 48];
++    pre_master_secret[..24].copy_from_slice(&client_random[..24]);
++    pre_master_secret[24..].copy_from_slice(&server_random[..24]);
++
++    let mut master_secret = [0u8; 48];
++    master_secret[0..16].copy_from_slice(&salted_hash(&pre_master_secret, b"A", client_random, server_random));
++    master_secret[16..32].copy_from_slice(&salted_hash(&pre_master_secret, b"BB", client_random, server_random));
++    master_secret[32..48].copy_from_slice(&salted_hash(&pre_master_secret, b"CCC", client_random, server_random));
++
++    let mut session_key_blob = [0u8; 48];
++    session_key_blob[0..16].copy_from_slice(&salted_hash(&master_secret, b"X", client_random, server_random));
++    session_key_blob[16..32].copy_from_slice(&salted_hash(&master_secret, b"YY", client_random, server_random));
++    session_key_blob[32..48].copy_from_slice(&salted_hash(&master_secret, b"ZZZ", client_random, server_random));
++
++    let mut mac_key = [0u8; 16];
++    mac_key.copy_from_slice(&session_key_blob[0..16]);
++
++    let mut s2c_key = final_hash(&session_key_blob[16..32], client_random, server_random);
++    let mut c2s_key = final_hash(&session_key_blob[32..48], client_random, server_random);
++
++    if method == EncryptionMethod::BIT_40 {
++        mac_key[..3].copy_from_slice(&SALT_40_56);
++        s2c_key[..3].copy_from_slice(&SALT_40_56);
++        c2s_key[..3].copy_from_slice(&SALT_40_56);
++    } else if method == EncryptionMethod::BIT_56 {
++        mac_key[0] = SALT_40_56[0];
++        s2c_key[0] = SALT_40_56[0];
++        c2s_key[0] = SALT_40_56[0];
++    }
++
++    let (enc_key, dec_key) = if is_server {
++        (s2c_key, c2s_key)
++    } else {
++        (c2s_key, s2c_key)
++    };
++
++    Ok((
++        DirectionCipher::Rc4(Rc4DirectionState::new(method, key_len, mac_key, enc_key)),
++        DirectionCipher::Rc4(Rc4DirectionState::new(method, key_len, mac_key, dec_key)),
++    ))
++}
++
++/// Encrypts the 32-byte `client_random` with the RSA public key embedded in
++/// `SC_SECURITY.server_cert` (`SERVER_CERTIFICATE`, proprietary or X.509).
++pub fn encrypt_client_random_with_server_cert(
++    server_cert_bytes: &[u8],
++    client_random: &[u8; 32],
++) -> Result<Vec<u8>, String> {
++    let cert = decode::<ServerCertificate>(server_cert_bytes)
++        .map_err(|err| format!("failed to decode Standard RDP server certificate: {err}"))?;
++
++    match &cert.certificate {
++        CertificateType::Proprietary(prop) => encrypt_with_modulus_exponent(
++            client_random,
++            &prop.public_key.modulus,
++            prop.public_key.public_exponent,
++        )
++        .map_err(|err| format!("failed to RSA-encrypt client random with proprietary cert: {err}")),
++        CertificateType::X509(_) => {
++            let public_key_der = cert
++                .get_public_key()
++                .map_err(|err| format!("failed to extract X.509 public key: {err:?}"))?;
++            encrypt_with_public_key(client_random, &public_key_der)
++                .map_err(|err| format!("failed to RSA-encrypt client random with X.509 cert: {err}"))
++        }
++    }
++}
++
++impl StandardRdpSecurity {
++    /// Initializes client-side Standard RDP Security from the server's `SC_SECURITY`
++    /// block and a freshly generated 32-byte `client_random`, returning both the
++    /// active security context and the `SecurityExchangePdu` to transmit.
++    pub fn new_client(
++        server_security: &ServerSecurityData,
++        client_random: [u8; 32],
++        message_channel_id: Option<u16>,
++    ) -> Result<(Self, SecurityExchangePdu), String> {
++        if server_security.encryption_level == EncryptionLevel::None || server_security.encryption_method.is_empty() {
++            return Err(String::from(
++                "cannot initialize Standard RDP encryption for ENCRYPTION_LEVEL_NONE",
++            ));
++        }
++
++        let server_random = server_security
++            .server_random
++            .as_ref()
++            .ok_or_else(|| String::from("SC_SECURITY missing 32-byte server random"))?;
++        if server_security.server_cert.is_empty() {
++            return Err(String::from("SC_SECURITY missing server certificate"));
++        }
++
++        let encrypted_client_random =
++            encrypt_client_random_with_server_cert(&server_security.server_cert, &client_random)?;
++
++        let (encrypt_cipher, decrypt_cipher) = derive_direction_ciphers(
++            server_security.encryption_method,
++            &client_random,
++            server_random,
++            false,
++        )?;
++
++        let info = StandardRdpSecurityInfo {
++            encryption_method: server_security.encryption_method,
++            encryption_level: server_security.encryption_level,
++        };
++        let encrypt_client_license = Arc::new(AtomicBool::new(
++            server_security.encryption_method == EncryptionMethod::FIPS,
++        ));
++
++        let security = Self {
++            encryptor: StandardRdpEncryptor {
++                info,
++                cipher: encrypt_cipher,
++                message_channel_id,
++                encrypt_client_license: Arc::clone(&encrypt_client_license),
++                use_salted_checksum: false,
++            },
++            decryptor: StandardRdpDecryptor {
++                info,
++                cipher: decrypt_cipher,
++                encrypt_client_license,
++            },
++        };
++
++        Ok((security, SecurityExchangePdu::new(encrypted_client_random)))
++    }
++
++    pub fn info(&self) -> StandardRdpSecurityInfo {
++        self.encryptor.info
++    }
++
++    pub fn encrypt_frame(&mut self, plain_frame: &[u8]) -> Result<Vec<u8>, String> {
++        self.encryptor.encrypt_frame(plain_frame)
++    }
++
++    pub fn encrypt_frames(&mut self, plain_frames: &[u8]) -> Result<Vec<u8>, String> {
++        self.encryptor.encrypt_frames(plain_frames)
++    }
++
++    pub fn decrypt_frame(&mut self, wire_frame: &[u8]) -> Result<Vec<u8>, String> {
++        self.decryptor.decrypt_frame(wire_frame)
++    }
++
++    /// Splits into independent outbound encryptor and inbound decryptor halves.
++    pub fn split(self) -> (StandardRdpEncryptor, StandardRdpDecryptor) {
++        (self.encryptor, self.decryptor)
++    }
++
++    #[cfg(test)]
++    pub(crate) fn new_pair_for_test(
++        method: EncryptionMethod,
++        level: EncryptionLevel,
++        client_random: [u8; 32],
++        server_random: [u8; 32],
++        message_channel_id: Option<u16>,
++    ) -> (Self, Self) {
++        let (c_enc, c_dec) = derive_direction_ciphers(method, &client_random, &server_random, false).unwrap();
++        let (s_enc, s_dec) = derive_direction_ciphers(method, &client_random, &server_random, true).unwrap();
++        let info = StandardRdpSecurityInfo {
++            encryption_method: method,
++            encryption_level: level,
++        };
++        let c_lic = Arc::new(AtomicBool::new(method == EncryptionMethod::FIPS));
++        let s_lic = Arc::new(AtomicBool::new(method == EncryptionMethod::FIPS));
++        let client = Self {
++            encryptor: StandardRdpEncryptor {
++                info,
++                cipher: c_enc,
++                message_channel_id,
++                encrypt_client_license: Arc::clone(&c_lic),
++                use_salted_checksum: false,
++            },
++            decryptor: StandardRdpDecryptor {
++                info,
++                cipher: c_dec,
++                encrypt_client_license: c_lic,
++            },
++        };
++        let server = Self {
++            encryptor: StandardRdpEncryptor {
++                info,
++                cipher: s_enc,
++                message_channel_id,
++                encrypt_client_license: Arc::clone(&s_lic),
++                use_salted_checksum: false,
++            },
++            decryptor: StandardRdpDecryptor {
++                info,
++                cipher: s_dec,
++                encrypt_client_license: s_lic,
++            },
++        };
++        (client, server)
++    }
++}
++
++/// Checks if a plaintext client `SendDataRequest.user_data` already begins with
++/// a `BasicSecurityHeader` (`INFO_PKT`, `LICENSE_PKT`, or message-channel PDU).
++fn detect_existing_client_security_header(
++    user_data: &[u8],
++    channel_id: u16,
++    message_channel_id: Option<u16>,
++) -> Option<BasicSecurityHeaderFlags> {
++    if user_data.len() < BASIC_SECURITY_HEADER_SIZE {
++        return None;
++    }
++    // IronRDP always encodes `flagsHi = 0` in BasicSecurityHeader, whereas
++    // ShareControlHeader always has non-zero pduType (version 0x10) at bytes [2..4].
++    if user_data[2] != 0 || user_data[3] != 0 {
++        return None;
++    }
++    let raw_flags = u16::from_le_bytes([user_data[0], user_data[1]]);
++    let flags = BasicSecurityHeaderFlags::from_bits_truncate(raw_flags);
++    if Some(channel_id) == message_channel_id {
++        if flags.intersects(
++            BasicSecurityHeaderFlags::AUTODETECT_REQ
++                | BasicSecurityHeaderFlags::AUTODETECT_RSP
++                | BasicSecurityHeaderFlags::HEARTBEAT
++                | BasicSecurityHeaderFlags::TRANSPORT_REQ
++                | BasicSecurityHeaderFlags::TRANSPORT_RSP,
++        ) {
++            return Some(flags);
++        }
++        return None;
++    }
++    if flags == BasicSecurityHeaderFlags::INFO_PKT
++        || flags == BasicSecurityHeaderFlags::LICENSE_PKT
++        || flags == BasicSecurityHeaderFlags::TRANSPORT_RSP
++    {
++        return Some(flags);
++    }
++    None
++}
++
++fn next_frame_len(buf: &[u8]) -> Result<usize, String> {
++    if buf.is_empty() {
++        return Ok(0);
++    }
++    if buf[0] == 0x03 {
++        if buf.len() < 4 {
++            return Err(String::from("truncated TPKT header"));
++        }
++        let len = usize::from(u16::from_be_bytes([buf[2], buf[3]]));
++        if len < 4 || len > buf.len() {
++            return Err(format!("invalid TPKT frame length {len} (buffer len {})", buf.len()));
++        }
++        Ok(len)
++    } else if (buf[0] & 0x03) == 0x00 {
++        if buf.len() < 2 {
++            return Err(String::from("truncated Fast-Path header"));
++        }
++        let mut cursor = ReadCursor::new(&buf[1..]);
++        let (len, _sz) = per::read_length(&mut cursor).map_err(|e| format!("invalid Fast-Path PER length: {e}"))?;
++        let len = usize::from(len);
++        if len < 2 || len > buf.len() {
++            return Err(format!("invalid Fast-Path frame length {len} (buffer len {})", buf.len()));
++        }
++        Ok(len)
++    } else {
++        Err(format!("unrecognized RDP frame leading byte 0x{:02x}", buf[0]))
++    }
++}
++
++fn encrypt_payload(
++    cipher: &mut DirectionCipher,
++    plaintext: &[u8],
++    salted: bool,
++    out: &mut Vec<u8>,
++) -> bool {
++    match cipher {
++        DirectionCipher::Rc4(rc4) => {
++            let (mac, ct) = rc4.encrypt(plaintext, salted);
++            out.extend_from_slice(&mac);
++            out.extend_from_slice(&ct);
++            salted
++        }
++        DirectionCipher::Fips(fips) => {
++            let (pad_len, mac, ct) = fips.encrypt(plaintext);
++            out.extend_from_slice(&FIPS_HEADER_LENGTH.to_le_bytes());
++            out.push(FIPS_VERSION_1);
++            out.push(pad_len);
++            out.extend_from_slice(&mac);
++            out.extend_from_slice(&ct);
++            false
++        }
++    }
++}
++
++fn decrypt_payload(
++    cipher: &mut DirectionCipher,
++    encrypted: &[u8],
++    salted: bool,
++) -> Result<Vec<u8>, String> {
++    match cipher {
++        DirectionCipher::Rc4(rc4) => {
++            if encrypted.len() < MAC_SIGNATURE_LEN {
++                return Err(String::from("Standard RDP RC4 payload shorter than 8-byte MAC"));
++            }
++            let mut mac = [0u8; 8];
++            mac.copy_from_slice(&encrypted[..MAC_SIGNATURE_LEN]);
++            rc4.decrypt(&encrypted[MAC_SIGNATURE_LEN..], &mac, salted)
++        }
++        DirectionCipher::Fips(fips) => {
++            if encrypted.len() < FIPS_INFO_LEN + MAC_SIGNATURE_LEN {
++                return Err(String::from("Standard RDP FIPS payload shorter than 12-byte FIPS header"));
++            }
++            let hdr_len = u16::from_le_bytes([encrypted[0], encrypted[1]]);
++            let version = encrypted[2];
++            let pad_len = encrypted[3];
++            if hdr_len != FIPS_HEADER_LENGTH || version != FIPS_VERSION_1 {
++                return Err(format!(
++                    "unexpected Standard RDP FIPS header (len=0x{hdr_len:04x}, version={version})"
++                ));
++            }
++            let mut mac = [0u8; 8];
++            mac.copy_from_slice(&encrypted[FIPS_INFO_LEN..FIPS_INFO_LEN + MAC_SIGNATURE_LEN]);
++            fips.decrypt(&encrypted[FIPS_INFO_LEN + MAC_SIGNATURE_LEN..], pad_len, &mac)
++        }
++    }
++}
++
++fn write_per_len_vec(dst: &mut Vec<u8>, len: usize) -> Result<(), String> {
++    let len_u16 = u16::try_from(len).map_err(|_| format!("Fast-Path length overflow: {len}"))?;
++    if len_u16 <= 0x7F {
++        dst.push(u8::try_from(len_u16).unwrap_or(0));
++    } else {
++        dst.push(u8::try_from((len_u16 >> 8) | 0x80).unwrap_or(0));
++        dst.push(u8::try_from(len_u16 & 0xFF).unwrap_or(0));
++    }
++    Ok(())
++}
++
++impl StandardRdpEncryptor {
++    pub fn info(&self) -> StandardRdpSecurityInfo {
++        self.info
++    }
++
++    pub fn set_use_salted_checksum(&mut self, enabled: bool) {
++        self.use_salted_checksum = enabled && !self.cipher.is_fips();
++    }
++
++    /// Encrypts a buffer containing one or more concatenated plaintext RDP frames
++    /// (TPKT Slow-Path or Fast-Path Input).
++    pub fn encrypt_frames(&mut self, plain_frames: &[u8]) -> Result<Vec<u8>, String> {
++        let mut out = Vec::with_capacity(plain_frames.len() + 32);
++        let mut offset = 0usize;
++        while offset < plain_frames.len() {
++            let frame_len = next_frame_len(&plain_frames[offset..])?;
++            let encrypted = self.encrypt_frame(&plain_frames[offset..offset + frame_len])?;
++            out.extend_from_slice(&encrypted);
++            offset += frame_len;
++        }
++        Ok(out)
++    }
++
++    /// Encrypts a single outbound plaintext RDP frame (TPKT or Fast-Path Input).
++    pub fn encrypt_frame(&mut self, plain_frame: &[u8]) -> Result<Vec<u8>, String> {
++        if plain_frame.is_empty() {
++            return Ok(Vec::new());
++        }
++
++        if plain_frame[0] == 0x03 {
++            let x224 = decode::<X224<McsMessage<'_>>>(plain_frame)
++                .map_err(|err| format!("failed to decode outbound MCS frame for encryption: {err}"))?
++                .0;
++            match x224 {
++                McsMessage::SendDataRequest(req) => {
++                    let user_data = req.user_data.as_ref();
++                    let existing_flags = detect_existing_client_security_header(
++                        user_data,
++                        req.channel_id,
++                        self.message_channel_id,
++                    );
++
++                    // Per [MS-RDPBCGR] 5.3.2, client licensing PDUs stay unencrypted
++                    // unless the server requested SEC_LICENSE_ENCRYPT_CS or FIPS is active.
++                    if existing_flags == Some(BasicSecurityHeaderFlags::LICENSE_PKT)
++                        && !self.cipher.is_fips()
++                        && !self.encrypt_client_license.load(Ordering::Acquire)
++                    {
++                        return Ok(plain_frame.to_vec());
++                    }
++
++                    let (mut flags, plaintext) = match existing_flags {
++                        Some(f) => (f, &user_data[BASIC_SECURITY_HEADER_SIZE..]),
++                        None => (BasicSecurityHeaderFlags::empty(), user_data),
++                    };
++
++                    flags.insert(BasicSecurityHeaderFlags::ENCRYPT);
++                    let salted = self.use_salted_checksum && !self.cipher.is_fips();
++                    if salted {
++                        flags.insert(BasicSecurityHeaderFlags::SECURE_CHECKSUM);
++                    }
++
++                    let mut encrypted_user_data = Vec::with_capacity(BASIC_SECURITY_HEADER_SIZE + 20 + plaintext.len());
++                    encrypted_user_data.extend_from_slice(&flags.bits().to_le_bytes());
++                    encrypted_user_data.extend_from_slice(&0u16.to_le_bytes());
++                    encrypt_payload(&mut self.cipher, plaintext, salted, &mut encrypted_user_data);
++
++                    let wrapped = McsMessage::SendDataRequest(SendDataRequest {
++                        initiator_id: req.initiator_id,
++                        channel_id: req.channel_id,
++                        user_data: Cow::Owned(encrypted_user_data),
++                    });
++                    encode_vec(&X224(wrapped))
++                        .map_err(|err| format!("failed to re-encode encrypted SendDataRequest: {err}"))
++                }
++                _ => Ok(plain_frame.to_vec()),
++            }
++        } else if (plain_frame[0] & 0x03) == 0x00 {
++            self.encrypt_fast_path_input(plain_frame)
++        } else {
++            Err(format!(
++                "unrecognized outbound RDP frame byte 0x{:02x}",
++                plain_frame[0]
++            ))
++        }
++    }
++
++    fn encrypt_fast_path_input(&mut self, plain_frame: &[u8]) -> Result<Vec<u8>, String> {
++        let mut cursor = ReadCursor::new(plain_frame);
++        let first_byte = cursor.read_u8();
++        let num_events_inline = first_byte.get_bits(2..6);
++        let (total_len, _len_size) =
++            per::read_length(&mut cursor).map_err(|e| format!("invalid Fast-Path input length: {e}"))?;
++        if usize::from(total_len) > plain_frame.len() {
++            return Err(String::from("truncated Fast-Path input frame"));
++        }
++        let extra_num_events = if num_events_inline == 0 {
++            if cursor.is_empty() {
++                return Err(String::from("Fast-Path input missing numEvents byte"));
++            }
++            Some(cursor.read_u8())
++        } else {
++            None
++        };
++        let header_consumed = plain_frame.len() - cursor.len();
++        let plaintext = &plain_frame[header_consumed..usize::from(total_len)];
++
++        let salted = self.use_salted_checksum && !self.cipher.is_fips();
++        let mut body = Vec::with_capacity(plaintext.len() + 20);
++        if let Some(n) = extra_num_events {
++            body.push(n);
++        }
++        encrypt_payload(&mut self.cipher, plaintext, salted, &mut body);
++
++        let mut enc_flags = EncryptionFlags::ENCRYPTED;
++        if salted {
++            enc_flags.insert(EncryptionFlags::SECURE_CHECKSUM);
++        }
++        let mut new_first_byte = 0u8;
++        new_first_byte.set_bits(0..2, 0);
++        new_first_byte.set_bits(2..6, num_events_inline);
++        new_first_byte.set_bits(6..8, enc_flags.bits());
++
++        let tentative = 1 + 1 + body.len();
++        let new_total_len = if tentative <= 0x7F { tentative } else { 1 + 2 + body.len() };
++
++        let mut out = Vec::with_capacity(new_total_len);
++        out.push(new_first_byte);
++        write_per_len_vec(&mut out, new_total_len)?;
++        out.extend_from_slice(&body);
++        Ok(out)
++    }
++
++    /// Server-side slow-path & fast-path encryption helper used in round-trip tests.
++    #[cfg(test)]
++    pub(crate) fn encrypt_server_frame_for_test(
++        &mut self,
++        plain_frame: &[u8],
++        extra_flags: BasicSecurityHeaderFlags,
++        flags_hi: u16,
++    ) -> Result<Vec<u8>, String> {
++        if self.info.encryption_level == EncryptionLevel::Low {
++            return Ok(plain_frame.to_vec());
++        }
++        if plain_frame[0] == 0x03 {
++            let x224 = decode::<X224<McsMessage<'_>>>(plain_frame).unwrap().0;
++            let McsMessage::SendDataIndication(ind) = x224 else {
++                return Ok(plain_frame.to_vec());
++            };
++            let user_data = ind.user_data.as_ref();
++            let (base_flags, plaintext) = if !extra_flags.is_empty() && user_data.len() >= BASIC_SECURITY_HEADER_SIZE {
++                let hdr = decode::<BasicSecurityHeader>(&user_data[..BASIC_SECURITY_HEADER_SIZE]).unwrap();
++                (hdr.flags | extra_flags, &user_data[BASIC_SECURITY_HEADER_SIZE..])
++            } else {
++                (BasicSecurityHeaderFlags::empty(), user_data)
++            };
++            let mut flags = base_flags | BasicSecurityHeaderFlags::ENCRYPT;
++            let salted = self.use_salted_checksum && !self.cipher.is_fips();
++            if salted {
++                flags.insert(BasicSecurityHeaderFlags::SECURE_CHECKSUM);
++            }
++            let mut enc_user_data = Vec::new();
++            enc_user_data.extend_from_slice(&flags.bits().to_le_bytes());
++            enc_user_data.extend_from_slice(&flags_hi.to_le_bytes());
++            encrypt_payload(&mut self.cipher, plaintext, salted, &mut enc_user_data);
++            let wrapped = McsMessage::SendDataIndication(SendDataIndication {
++                initiator_id: ind.initiator_id,
++                channel_id: ind.channel_id,
++                user_data: Cow::Owned(enc_user_data),
++            });
++            encode_vec(&X224(wrapped)).map_err(|e| format!("{e}"))
++        } else {
++            let mut cursor = ReadCursor::new(plain_frame);
++            let header = FastPathHeader::decode(&mut cursor).map_err(|e| format!("{e}"))?;
++            let plaintext = cursor.read_slice(header.data_length);
++            let salted = self.use_salted_checksum && !self.cipher.is_fips();
++            let mut body = Vec::new();
++            encrypt_payload(&mut self.cipher, plaintext, salted, &mut body);
++            let mut flags = EncryptionFlags::ENCRYPTED;
++            if salted {
++                flags.insert(EncryptionFlags::SECURE_CHECKSUM);
++            }
++            let new_hdr = FastPathHeader::new(flags, body.len());
++            let mut out = encode_vec(&new_hdr).map_err(|e| format!("{e}"))?;
++            out.extend_from_slice(&body);
++            Ok(out)
++        }
++    }
++}
++
++impl StandardRdpDecryptor {
++    pub fn info(&self) -> StandardRdpSecurityInfo {
++        self.info
++    }
++
++    /// Decrypts a single inbound wire RDP frame (TPKT Slow-Path or Fast-Path Output).
++    pub fn decrypt_frame(&mut self, wire_frame: &[u8]) -> Result<Vec<u8>, String> {
++        if wire_frame.is_empty() {
++            return Ok(Vec::new());
++        }
++
++        // Under ENCRYPTION_LEVEL_LOW only client -> server traffic is encrypted.
++        if self.info.encryption_level == EncryptionLevel::Low {
++            return Ok(wire_frame.to_vec());
++        }
++
++        if wire_frame[0] == 0x03 {
++            let x224 = decode::<X224<McsMessage<'_>>>(wire_frame)
++                .map_err(|err| format!("failed to decode inbound MCS frame for decryption: {err}"))?
++                .0;
++            match x224 {
++                McsMessage::SendDataIndication(ind) => {
++                    let user_data = ind.user_data.as_ref();
++                    if user_data.len() < BASIC_SECURITY_HEADER_SIZE {
++                        return Err(String::from("inbound Standard RDP SendDataIndication missing security header"));
++                    }
++                    // Ignore flagsHi (Windows 2003 R2 populates non-zero bytes such as 0x0302).
++                    let raw_flags = u16::from_le_bytes([user_data[0], user_data[1]]);
++                    let flags = BasicSecurityHeaderFlags::from_bits_truncate(raw_flags);
++
++                    if flags.contains(BasicSecurityHeaderFlags::LICENSE_ENCRYPT_CS) {
++                        self.encrypt_client_license.store(true, Ordering::Release);
++                    }
++
++                    if !flags.contains(BasicSecurityHeaderFlags::ENCRYPT) {
++                        return Ok(wire_frame.to_vec());
++                    }
++
++                    let salted = flags.contains(BasicSecurityHeaderFlags::SECURE_CHECKSUM);
++                    let plaintext = decrypt_payload(&mut self.cipher, &user_data[BASIC_SECURITY_HEADER_SIZE..], salted)?;
++
++                    let preserved = flags.intersection(PRESERVED_SECURITY_HEADER_FLAGS);
++                    let plain_user_data = if !preserved.is_empty() {
++                        let mut buf = Vec::with_capacity(BASIC_SECURITY_HEADER_SIZE + plaintext.len());
++                        buf.extend_from_slice(&preserved.bits().to_le_bytes());
++                        buf.extend_from_slice(&0u16.to_le_bytes());
++                        buf.extend_from_slice(&plaintext);
++                        buf
++                    } else {
++                        plaintext
++                    };
++
++                    let unwrapped = McsMessage::SendDataIndication(SendDataIndication {
++                        initiator_id: ind.initiator_id,
++                        channel_id: ind.channel_id,
++                        user_data: Cow::Owned(plain_user_data),
++                    });
++                    encode_vec(&X224(unwrapped))
++                        .map_err(|err| format!("failed to re-encode decrypted SendDataIndication: {err}"))
++                }
++                _ => Ok(wire_frame.to_vec()),
++            }
++        } else if (wire_frame[0] & 0x03) == 0x00 {
++            self.decrypt_fast_path_output(wire_frame)
++        } else {
++            Err(format!("unrecognized inbound RDP frame byte 0x{:02x}", wire_frame[0]))
++        }
++    }
++
++    fn decrypt_fast_path_output(&mut self, wire_frame: &[u8]) -> Result<Vec<u8>, String> {
++        let mut cursor = ReadCursor::new(wire_frame);
++        let header = FastPathHeader::decode(&mut cursor)
++            .map_err(|err| format!("failed to decode inbound Fast-Path header: {err}"))?;
++        if !header.flags.contains(EncryptionFlags::ENCRYPTED) {
++            return Ok(wire_frame.to_vec());
++        }
++        if cursor.len() < header.data_length {
++            return Err(String::from("truncated encrypted Fast-Path output frame"));
++        }
++        let encrypted = cursor.read_slice(header.data_length);
++        let salted = header.flags.contains(EncryptionFlags::SECURE_CHECKSUM);
++        let plaintext = decrypt_payload(&mut self.cipher, encrypted, salted)?;
++        let plain_header = FastPathHeader::new(EncryptionFlags::empty(), plaintext.len());
++        let mut out = encode_vec(&plain_header)
++            .map_err(|err| format!("failed to re-encode decrypted Fast-Path header: {err}"))?;
++        out.extend_from_slice(&plaintext);
++        Ok(out)
++    }
++
++    /// Server-side decrypt helper used in unit tests to verify client -> server frames.
++    #[cfg(test)]
++    pub(crate) fn decrypt_client_frame_for_test(&mut self, wire_frame: &[u8]) -> Result<Vec<u8>, String> {
++        if wire_frame[0] == 0x03 {
++            let x224 = decode::<X224<McsMessage<'_>>>(wire_frame).map_err(|e| format!("{e}"))?.0;
++            let McsMessage::SendDataRequest(req) = x224 else {
++                return Ok(wire_frame.to_vec());
++            };
++            let user_data = req.user_data.as_ref();
++            let raw_flags = u16::from_le_bytes([user_data[0], user_data[1]]);
++            let flags = BasicSecurityHeaderFlags::from_bits_truncate(raw_flags);
++            if !flags.contains(BasicSecurityHeaderFlags::ENCRYPT) {
++                return Ok(wire_frame.to_vec());
++            }
++            let salted = flags.contains(BasicSecurityHeaderFlags::SECURE_CHECKSUM);
++            let plaintext = decrypt_payload(&mut self.cipher, &user_data[BASIC_SECURITY_HEADER_SIZE..], salted)?;
++            let preserved = flags.intersection(PRESERVED_SECURITY_HEADER_FLAGS);
++            let plain_user_data = if !preserved.is_empty() {
++                let mut buf = Vec::with_capacity(BASIC_SECURITY_HEADER_SIZE + plaintext.len());
++                buf.extend_from_slice(&preserved.bits().to_le_bytes());
++                buf.extend_from_slice(&0u16.to_le_bytes());
++                buf.extend_from_slice(&plaintext);
++                buf
++            } else {
++                plaintext
++            };
++            encode_vec(&X224(McsMessage::SendDataRequest(SendDataRequest {
++                initiator_id: req.initiator_id,
++                channel_id: req.channel_id,
++                user_data: Cow::Owned(plain_user_data),
++            })))
++            .map_err(|e| format!("{e}"))
++        } else {
++            let mut cursor = ReadCursor::new(wire_frame);
++            let first = cursor.read_u8();
++            let flags = EncryptionFlags::from_bits_retain(first.get_bits(6..8));
++            let num_events_inline = first.get_bits(2..6);
++            let (total_len, _) = per::read_length(&mut cursor).map_err(|e| format!("{e}"))?;
++            let extra_num = if num_events_inline == 0 {
++                Some(cursor.read_u8())
++            } else {
++                None
++            };
++            let consumed = wire_frame.len() - cursor.len();
++            let encrypted = &wire_frame[consumed..usize::from(total_len)];
++            let salted = flags.contains(EncryptionFlags::SECURE_CHECKSUM);
++            let plaintext = decrypt_payload(&mut self.cipher, encrypted, salted)?;
++            let mut body = Vec::new();
++            if let Some(n) = extra_num {
++                body.push(n);
++            }
++            body.extend_from_slice(&plaintext);
++            let tentative = 1 + 1 + body.len();
++            let new_len = if tentative <= 0x7F { tentative } else { 1 + 2 + body.len() };
++            let mut out = Vec::with_capacity(new_len);
++            let mut plain_first = 0u8;
++            plain_first.set_bits(2..6, num_events_inline);
++            out.push(plain_first);
++            write_per_len_vec(&mut out, new_len)?;
++            out.extend_from_slice(&body);
++            Ok(out)
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::mcs::ConnectResponse;
++    use crate::x224::X224Data;
++
++    fn make_send_data_request(channel_id: u16, user_data: &[u8]) -> Vec<u8> {
++        encode_vec(&X224(McsMessage::SendDataRequest(SendDataRequest {
++            initiator_id: 1008,
++            channel_id,
++            user_data: Cow::Borrowed(user_data),
++        })))
++        .unwrap()
++    }
++
++    fn make_send_data_indication(channel_id: u16, user_data: &[u8]) -> Vec<u8> {
++        encode_vec(&X224(McsMessage::SendDataIndication(SendDataIndication {
++            initiator_id: 1001,
++            channel_id,
++            user_data: Cow::Borrowed(user_data),
++        })))
++        .unwrap()
++    }
++
++    #[test]
++    fn fips_expand_key_bits_produces_odd_parity_24_bytes() {
++        let input = [
++            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10, 0x11, 0x22,
++            0x33, 0x44, 0x01,
++        ];
++        let expanded = fips_expand_key_bits(&input);
++        for byte in expanded {
++            assert_eq!(byte.count_ones() % 2, 1, "DES key byte 0x{byte:02x} must have odd parity");
++        }
++    }
++
++    #[test]
++    fn real_windows_2003r2_connect_response_parses_and_builds_security_exchange() {
++        // Real Server MCS Connect-Response captured from Windows Server 2003 R2
++        // (GitHub issue #4482, rdp_mstsc.pcapng packet [03], 337 bytes).
++        const WIN2003_CONNECT_RESPONSE_HEX: &str = concat!(
++            "0300015102f0807f668201450a0100020100301a020122020103020100020101020100020101020300fff80201020482011f",
++            "000500147c00012a14760a01010001c0004d63446e8108010c0c000400080000000000030c1000eb030400ec03ed03ee03ef",
++            "03020cec00020000000200000020000000b800000023286d5fcf9e721276aef900cd57357ad5a7994d36c54536c329ae4378",
++            "0b4f6601000000010000000100000006005c005253413148000000000200003f000000010001005534e90f476b234d5136a9",
++            "e51bbcc948e7637149c89e493bfb2779e2f152f0ad6ffba9e852cffd756b2cf1e779ad63e4d9fc7400ca1a9348d72e240fcd",
++            "25a6be00000000000000000800480086bb2e368312a7f431b4590216ea1cc7c650faa0ba6167da818e828a85e7330f679cfc",
++            "99fa9155627628071ef2cf56e5ea7f64e1586a03b85d4463cd6264675f0000000000000000"
++        );
++        let bytes: Vec<u8> = (0..WIN2003_CONNECT_RESPONSE_HEX.len())
++            .step_by(2)
++            .map(|i| u8::from_str_radix(&WIN2003_CONNECT_RESPONSE_HEX[i..i + 2], 16).unwrap())
++            .collect();
++
++        let x224_data = decode::<X224<X224Data<'_>>>(&bytes).unwrap().0;
++        let connect_response = decode::<ConnectResponse>(x224_data.data.as_ref()).unwrap();
++        let sc_security = &connect_response.conference_create_response.gcc_blocks().security;
++
++        assert_eq!(sc_security.encryption_method, EncryptionMethod::BIT_128);
++        assert_eq!(sc_security.encryption_level, EncryptionLevel::ClientCompatible);
++        assert_eq!(sc_security.server_cert.len(), 184);
++
++        let client_random = [0x42u8; 32];
++        let (sec, exchange_pdu) = StandardRdpSecurity::new_client(sc_security, client_random, None).unwrap();
++        assert_eq!(sec.info().encryption_method, EncryptionMethod::BIT_128);
++        assert_eq!(sec.info().encryption_level, EncryptionLevel::ClientCompatible);
++        // 512-bit RSA modulus -> 64 bytes ciphertext + 8 bytes zero padding = 72 bytes (0x48)
++        assert_eq!(exchange_pdu.encrypted_client_random.len(), 72);
++        assert_eq!(&exchange_pdu.encrypted_client_random[64..72], &[0u8; 8]);
++
++        let encoded = encode_vec(&exchange_pdu).unwrap();
++        let decoded = decode::<SecurityExchangePdu>(&encoded).unwrap();
++        assert_eq!(decoded, exchange_pdu);
++    }
++
++    #[test]
++    fn roundtrip_all_methods_slow_path_and_fast_path() {
++        let client_random = [0x11u8; 32];
++        let server_random = [0x22u8; 32];
++
++        for (method, level) in [
++            (EncryptionMethod::BIT_40, EncryptionLevel::ClientCompatible),
++            (EncryptionMethod::BIT_56, EncryptionLevel::ClientCompatible),
++            (EncryptionMethod::BIT_128, EncryptionLevel::ClientCompatible),
++            (EncryptionMethod::BIT_128, EncryptionLevel::High),
++            (EncryptionMethod::FIPS, EncryptionLevel::Fips),
++        ] {
++            let (mut client, mut server) =
++                StandardRdpSecurity::new_pair_for_test(method, level, client_random, server_random, Some(1009));
++
++            // 1. ClientInfoPdu (existing BasicSecurityHeader with INFO_PKT)
++            let mut client_info = vec![0x40, 0x00, 0x00, 0x00];
++            client_info.extend_from_slice(b"client-info-payload-data-1234567890");
++            let plain_ci = make_send_data_request(1003, &client_info);
++            let enc_ci = client.encrypt_frame(&plain_ci).unwrap();
++            let dec_ci = server.decryptor.decrypt_client_frame_for_test(&enc_ci).unwrap();
++            assert_eq!(dec_ci, plain_ci, "ClientInfo roundtrip failed for {method:?}");
++
++            // 2. Server encrypted LicensePdu with LICENSE_ENCRYPT_CS + LICENSE_ENCRYPT_SC
++            let mut server_lic = vec![0x80, 0x00, 0x00, 0x00];
++            server_lic.extend_from_slice(b"license-error-valid-client");
++            let plain_slic = make_send_data_indication(1003, &server_lic);
++            let enc_slic = server
++                .encryptor
++                .encrypt_server_frame_for_test(
++                    &plain_slic,
++                    BasicSecurityHeaderFlags::LICENSE_PKT
++                        | BasicSecurityHeaderFlags::LICENSE_ENCRYPT_CS
++                        | BasicSecurityHeaderFlags::LICENSE_ENCRYPT_SC,
++                    0x0000,
++                )
++                .unwrap();
++            let dec_slic = client.decrypt_frame(&enc_slic).unwrap();
++            assert_eq!(dec_slic, plain_slic, "Server License roundtrip failed for {method:?}");
++
++            // 3. Server ShareControl PDU with non-zero flagsHi (0x0302, like Windows 2003 R2!)
++            let demand_active_payload = b"\x20\x00\x11\x00\xea\x03\x01\x00\x01\x00demand-active-body";
++            let plain_da = make_send_data_indication(1003, demand_active_payload);
++            let enc_da = server
++                .encryptor
++                .encrypt_server_frame_for_test(&plain_da, BasicSecurityHeaderFlags::empty(), 0x0302)
++                .unwrap();
++            let dec_da = client.decrypt_frame(&enc_da).unwrap();
++            assert_eq!(dec_da, plain_da, "DemandActive roundtrip failed for {method:?}");
++
++            // 4. Concatenated multi-TPKT outbound frames (ConnectionFinalization style)
++            let pdu1 = make_send_data_request(1003, b"\x16\x00\x17\x00\xf0\x03sync-pdu");
++            let pdu2 = make_send_data_request(1003, b"\x18\x00\x17\x00\xf0\x03control-pdu");
++            let combined = [pdu1.as_slice(), pdu2.as_slice()].concat();
++            let enc_combined = client.encrypt_frames(&combined).unwrap();
++            let len1 = next_frame_len(&enc_combined).unwrap();
++            let dec1 = server.decryptor.decrypt_client_frame_for_test(&enc_combined[..len1]).unwrap();
++            let dec2 = server.decryptor.decrypt_client_frame_for_test(&enc_combined[len1..]).unwrap();
++            assert_eq!(dec1, pdu1);
++            assert_eq!(dec2, pdu2);
++
++            // 5. Fast-Path Input (both inline numEvents < 16 and extra byte >= 16)
++            let fp_in_small = vec![0x04, 0x07, 0x01, 0x02, 0x03, 0x04, 0x05]; // 1 event
++            let enc_fp_in = client.encrypt_frame(&fp_in_small).unwrap();
++            assert_ne!(enc_fp_in[0] & 0x80, 0);
++            let dec_fp_in = server.decryptor.decrypt_client_frame_for_test(&enc_fp_in).unwrap();
++            assert_eq!(dec_fp_in, fp_in_small, "FastPath input roundtrip failed for {method:?}");
++
++            let mut fp_in_many = vec![0x00, 0x09, 0x10, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]; // 16 events
++            fp_in_many[1] = u8::try_from(fp_in_many.len()).unwrap();
++            let enc_fp_many = client.encrypt_frame(&fp_in_many).unwrap();
++            let dec_fp_many = server.decryptor.decrypt_client_frame_for_test(&enc_fp_many).unwrap();
++            assert_eq!(dec_fp_many, fp_in_many);
++
++            // 6. Fast-Path Output (server -> client)
++            let fp_body = b"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b";
++            let fp_hdr = FastPathHeader::new(EncryptionFlags::empty(), fp_body.len());
++            let mut plain_fp_out = encode_vec(&fp_hdr).unwrap();
++            plain_fp_out.extend_from_slice(fp_body);
++            let enc_fp_out = server
++                .encryptor
++                .encrypt_server_frame_for_test(&plain_fp_out, BasicSecurityHeaderFlags::empty(), 0)
++                .unwrap();
++            let dec_fp_out = client.decrypt_frame(&enc_fp_out).unwrap();
++            assert_eq!(dec_fp_out, plain_fp_out, "FastPath output roundtrip failed for {method:?}");
++        }
++    }
++
++    #[test]
++    fn encryption_level_low_only_encrypts_client_to_server() {
++        let (mut client, mut server) = StandardRdpSecurity::new_pair_for_test(
++            EncryptionMethod::BIT_40,
++            EncryptionLevel::Low,
++            [0x33u8; 32],
++            [0x44u8; 32],
++            None,
++        );
++
++        let plain_c2s = make_send_data_request(1003, b"client-secret-data");
++        let enc_c2s = client.encrypt_frame(&plain_c2s).unwrap();
++        assert_ne!(enc_c2s, plain_c2s);
++        let dec_c2s = server.decryptor.decrypt_client_frame_for_test(&enc_c2s).unwrap();
++        assert_eq!(dec_c2s, plain_c2s);
++
++        let plain_s2c = make_send_data_indication(1003, b"plaintext-server-data");
++        let dec_s2c = client.decrypt_frame(&plain_s2c).unwrap();
++        assert_eq!(dec_s2c, plain_s2c);
++    }
++
++    #[test]
++    fn rc4_key_update_at_4096_packets_and_salted_mac_stay_in_sync() {
++        let (mut client, mut server) = StandardRdpSecurity::new_pair_for_test(
++            EncryptionMethod::BIT_128,
++            EncryptionLevel::ClientCompatible,
++            [0x55u8; 32],
++            [0x66u8; 32],
++            None,
++        );
++        server.encryptor.set_use_salted_checksum(true);
++        client.encryptor.set_use_salted_checksum(true);
++
++        // Drive 4105 packets across the 4096-packet key-update boundary in both directions.
++        for i in 0..4105u32 {
++            let payload = format!("packet-{i:05}");
++            let plain_s2c = make_send_data_indication(1003, payload.as_bytes());
++            let enc_s2c = server
++                .encryptor
++                .encrypt_server_frame_for_test(&plain_s2c, BasicSecurityHeaderFlags::empty(), 0x0302)
++                .unwrap();
++            let dec_s2c = client.decrypt_frame(&enc_s2c).unwrap();
++            assert_eq!(dec_s2c, plain_s2c, "S->C mismatch at packet {i}");
++
++            let plain_c2s = make_send_data_request(1003, payload.as_bytes());
++            let enc_c2s = client.encrypt_frame(&plain_c2s).unwrap();
++            let dec_c2s = server.decryptor.decrypt_client_frame_for_test(&enc_c2s).unwrap();
++            assert_eq!(dec_c2s, plain_c2s, "C->S mismatch at packet {i}");
++        }
++    }
++}
+diff --git a/crates/ironrdp-pdu/src/gcc/conference_create.rs b/crates/ironrdp-pdu/src/gcc/conference_create.rs
+index 063faf4..f9c84f2 100644
+--- a/crates/ironrdp-pdu/src/gcc/conference_create.rs
++++ b/crates/ironrdp-pdu/src/gcc/conference_create.rs
+@@ -45,15 +45,20 @@ impl ConferenceCreateRequest {
+     const NAME: &'static str = "ConferenceCreateRequest";
+ 
+     pub fn new(gcc_blocks: ClientGccBlocks) -> DecodeResult<Self> {
++        let gcc_len = gcc_blocks.size();
++        let user_data_len_size = per::sizeof_length(gcc_len);
+         // Ensure the invariant on gcc_blocks.size() is respected.
+-        check_invariant(gcc_blocks.size() <= usize::from(u16::MAX) - CONFERENCE_REQUEST_CONNECT_PDU_SIZE).ok_or_else(
+-            || {
+-                invalid_field_err!(
+-                    "gcc_blocks",
+-                    "gcc_blocks.size() + CONFERENCE_REQUEST_CONNECT_PDU_SIZE > u16::MAX"
+-                )
+-            },
+-        )?;
++        check_invariant(
++            gcc_len
++                .saturating_add(user_data_len_size)
++                <= usize::from(u16::MAX) - CONFERENCE_REQUEST_CONNECT_PDU_SIZE,
++        )
++        .ok_or_else(|| {
++            invalid_field_err!(
++                "gcc_blocks",
++                "gcc_blocks.size() + CONFERENCE_REQUEST_CONNECT_PDU_SIZE > u16::MAX"
++            )
++        })?;
+ 
+         Ok(Self { gcc_blocks })
+     }
+@@ -72,18 +77,20 @@ impl Encode for ConferenceCreateRequest {
+         ensure_size!(in:dst, size: self.size());
+ 
+         let gcc_blocks_buffer_length = self.gcc_blocks.size();
++        let user_data_length_size = per::sizeof_length(gcc_blocks_buffer_length);
+ 
+         // ConnectData::Key: select type OBJECT_IDENTIFIER
+         per::write_choice(dst, OBJECT_IDENTIFIER_KEY);
+         // ConnectData::Key: value
+         per::write_object_id(dst, CONFERENCE_REQUEST_OBJECT_ID);
+ 
+-        // ConnectData::connectPDU: length
++        // ConnectData::connectPDU: length (covers the 12-byte ConferenceCreateRequest header
++        // plus the PER-encoded userData length field and the GCC blocks themselves).
+         per::write_length(
+             dst,
+             cast_length!(
+                 "gccBlocksLen",
+-                gcc_blocks_buffer_length + CONFERENCE_REQUEST_CONNECT_PDU_SIZE, in: dst)?,
++                gcc_blocks_buffer_length + CONFERENCE_REQUEST_CONNECT_PDU_SIZE + user_data_length_size, in: dst)?,
+         );
+         // ConnectGCCPDU (CHOICE): Select conferenceCreateRequest (0) of type ConferenceCreateRequest
+         per::write_choice(dst, CONNECT_GCC_PDU_CONFERENCE_REQUEST_CHOICE);
+@@ -117,16 +124,17 @@ impl Encode for ConferenceCreateRequest {
+ 
+     fn size(&self) -> usize {
+         let gcc_blocks_buffer_length = self.gcc_blocks.size();
+-        let req_length = u16::try_from(CONFERENCE_REQUEST_CONNECT_PDU_SIZE + gcc_blocks_buffer_length)
+-            .expect("per the invariant on self.gcc_blocks, this cast is infallible");
+-        let length = u16::try_from(gcc_blocks_buffer_length)
+-            .expect("per the invariant on self.gcc_blocks, this cast is infallible");
++        let user_data_length_size = per::sizeof_length(gcc_blocks_buffer_length);
++        let req_length = u16::try_from(
++            CONFERENCE_REQUEST_CONNECT_PDU_SIZE + user_data_length_size + gcc_blocks_buffer_length,
++        )
++        .expect("per the invariant on self.gcc_blocks, this cast is infallible");
+ 
+         per::CHOICE_SIZE
+             + CONFERENCE_REQUEST_OBJECT_ID.len()
+             + per::sizeof_length(usize::from(req_length))
+             + CONFERENCE_REQUEST_CONNECT_PDU_SIZE
+-            + per::sizeof_length(usize::from(length))
++            + user_data_length_size
+             + gcc_blocks_buffer_length
+     }
+ }
+diff --git a/crates/ironrdp-pdu/src/gcc/security_data.rs b/crates/ironrdp-pdu/src/gcc/security_data.rs
+index be95b21..c47444d 100644
+--- a/crates/ironrdp-pdu/src/gcc/security_data.rs
++++ b/crates/ironrdp-pdu/src/gcc/security_data.rs
+@@ -14,7 +14,7 @@ const SERVER_ENCRYPTION_LEVEL_SIZE: usize = 4;
+ const SERVER_RANDOM_LEN_SIZE: usize = 4;
+ const SERVER_CERT_LEN_SIZE: usize = 4;
+ const SERVER_RANDOM_LEN: usize = 0x20;
+-const MAX_SERVER_CERT_LEN: usize = 1024;
++const MAX_SERVER_CERT_LEN: usize = 16384;
+ 
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+diff --git a/crates/ironrdp-pdu/src/lib.rs b/crates/ironrdp-pdu/src/lib.rs
+index b8a50c3..a5de695 100644
+--- a/crates/ironrdp-pdu/src/lib.rs
++++ b/crates/ironrdp-pdu/src/lib.rs
+@@ -26,7 +26,7 @@ pub mod x224;
+ 
+ pub(crate) mod basic_output;
+ pub(crate) mod ber;
+-pub(crate) mod crypto;
++pub mod crypto;
+ pub(crate) mod per;
+ 
+ pub use crate::basic_output::{bitmap, fast_path, pointer, slow_path, surface_commands, window};
+diff --git a/crates/ironrdp-pdu/src/rdp/server_license/server_license_request/cert.rs b/crates/ironrdp-pdu/src/rdp/server_license/server_license_request/cert.rs
+index 3d46a35..4407d3f 100644
+--- a/crates/ironrdp-pdu/src/rdp/server_license/server_license_request/cert.rs
++++ b/crates/ironrdp-pdu/src/rdp/server_license/server_license_request/cert.rs
+@@ -17,7 +17,7 @@ pub const RSA_KEY_PADDING_LENGTH: u32 = 8;
+ pub const RSA_SENTINEL: u32 = 0x3141_5352;
+ pub const RSA_KEY_SIZE_WITHOUT_MODULUS: usize = 20;
+ 
+-const MIN_CERTIFICATE_AMOUNT: usize = 2;
++const MIN_CERTIFICATE_AMOUNT: usize = 1;
+ const MAX_CERTIFICATE_AMOUNT: usize = 200;
+ const MAX_CERTIFICATE_LEN: usize = 4096;
+ 
+diff --git a/crates/ironrdp-testsuite-core/src/conference_create.rs b/crates/ironrdp-testsuite-core/src/conference_create.rs
+index 92ab334..2d78697 100644
+--- a/crates/ironrdp-testsuite-core/src/conference_create.rs
++++ b/crates/ironrdp-testsuite-core/src/conference_create.rs
+@@ -6,7 +6,7 @@ use ironrdp_pdu::gcc::{ConferenceCreateRequest, ConferenceCreateResponse};
+ use crate::gcc;
+ 
+ pub const CONFERENCE_CREATE_REQUEST_PREFIX_BUFFER: [u8; 23] = [
+-    0x00, 0x05, 0x00, 0x14, 0x7c, 0x00, 0x01, 0x81, 0x28, 0x00, 0x08, 0x00, 0x10, 0x00, 0x01, 0xc0, 0x00, 0x44, 0x75,
++    0x00, 0x05, 0x00, 0x14, 0x7c, 0x00, 0x01, 0x81, 0x2a, 0x00, 0x08, 0x00, 0x10, 0x00, 0x01, 0xc0, 0x00, 0x44, 0x75,
+     0x63, 0x61, 0x81, 0x1c,
+ ];
+ 
+diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
+index ba81260..986b40a 100644
+--- a/crates/ironrdp-web/src/session.rs
++++ b/crates/ironrdp-web/src/session.rs
+@@ -33,13 +33,18 @@ use ironrdp::cliprdr::backend::ClipboardMessage;
+ use ironrdp::cliprdr::pdu::{FileContentsFlags, FileContentsRequest, FileContentsResponse, FileDescriptor};
+ use ironrdp::connector::connection_activation::ConnectionActivationState;
+ use ironrdp::connector::credssp::{KdcResolution, KerberosConfig};
+-use ironrdp::connector::{self, ClientConnector, Credentials};
++use ironrdp::connector::{self, ClientConnector, Credentials, Sequence as _};
+ use ironrdp::displaycontrol::client::DisplayControlClient;
+ use ironrdp::displaycontrol::pdu::{
+     DeviceScaleFactor, DisplayControlCapabilities, DisplayControlMonitorLayout, MonitorLayoutEntry, MonitorOrientation,
+ };
+ use ironrdp::dvc::DrdynvcClient;
+ use ironrdp::graphics::image_processing::PixelFormat;
++use ironrdp::pdu::Action;
++use ironrdp::pdu::crypto::standard_rdp::{
++    StandardRdpDecryptor, StandardRdpEncryptor, StandardRdpSecurity, StandardRdpSecurityInfo,
++};
++use ironrdp::pdu::gcc::{EncryptionLevel, EncryptionMethod};
+ use ironrdp::pdu::geometry::InclusiveRectangle;
+ use ironrdp::pdu::input::fast_path::FastPathInputEvent;
+ use ironrdp::pdu::rdp::capability_sets::{BitmapCodecs, client_codecs_capabilities};
+@@ -123,6 +128,7 @@ struct SessionBuilderInner {
+     camera_h264: bool,
+     enable_credssp: bool,
+     enable_standard_rdp_security: bool,
++    security_info_callback: Option<js_sys::Function>,
+     enable_server_pointer: bool,
+     legacy_graphics: bool,
+     outbound_message_size_limit: Option<usize>,
+@@ -187,6 +193,7 @@ impl Default for SessionBuilderInner {
+             camera_h264: false,
+             enable_credssp: true,
+             enable_standard_rdp_security: false,
++            security_info_callback: None,
+             enable_server_pointer: true,
+             legacy_graphics: false,
+             outbound_message_size_limit: None,
+@@ -389,6 +396,9 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             |enable_standard_rdp_security: bool| {
+                 self.0.borrow_mut().enable_standard_rdp_security = enable_standard_rdp_security;
+             };
++            |security_info_callback: JsValue| {
++                self.0.borrow_mut().security_info_callback = security_info_callback.dyn_into::<js_sys::Function>().ok();
++            };
+             |enable_server_pointer: bool| { self.0.borrow_mut().enable_server_pointer = enable_server_pointer };
+             |legacy_graphics: bool| { self.0.borrow_mut().legacy_graphics = legacy_graphics };
+             |outbound_message_size_limit: f64| {
+@@ -805,7 +815,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             })
+             .transpose()?;
+ 
+-        let (connection_result, ws) = connect(ConnectParams {
++        let (mut connection_result, ws) = connect(ConnectParams {
+             ws,
+             config,
+             proxy_auth_token: auth_token,
+@@ -835,11 +845,30 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+ 
+         info!("Connected!");
+ 
++        let standard_rdp_info = connection_result
++            .standard_rdp_security
++            .as_ref()
++            .map(StandardRdpSecurity::info);
++        if let Some(callback) = self.0.borrow().security_info_callback.clone() {
++            report_security_info(&callback, security.enable_standard_rdp_security, standard_rdp_info);
++        }
++
++        let (standard_rdp_encryptor, standard_rdp_decryptor) = connection_result
++            .standard_rdp_security
++            .take()
++            .map(StandardRdpSecurity::split)
++            .unzip();
++
+         let (rdp_reader, rdp_writer) = futures_util::AsyncReadExt::split(ws);
+ 
+         let (writer_tx, writer_rx) = mpsc::unbounded();
+ 
+-        spawn_local(writer_task(writer_rx, rdp_writer, outbound_message_size_limit));
++        spawn_local(writer_task(
++            writer_rx,
++            rdp_writer,
++            outbound_message_size_limit,
++            standard_rdp_encryptor,
++        ));
+ 
+         Ok(Session {
+             desktop_size: connection_result.desktop_size,
+@@ -860,6 +889,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             input_events_rx: RefCell::new(Some(input_events_rx)),
+             rdp_reader: RefCell::new(Some(rdp_reader)),
+             connection_result: RefCell::new(Some(connection_result)),
++            standard_rdp_decryptor: RefCell::new(Some(standard_rdp_decryptor)),
+             clipboard: RefCell::new(Some(clipboard)),
+             printer: RefCell::new(Some(printer)),
+         })
+@@ -1026,6 +1056,7 @@ pub(crate) struct Session {
+     // Consumed when `run` is called
+     input_events_rx: RefCell<Option<mpsc::UnboundedReceiver<RdpInputEvent>>>,
+     connection_result: RefCell<Option<connector::ConnectionResult>>,
++    standard_rdp_decryptor: RefCell<Option<Option<StandardRdpDecryptor>>>,
+     rdp_reader: RefCell<Option<ReadHalf<WebSocket>>>,
+     clipboard: RefCell<Option<Option<WasmClipboard>>>,
+     printer: RefCell<Option<Option<WasmPrinter>>>,
+@@ -1200,6 +1231,12 @@ impl iron_remote_desktop::Session for Session {
+             self.report_monitor_layout(&layout.monitors);
+         }
+ 
++        let mut standard_rdp_decryptor = self
++            .standard_rdp_decryptor
++            .borrow_mut()
++            .take()
++            .expect("run called only once");
++
+         let mut clipboard = self.clipboard.borrow_mut().take().expect("run called only once");
+         let mut wasm_printer = self.printer.borrow_mut().take().expect("run called only once");
+ 
+@@ -1276,7 +1313,17 @@ impl iron_remote_desktop::Session for Session {
+                     let (action, payload) = frame.context("read frame")?;
+                     trace!(?action, frame_length = payload.len(), "Frame received");
+ 
+-                    active_stage.process(&mut image, action, &payload, framed.last_read_at())?
++                    let decrypted_storage;
++                    let payload = if let Some(decryptor) = standard_rdp_decryptor.as_mut() {
++                        decrypted_storage = decryptor
++                            .decrypt_frame(&payload)
++                            .map_err(|err| IronError::from(anyhow::anyhow!("Standard RDP decrypt failed: {err}")))?;
++                        decrypted_storage.as_slice()
++                    } else {
++                        &payload
++                    };
++
++                    active_stage.process(&mut image, action, payload, framed.last_read_at())?
+                 }
+                 input_events = input_events.next() => {
+                     let event = input_events.context("read next input events")?;
+@@ -1736,8 +1783,30 @@ impl iron_remote_desktop::Session for Session {
+                         let mut connection_activation = activation_factory.create();
+                         let mut buf = WriteBuf::new();
+                         'activation_seq: loop {
+-                            let written =
+-                                single_sequence_step_read(&mut framed, &mut connection_activation, &mut buf).await?;
++                            let written = if let Some(decryptor) = standard_rdp_decryptor.as_mut() {
++                                buf.clear();
++                                if connection_activation.next_pdu_hint().is_some() {
++                                    // Read and decrypt every incoming wire frame (including any late
++                                    // pre-activation Fast-Path output frames) so the Standard RDP
++                                    // stream cipher and packet counters stay synchronized across
++                                    // Deactivation-Reactivation.
++                                    let decrypted_x224 = loop {
++                                        let (action, raw_frame) = framed.read_pdu().await.context("read reactivation frame")?;
++                                        let plain = decryptor
++                                            .decrypt_frame(&raw_frame)
++                                            .map_err(|err| IronError::from(anyhow::anyhow!("Standard RDP decrypt failed: {err}")))?;
++                                        if action == Action::X224 {
++                                            break plain;
++                                        }
++                                        debug!("Discarding late Fast-Path frame during Deactivation-Reactivation");
++                                    };
++                                    connection_activation.step(&decrypted_x224, framed.last_read_at(), &mut buf)?
++                                } else {
++                                    connection_activation.step_no_input(&mut buf)?
++                                }
++                            } else {
++                                single_sequence_step_read(&mut framed, &mut connection_activation, &mut buf).await?
++                            };
+ 
+                             if written.size().is_some() {
+                                 self.writer_tx
+@@ -2523,10 +2592,59 @@ fn build_config(
+     }
+ }
+ 
++fn standard_rdp_method_label(method: EncryptionMethod) -> &'static str {
++    if method == EncryptionMethod::BIT_128 {
++        "rc4-128"
++    } else if method == EncryptionMethod::BIT_56 {
++        "rc4-56"
++    } else if method == EncryptionMethod::BIT_40 {
++        "rc4-40"
++    } else if method == EncryptionMethod::FIPS {
++        "fips"
++    } else {
++        "none"
++    }
++}
++
++fn standard_rdp_level_label(level: EncryptionLevel) -> &'static str {
++    match level {
++        EncryptionLevel::None => "none",
++        EncryptionLevel::Low => "low",
++        EncryptionLevel::ClientCompatible => "client-compatible",
++        EncryptionLevel::High => "high",
++        EncryptionLevel::Fips => "fips",
++    }
++}
++
++fn report_security_info(
++    callback: &js_sys::Function,
++    standard_rdp: bool,
++    info: Option<StandardRdpSecurityInfo>,
++) {
++    let obj = js_sys::Object::new();
++    let (encrypted, method, level) = match (standard_rdp, info) {
++        (false, _) => (true, "tls", "enhanced"),
++        (true, Some(sec)) => (
++            sec.encryption_level != EncryptionLevel::None && !sec.encryption_method.is_empty(),
++            standard_rdp_method_label(sec.encryption_method),
++            standard_rdp_level_label(sec.encryption_level),
++        ),
++        (true, None) => (false, "none", "none"),
++    };
++    let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("standardRdp"), &JsValue::from_bool(standard_rdp));
++    let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("encrypted"), &JsValue::from_bool(encrypted));
++    let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("method"), &JsValue::from_str(method));
++    let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("level"), &JsValue::from_str(level));
++    if let Err(error) = callback.call1(&JsValue::NULL, &obj) {
++        warn!(?error, "Security info callback failed");
++    }
++}
++
+ async fn writer_task(
+     rx: mpsc::UnboundedReceiver<Vec<u8>>,
+     rdp_writer: WriteHalf<WebSocket>,
+     outbound_limit: Option<usize>,
++    standard_rdp_encryptor: Option<StandardRdpEncryptor>,
+ ) {
+     debug!("writer task started");
+ 
+@@ -2534,8 +2652,16 @@ async fn writer_task(
+         mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
+         mut rdp_writer: WriteHalf<WebSocket>,
+         outbound_limit: Option<usize>,
++        mut standard_rdp_encryptor: Option<StandardRdpEncryptor>,
+     ) -> anyhow::Result<()> {
+         while let Some(frame) = rx.next().await {
++            let frame = if let Some(encryptor) = standard_rdp_encryptor.as_mut() {
++                encryptor
++                    .encrypt_frames(&frame)
++                    .map_err(|err| anyhow::anyhow!("Standard RDP encrypt failed: {err}"))?
++            } else {
++                frame
++            };
+             match outbound_limit {
+                 Some(max_size) if frame.len() > max_size => {
+                     // Send in chunks.
+@@ -2555,7 +2681,7 @@ async fn writer_task(
+         Ok(())
+     }
+ 
+-    match inner(rx, rdp_writer, outbound_limit).await {
++    match inner(rx, rdp_writer, outbound_limit, standard_rdp_encryptor).await {
+         Ok(()) => debug!("writer task ended gracefully"),
+         Err(e) => error!("writer task ended unexpectedly: {e:#}"),
+     }

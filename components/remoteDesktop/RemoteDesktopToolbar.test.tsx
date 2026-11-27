@@ -205,3 +205,22 @@ test('RemoteDesktopToolbar disables Keyboard Grab while connecting', () => {
   });
   assert.match(connectingHtml, /<button[^>]*disabled=""[^>]*aria-label="Keys: Local"/);
 });
+
+test('RemoteDesktopToolbar renders Standard RDP security badge only when not using TLS', () => {
+  const standardRdpHtml = renderToolbar({
+    protocol: 'rdp',
+    encrypted: false,
+    legacySecurityBadge: 'RC4-128',
+  });
+  assert.match(standardRdpHtml, /RC4-128/);
+  assert.match(standardRdpHtml, /Standard RDP Security \(RC4-128\)/);
+  assert.doesNotMatch(standardRdpHtml, /Encrypted TLS connection/);
+
+  const tlsHtml = renderToolbar({
+    protocol: 'rdp',
+    encrypted: true,
+    legacySecurityBadge: 'RC4-128',
+  });
+  assert.match(tlsHtml, /Encrypted TLS connection/);
+  assert.doesNotMatch(tlsHtml, /Standard RDP Security/);
+});
