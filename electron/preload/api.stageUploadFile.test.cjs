@@ -53,19 +53,40 @@ test("superseding pathless upload staging uses an independent temp file", async 
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-preload-stage-race-"));
   t.after(() => fs.promises.rm(dir, { recursive: true, force: true }));
   const created = [];
-  const deleted = [];
+  const aborted = [];
+  const stages = new Map();
+  let nextStageId = 0;
   const ipcRenderer = {
     on() {},
     removeListener() {},
     async invoke(channel, payload) {
-      if (channel === "netcatty:tempdir:createUploadPath") {
+      if (channel === "netcatty:tempdir:stageUploadOpen") {
+        const stageId = `stage-${++nextStageId}`;
         const localPath = path.join(dir, `${payload.transferId}_${payload.fileName}.part`);
+        const handle = await fs.promises.open(localPath, "wx", 0o600);
+        stages.set(stageId, { handle, localPath, offset: 0 });
         created.push({ payload, localPath });
-        return localPath;
+        return { stageId, localPath };
       }
-      if (channel === "netcatty:deleteTempFile") {
-        deleted.push(payload.filePath);
-        await fs.promises.unlink(payload.filePath).catch(() => {});
+      if (channel === "netcatty:tempdir:stageUploadWrite") {
+        const stage = stages.get(payload.stageId);
+        const buf = Buffer.from(payload.chunk.buffer, payload.chunk.byteOffset, payload.chunk.byteLength);
+        await stage.handle.write(buf, 0, buf.length, stage.offset);
+        stage.offset += buf.length;
+        return { bytesWritten: buf.length };
+      }
+      if (channel === "netcatty:tempdir:stageUploadClose") {
+        const stage = stages.get(payload.stageId);
+        stages.delete(payload.stageId);
+        await stage.handle.close();
+        return { localPath: stage.localPath };
+      }
+      if (channel === "netcatty:tempdir:stageUploadAbort") {
+        const stage = stages.get(payload.stageId);
+        stages.delete(payload.stageId);
+        aborted.push(stage.localPath);
+        await stage.handle.close().catch(() => {});
+        await fs.promises.unlink(stage.localPath).catch(() => {});
         return { success: true };
       }
       throw new Error(`Unexpected IPC call: ${channel}`);
@@ -87,7 +108,7 @@ test("superseding pathless upload staging uses an independent temp file", async 
   assert.equal(secondPath, created[1].localPath);
   assert.deepEqual(await fs.promises.readFile(secondPath), Buffer.from([4, 5, 6]));
   await assert.rejects(fs.promises.stat(created[0].localPath), { code: "ENOENT" });
-  assert.deepEqual(deleted, [created[0].localPath]);
+  assert.deepEqual(aborted, [created[0].localPath]);
 });
 
 test("failed upload path allocation releases the staging controller", async () => {
@@ -97,7 +118,7 @@ test("failed upload path allocation releases the staging controller", async () =
       on() {},
       removeListener() {},
       async invoke(channel) {
-        if (channel === "netcatty:tempdir:createUploadPath") throw new Error("path unavailable");
+        if (channel === "netcatty:tempdir:stageUploadOpen") throw new Error("path unavailable");
         throw new Error(`Unexpected IPC call: ${channel}`);
       },
     },

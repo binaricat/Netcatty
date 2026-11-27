@@ -300,7 +300,7 @@ test("serializeTerminalForHibernate keeps visual capture when context buffer rea
   assert.equal(result.contextScrollbackSnapshot, "");
 });
 
-test("serializeTerminalForHibernate preserves plain text context for normal screen", async () => {
+test("serializeTerminalForHibernate preserves plain text context for normal screen without duplicate scrollback serialization", async () => {
   const capturedRanges: unknown[] = [];
   const term = createFakeTerm("normal", 3, 5);
   const serializeAddon = {
@@ -310,16 +310,60 @@ test("serializeTerminalForHibernate preserves plain text context for normal scre
     },
   };
   const result = await serializeTerminalForHibernate(term as never, serializeAddon as never);
+  assert.equal(result.snapshot, "serialized");
   assert.equal(result.viewportSnapshot, "serialized");
-  assert.equal(result.scrollbackSnapshot, "serialized");
+  assert.equal(result.scrollbackSnapshot, "");
   assert.equal(result.contextScrollbackSnapshot, "screen-0\nscreen-1");
   assert.equal(result.contextViewportSnapshot, "screen-2\nscreen-3\nscreen-4");
   assert.equal(result.contextSnapshot, "screen-0\nscreen-1\nscreen-2\nscreen-3\nscreen-4");
   assert.deepEqual(capturedRanges, [
     { start: 2, end: 4 },
-    { start: 0, end: 1 },
     undefined,
   ]);
+});
+
+test("serializeTerminalForHibernate falls back to scrollback slice when full snapshot is empty", async () => {
+  const capturedRanges: unknown[] = [];
+  const term = createFakeTerm("normal", 3, 5);
+  const serializeAddon = {
+    serialize: (options?: Record<string, unknown>) => {
+      capturedRanges.push(options?.range);
+      return options?.range ? "range-serialized" : "";
+    },
+  };
+  const result = await serializeTerminalForHibernate(term as never, serializeAddon as never);
+  assert.equal(result.snapshot, "");
+  assert.equal(result.viewportSnapshot, "range-serialized");
+  assert.equal(result.scrollbackSnapshot, "range-serialized");
+  assert.deepEqual(capturedRanges, [
+    { start: 2, end: 4 },
+    undefined,
+    { start: 0, end: 1 },
+  ]);
+});
+
+test("serializeTerminalForHibernate compresses large snapshots and resolves them on wake", async () => {
+  const { resolveHibernateWakeHistoryAsync } = await import("./terminalHibernateRuntime.ts");
+  const largeText = Array.from({ length: 200 }, (_, i) => `\x1b[32mINFO\x1b[0m line ${i} hello world`).join("\r\n");
+  const term = createFakeTerm("normal", 3, 200);
+  const serializeAddon = {
+    serialize: (options?: Record<string, unknown>) => (
+      options?.range ? "viewport-only" : largeText
+    ),
+  };
+  const result = await serializeTerminalForHibernate(term as never, serializeAddon as never);
+  assert.ok(result.compressedSnapshot instanceof Uint8Array);
+  assert.ok(result.compressedSnapshot.byteLength > 0);
+  assert.ok(result.compressedSnapshot.byteLength < largeText.length / 4);
+  const restored = await resolveHibernateWakeHistoryAsync({
+    snapshot: "",
+    compressedSnapshot: result.compressedSnapshot,
+    viewportSnapshot: result.viewportSnapshot,
+    scrollbackSnapshot: "",
+    pendingBuffer: "",
+    alternateScreen: false,
+  });
+  assert.equal(restored, largeText);
 });
 
 test("serializeTerminalForHibernate waits for deferred history preparation", async () => {

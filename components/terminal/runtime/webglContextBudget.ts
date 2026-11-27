@@ -23,6 +23,14 @@ export const MAX_ACTIVE_WEBGL_CONTEXTS = 12;
  */
 export const MIN_HIDDEN_MS_BEFORE_WEBGL_RELEASE = 3_000;
 
+/**
+ * Keep at most one most-recently-hidden terminal WebGL context warm so rapid
+ * Ctrl-Tab / back-and-forth switches stay instant while older hidden tabs
+ * release their GPU surfaces and glyph atlases after the idle grace window.
+ */
+export const MAX_HIDDEN_WEBGL_CONTEXTS = 1;
+export const HIDDEN_WEBGL_IDLE_RELEASE_MS = 15_000;
+
 export interface WebglContextBudgetMember {
   /** When the pane was hidden, or null while it is on screen. */
   getHiddenSince(): number | null;
@@ -46,6 +54,9 @@ export interface WebglContextBudget {
 interface WebglContextBudgetOptions {
   maxActiveContexts?: number;
   minHiddenMs?: number;
+  /** Optional cap on retained hidden contexts (oldest released after hiddenIdleReleaseMs). */
+  maxHiddenContexts?: number;
+  hiddenIdleReleaseMs?: number;
   now?: () => number;
   setTimer?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
@@ -56,6 +67,8 @@ export function createWebglContextBudget(
 ): WebglContextBudget {
   const maxActive = options.maxActiveContexts ?? MAX_ACTIVE_WEBGL_CONTEXTS;
   const minHiddenMs = options.minHiddenMs ?? MIN_HIDDEN_MS_BEFORE_WEBGL_RELEASE;
+  const maxHidden = options.maxHiddenContexts ?? Number.POSITIVE_INFINITY;
+  const hiddenIdleMs = options.hiddenIdleReleaseMs ?? HIDDEN_WEBGL_IDLE_RELEASE_MS;
   const now = options.now ?? Date.now;
   const setTimer = options.setTimer
     ?? ((callback: () => void, delayMs: number) => setTimeout(callback, delayMs));
@@ -78,24 +91,49 @@ export function createWebglContextBudget(
   };
 
   const releaseOverflow = () => {
-    if (active.size <= maxActive) return;
     const time = now();
-    const releasable: Array<{ member: WebglContextBudgetMember; hiddenSince: number }> = [];
-    let nextReleasableAt = Number.POSITIVE_INFINITY;
+    const hiddenMembers: Array<{ member: WebglContextBudgetMember; hiddenSince: number }> = [];
     for (const member of active) {
       const hiddenSince = member.getHiddenSince();
-      if (hiddenSince === null) continue;
-      const releasableAt = hiddenSince + minHiddenMs;
-      if (releasableAt <= time) releasable.push({ member, hiddenSince });
-      else nextReleasableAt = Math.min(nextReleasableAt, releasableAt);
+      if (hiddenSince !== null) hiddenMembers.push({ member, hiddenSince });
     }
-    releasable.sort((a, b) => a.hiddenSince - b.hiddenSince);
-    for (const { member } of releasable) {
-      if (active.size <= maxActive) break;
-      active.delete(member);
-      member.release();
+    if (hiddenMembers.length === 0) return;
+    hiddenMembers.sort((a, b) => a.hiddenSince - b.hiddenSince);
+
+    let nextReleasableAt = Number.POSITIVE_INFINITY;
+
+    // 1. Enforce total active cap (uses shorter minHiddenMs grace).
+    if (active.size > maxActive) {
+      for (const entry of hiddenMembers) {
+        if (active.size <= maxActive) break;
+        const releasableAt = entry.hiddenSince + minHiddenMs;
+        if (releasableAt <= time) {
+          active.delete(entry.member);
+          entry.member.release();
+        } else {
+          nextReleasableAt = Math.min(nextReleasableAt, releasableAt);
+        }
+      }
     }
-    if (active.size > maxActive && Number.isFinite(nextReleasableAt)) {
+
+    // 2. Enforce idle hidden cap (keeps newest `maxHidden` MRU hidden tabs warm
+    // and releases older hidden tabs once they stay hidden for `hiddenIdleMs`).
+    if (Number.isFinite(maxHidden)) {
+      const remainingHidden = hiddenMembers.filter((entry) => active.has(entry.member));
+      const excessHidden = remainingHidden.length - maxHidden;
+      for (let i = 0; i < excessHidden; i += 1) {
+        const entry = remainingHidden[i];
+        const releasableAt = entry.hiddenSince + hiddenIdleMs;
+        if (releasableAt <= time) {
+          active.delete(entry.member);
+          entry.member.release();
+        } else {
+          nextReleasableAt = Math.min(nextReleasableAt, releasableAt);
+        }
+      }
+    }
+
+    if (Number.isFinite(nextReleasableAt)) {
       scheduleCheck(nextReleasableAt);
     }
   };
@@ -116,9 +154,16 @@ export function createWebglContextBudget(
       active.delete(member);
     },
     noteHidden(member) {
-      if (!active.has(member) || active.size <= maxActive) return;
+      if (!active.has(member)) return;
       const hiddenSince = member.getHiddenSince();
-      if (hiddenSince !== null) scheduleCheck(hiddenSince + minHiddenMs);
+      if (hiddenSince === null) return;
+      if (active.size > maxActive) {
+        scheduleCheck(hiddenSince + minHiddenMs);
+        return;
+      }
+      if (Number.isFinite(maxHidden)) {
+        releaseOverflow();
+      }
     },
     getActiveCount: () => active.size,
   };
@@ -128,6 +173,11 @@ let sharedBudget: WebglContextBudget | null = null;
 
 /** The budget shared by every terminal in this renderer process. */
 export function getSharedWebglContextBudget(): WebglContextBudget {
-  sharedBudget ??= createWebglContextBudget();
+  sharedBudget ??= createWebglContextBudget({
+    maxActiveContexts: MAX_ACTIVE_WEBGL_CONTEXTS,
+    minHiddenMs: MIN_HIDDEN_MS_BEFORE_WEBGL_RELEASE,
+    maxHiddenContexts: MAX_HIDDEN_WEBGL_CONTEXTS,
+    hiddenIdleReleaseMs: HIDDEN_WEBGL_IDLE_RELEASE_MS,
+  });
   return sharedBudget;
 }

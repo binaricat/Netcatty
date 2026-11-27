@@ -43,7 +43,7 @@ const DEFAULT_SSH_TRANSPORT_IDLE_TTL_MS = 5 * 60_000;
  * Global safety bound for authenticated transports with no active leases.
  * Active transports never count toward this limit and are never evicted.
  */
-const DEFAULT_MAX_IDLE_SSH_TRANSPORTS = 128;
+const DEFAULT_MAX_IDLE_SSH_TRANSPORTS = 24;
 
 /** Storage key mirrored in infrastructure/config/storageKeys.ts (main + renderer). */
 const STORAGE_KEY_SSH_TRANSPORT_IDLE_TTL_MS = "netcatty_ssh_transport_idle_ttl_ms_v1";

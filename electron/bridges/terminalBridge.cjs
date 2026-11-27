@@ -15,13 +15,25 @@ const { ensureNodePtySpawnHelperExecutable } = require("./nodePtySpawnHelperPerm
 const { createTerminalFlowPauseArbiter } = require("./terminalFlowPauseArbiter.cjs");
 const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
 
-ensureNodePtySpawnHelperExecutable();
-
 const terminalFlowPauseArbiter = createTerminalFlowPauseArbiter();
 const trackedFlowPauseSenders = new WeakSet();
 
-const pty = require("node-pty");
-const { SerialPort } = require("serialport");
+let cachedPty = null;
+function getPty() {
+  if (!cachedPty) {
+    ensureNodePtySpawnHelperExecutable();
+    cachedPty = require("node-pty");
+  }
+  return cachedPty;
+}
+
+let cachedSerialPort = null;
+function getSerialPort() {
+  if (!cachedSerialPort) {
+    ({ SerialPort: cachedSerialPort } = require("serialport"));
+  }
+  return cachedSerialPort;
+}
 const { createSerialTransport } = require("./serialNamedPipe.cjs");
 const {
   configureTerminalSessionDataEmitter,
@@ -1133,7 +1145,7 @@ async function startLocalSession(event, payload) {
       ? prepareGitBashDirectoryIntegration(shell, shellArgs, env, discoverShells().find(item => item.id === 'git-bash')?.command) : null);
   let proc;
   try {
-    proc = pty.spawn(shell, directoryIntegration?.args ?? shellArgs, {
+    proc = getPty().spawn(shell, directoryIntegration?.args ?? shellArgs, {
       name: env.TERM || "xterm-256color",
       cols: payload?.cols || 80,
       rows: payload?.rows || 24,
@@ -1336,7 +1348,8 @@ const { createMoshSessionApi } = require("./terminalBridge/moshSession.cjs");
 const moshSessionApi = createMoshSessionApi({
   get sessions() { return sessions; },
   get electronModule() { return electronModule; },
-  os, fs, net, path, pty, iconv, Buffer, StringDecoder, process, console,
+  get pty() { return getPty(); },
+  os, fs, net, path, iconv, Buffer, StringDecoder, process, console,
   setTimeout, clearTimeout, setInterval, clearInterval,
   randomUUID, execFileAsync, ptyProcessTree, sessionLogStreamManager,
   stripAnsi, trackSessionIdlePrompt, createZmodemSentry, moshHandshake, tempDirBridge,
@@ -1372,7 +1385,8 @@ const { createEtSessionApi } = require("./terminalBridge/etSession.cjs");
 const etSessionApi = createEtSessionApi({
   get sessions() { return sessions; },
   get electronModule() { return electronModule; },
-  os, fs, path, pty, process, console,
+  get pty() { return getPty(); },
+  os, fs, path, process, console,
   randomUUID, execFile, execFileSync, StringDecoder,
   sessionLogStreamManager, tempDirBridge,
   createZmodemSentry, trackSessionIdlePrompt, createPtyOutputBuffer,
@@ -1397,7 +1411,7 @@ const {
  */
 async function listSerialPorts() {
   try {
-    const ports = await SerialPort.list();
+    const ports = await getSerialPort().list();
     return ports.map(port => ({
       path: port.path,
       manufacturer: port.manufacturer || '',
@@ -1464,7 +1478,7 @@ async function startSerialSession(event, options) {
         xon: flowControl === 'xon/xoff',
         xoff: flowControl === 'xon/xoff',
         autoOpen: false,
-      }, SerialPort);
+      }, getSerialPort());
 
       const abortPendingOpen = () => {
         try { serialPort.close(); } catch { /* ignore */ }
@@ -2743,12 +2757,15 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:serial:list",
       "netcatty:serial:ymodem-send",
       "netcatty:serial:ymodem-receive",
-      "netcatty:local:defaultShell",
-      "netcatty:local:validatePath",
-      "netcatty:shells:discover",
       "netcatty:terminal:setEncoding",
       "netcatty:telnet:getEchoMode",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    // Stateless local shell/path queries do not depend on worker session state;
+    // serving them directly in main avoids spawning the terminal utilityProcess
+    // (45+ MiB) during cold 0-host startup or host-editor validation.
+    ipcMain.handle("netcatty:local:defaultShell", getDefaultShell);
+    ipcMain.handle("netcatty:local:validatePath", validatePath);
+    ipcMain.handle("netcatty:shells:discover", () => discoverShells());
     ipcMain.handle("netcatty:close:await", async (event, payload) => {
       const result = await terminalWorkerManager.request("netcatty:close:await", payload, {
         webContentsId: event?.sender?.id,

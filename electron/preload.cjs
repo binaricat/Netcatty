@@ -1,6 +1,12 @@
 const { ipcRenderer, contextBridge, webUtils } = require("electron");
-const os = require("node:os");
-const { randomUUID } = require("node:crypto");
+const OS_RELEASE_ARG_PREFIX = "--netcatty-os-release=";
+const readOsReleaseFromArgv = () => {
+  const argv = Array.isArray(process?.argv) ? process.argv : [];
+  const arg = argv.find((entry) => typeof entry === "string" && entry.startsWith(OS_RELEASE_ARG_PREFIX));
+  return arg ? arg.slice(OS_RELEASE_ARG_PREFIX.length) : "";
+};
+const os = { release: readOsReleaseFromArgv };
+const randomUUID = () => globalThis.crypto.randomUUID();
 const { SessionTombstones } = require("./preload/sessionTombstones.cjs");
 const { createPreloadApi } = require("./preload/api.cjs");
 const {

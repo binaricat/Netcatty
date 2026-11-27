@@ -1,20 +1,50 @@
+import { useEffect, useState } from 'react';
 import { usePluginPermissionPrompt } from '../../application/state/usePluginPermissionPrompt';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { describePluginPermission } from '@/domain/pluginPermissionDescriptions.cjs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Button } from '../ui/button';
-import globalAgentToolSpecs from '../../infrastructure/ai/harness/generated/globalAgentToolSpecs.json';
+
+type CapabilityToolEntry = { capabilityId?: string; toolName?: string };
+let cachedGlobalToolNames: Map<string, string> | null = null;
+let loadingGlobalToolNames: Promise<Map<string, string>> | null = null;
+
+function loadGlobalToolNames(): Promise<Map<string, string>> {
+  if (cachedGlobalToolNames) return Promise.resolve(cachedGlobalToolNames);
+  loadingGlobalToolNames ??= import('../../infrastructure/ai/harness/generated/globalAgentToolSpecs.json')
+    .then((mod) => {
+      const specs = (mod.default ?? mod) as CapabilityToolEntry[];
+      const map = new Map<string, string>();
+      for (const tool of specs) {
+        if (tool.capabilityId && tool.toolName) map.set(tool.capabilityId, tool.toolName);
+      }
+      cachedGlobalToolNames = map;
+      return map;
+    })
+    .catch(() => new Map<string, string>());
+  return loadingGlobalToolNames;
+}
 
 /** Rendered only by the trusted app, never inside a plugin view. */
 export function PluginPermissionHost() {
   const { resolvedLocale } = useI18n();
   const zh = resolvedLocale.startsWith('zh');
   const { prompt, busy, respond } = usePluginPermissionPrompt();
+  const action = prompt?.displayContext?.action;
+  const capabilityId = action?.capabilityId;
+  const [toolNames, setToolNames] = useState<Map<string, string> | null>(() => cachedGlobalToolNames);
+  useEffect(() => {
+    if (!capabilityId || cachedGlobalToolNames) return;
+    let active = true;
+    void loadGlobalToolNames().then((map) => {
+      if (active) setToolNames(map);
+    });
+    return () => { active = false; };
+  }, [capabilityId]);
   if (!prompt) return null;
   const description = describePluginPermission(prompt.permission, resolvedLocale);
   const resources = prompt.resources.filter((resource) => resource !== '*' && !resource.startsWith('selected:'));
-  const action = prompt.displayContext?.action;
-  const operation = action && (globalAgentToolSpecs.find((tool) => tool.capabilityId === action.capabilityId)?.toolName ?? action.capabilityId);
+  const operation = action && (toolNames?.get(action.capabilityId) ?? action.capabilityId);
   const selections = prompt.displayContext?.selections ?? [];
   return <Dialog open onOpenChange={(open) => { if (!open) void respond('cancel'); }}>
     <DialogContent data-host-security-surface="" className="max-h-[85vh] overflow-y-auto sm:max-w-[480px]">

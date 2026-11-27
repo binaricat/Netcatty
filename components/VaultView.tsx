@@ -128,7 +128,7 @@ import {
 } from "../domain/quickConnect";
 import SerialConnectModal from "./SerialConnectModal";
 import SerialHostDetailsPanel from "./SerialHostDetailsPanel";
-import { NotesManager } from "./notes/NotesManager";
+import { LazyNotesManager as NotesManager } from "./notes/LazyNotesManager";
 import { ImportVaultDialog } from "./vault/ImportVaultDialog";
 import { HostTreeGroupDeleteDialog } from "./host/HostTreeGroupDeleteDialog";
 import { useHostTreeInlineGroupActions } from "./vault/useHostTreeInlineGroupActions";

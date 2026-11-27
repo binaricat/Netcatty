@@ -2,6 +2,9 @@
 const {
   windowsFramelessContentChromeOptions,
 } = require("./windowsWindowChrome.cjs");
+const {
+  resolvePreloadWebPreferences,
+} = require("../../preloadPath.cjs");
 
 function createSettingsWindowApi(ctx) {
   // The extracted window helpers intentionally share the parent window-manager state.
@@ -103,12 +106,50 @@ function createSettingsWindowApi(ctx) {
       }
     }
     
+    const DEFAULT_SETTINGS_IDLE_DESTROY_MS = 20_000;
+    let settingsIdleDestroyTimer = null;
+
+    function resolveSettingsIdleDestroyMs() {
+      const raw = process.env.NETCATTY_SETTINGS_IDLE_DESTROY_MS;
+      if (raw !== undefined) {
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+      }
+      return DEFAULT_SETTINGS_IDLE_DESTROY_MS;
+    }
+
+    function clearSettingsIdleDestroyTimer() {
+      if (settingsIdleDestroyTimer) {
+        clearTimeout(settingsIdleDestroyTimer);
+        settingsIdleDestroyTimer = null;
+      }
+    }
+
+    function scheduleSettingsIdleDestroy(win) {
+      clearSettingsIdleDestroyTimer();
+      const delayMs = resolveSettingsIdleDestroyMs();
+      if (delayMs <= 0) return;
+      settingsIdleDestroyTimer = setTimeout(() => {
+        settingsIdleDestroyTimer = null;
+        if (isQuitting) return;
+        try {
+          if (settingsWindow === win && win && !win.isDestroyed() && !win.isVisible()) {
+            win.destroy();
+          }
+        } catch {
+          // ignore
+        }
+      }, delayMs);
+      settingsIdleDestroyTimer.unref?.();
+    }
+
     async function openSettingsWindow(electronModule, options, { showOnLoad = true } = {}) {
       const { BrowserWindow, shell } = electronModule;
       const { preload, devServerUrl, isDev, appIcon, isMac, electronDir, sourceWindow } = options;
     
       // If settings window already exists, show and focus it
       if (settingsWindow && !settingsWindow.isDestroyed()) {
+        clearSettingsIdleDestroyTimer();
         centerSettingsWindowOnSourceDisplay(settingsWindow, electronModule, sourceWindow || mainWindow);
         showAndFocusWindow(settingsWindow);
         return settingsWindow;
@@ -157,7 +198,7 @@ function createSettingsWindowApi(ctx) {
           preload,
           contextIsolation: true,
           nodeIntegration: false,
-          sandbox: false,
+          ...resolvePreloadWebPreferences(preload),
           spellcheck: false,
           v8CacheOptions: V8_CACHE_OPTIONS,
         },
@@ -249,8 +290,13 @@ function createSettingsWindowApi(ctx) {
       }
 
       applyWindowOpacityToWindow(win);
+
+      win.on("show", () => {
+        clearSettingsIdleDestroyTimer();
+      });
     
-      // Hide instead of close so the window can be reused instantly.
+      // Hide briefly so immediate reopen is instant, then destroy after idle grace
+      // so the settings renderer process does not stay resident indefinitely.
       // When the app is quitting, allow normal close/destroy.
       win.on('close', (event) => {
         if (!isQuitting) {
@@ -260,12 +306,16 @@ function createSettingsWindowApi(ctx) {
           } catch {
             // ignore
           }
+          scheduleSettingsIdleDestroy(win);
         }
       });
     
       // Clean up reference when actually destroyed
       win.on('closed', () => {
-        settingsWindow = null;
+        clearSettingsIdleDestroyTimer();
+        if (settingsWindow === win) {
+          settingsWindow = null;
+        }
       });
     
       // Prevent HTML <title> from overriding the window title

@@ -35,6 +35,7 @@ export function resolveHibernateSerializeOptions(term: XTerm): {
 
 export type TerminalHibernateSnapshot = {
   snapshot: string;
+  compressedSnapshot?: Uint8Array | null;
   viewportSnapshot: string;
   scrollbackSnapshot: string;
   contextSnapshot?: string;
@@ -42,6 +43,39 @@ export type TerminalHibernateSnapshot = {
   contextScrollbackSnapshot?: string;
   alternateScreen: boolean;
 };
+
+const HIBERNATE_COMPRESS_MIN_CHARS = 4_096;
+
+export async function compressHibernateSnapshot(text: string): Promise<Uint8Array | null> {
+  if (
+    !text
+    || text.length < HIBERNATE_COMPRESS_MIN_CHARS
+    || typeof CompressionStream === "undefined"
+  ) {
+    return null;
+  }
+  try {
+    const encoded = new TextEncoder().encode(text);
+    const stream = new Blob([encoded]).stream().pipeThrough(new CompressionStream("gzip"));
+    const buffer = await new Response(stream).arrayBuffer();
+    return new Uint8Array(buffer);
+  } catch {
+    return null;
+  }
+}
+
+export async function decompressHibernateSnapshot(data: Uint8Array): Promise<string> {
+  if (!data || data.byteLength === 0 || typeof DecompressionStream === "undefined") {
+    return "";
+  }
+  try {
+    const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("gzip"));
+    const buffer = await new Response(stream).arrayBuffer();
+    return new TextDecoder().decode(buffer);
+  } catch {
+    return "";
+  }
+}
 
 type MutableValue<T> = { current: T };
 
@@ -235,8 +269,20 @@ export async function serializeTerminalForHibernate(
       excludeModes,
       range: { start: viewportStart, end: viewportEnd },
     }, preferWasm);
+
+    const snapshot = capHibernateBufferByLines(
+      await serializeWithOptions(term, serializeAddon, {
+        excludeAltBuffer,
+        excludeModes,
+      }, preferWasm),
+      TERMINAL_HIBERNATE_SNAPSHOT_MAX_LINES,
+    );
+
+    // Avoid serializing and retaining a duplicate copy of the entire scrollback
+    // when the coherent full snapshot already succeeded. Only fall back to a
+    // ranged scrollback slice when full serialization returned empty.
     let scrollbackSnapshot = "";
-    if (viewportStart > 0) {
+    if (!snapshot && viewportStart > 0) {
       const scrollbackStart = Math.max(0, viewportStart - TERMINAL_HIBERNATE_SNAPSHOT_MAX_LINES);
       scrollbackSnapshot = capHibernateBufferByLines(
         await serializeWithOptions(term, serializeAddon, {
@@ -248,16 +294,11 @@ export async function serializeTerminalForHibernate(
       );
     }
 
-    const snapshot = capHibernateBufferByLines(
-      await serializeWithOptions(term, serializeAddon, {
-        excludeAltBuffer,
-        excludeModes,
-      }, preferWasm),
-      TERMINAL_HIBERNATE_SNAPSHOT_MAX_LINES,
-    );
+    const compressedSnapshot = await compressHibernateSnapshot(snapshot);
 
     return {
       snapshot,
+      compressedSnapshot,
       viewportSnapshot,
       scrollbackSnapshot,
       ...context,
@@ -266,6 +307,7 @@ export async function serializeTerminalForHibernate(
   } catch {
     return {
       snapshot: "",
+      compressedSnapshot: null,
       viewportSnapshot: "",
       scrollbackSnapshot: "",
       alternateScreen: isTerminalAlternateScreenActive(term),
@@ -314,6 +356,17 @@ export function resolveHibernateWakeHistory(payload: TerminalHibernateWakePayloa
   return `${scrollback}\r\n${viewport}`;
 }
 
+export async function resolveHibernateWakeHistoryAsync(
+  payload: TerminalHibernateWakePayload,
+): Promise<string> {
+  if (payload.snapshot) return payload.snapshot;
+  if (payload.compressedSnapshot && payload.compressedSnapshot.byteLength > 0) {
+    const decompressed = await decompressHibernateSnapshot(payload.compressedSnapshot);
+    if (decompressed) return decompressed;
+  }
+  return resolveHibernateWakeHistory(payload);
+}
+
 export async function applyHibernateWakeToTerminal(
   term: XTerm,
   runtime: XTermRuntime,
@@ -321,7 +374,7 @@ export async function applyHibernateWakeToTerminal(
   options: ApplyHibernateWakeOptions = {},
 ): Promise<void> {
   const replayOptions = options.replayOptions;
-  const history = resolveHibernateWakeHistory(payload);
+  const history = await resolveHibernateWakeHistoryAsync(payload);
 
   // Chunked writes already yield to the event loop for large buffers. Do not
   // idle-append older scrollback after the viewport: under a finite xterm
@@ -356,6 +409,7 @@ export function buildHibernateWakePayload(
 ): TerminalHibernateWakePayload {
   return {
     snapshot: snapshot.snapshot,
+    compressedSnapshot: snapshot.compressedSnapshot ?? null,
     viewportSnapshot: snapshot.viewportSnapshot,
     scrollbackSnapshot: snapshot.scrollbackSnapshot,
     pendingBuffer,

@@ -440,15 +440,19 @@ function ensureTrayPanelWindow() {
     // the CSS radius (#2505 / Electron #46468).
     ...windowsCssRoundedOverlayChromeOptions(),
     ...(process.platform === "darwin" ? { visualEffectState: "active" } : {}),
-    webPreferences: {
-      preload: path.join(__dirname, "../preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      spellcheck: false,
-      // Tray must not inherit Chromium page-zoom from the main window origin.
-      zoomFactor: 1,
-    },
+    webPreferences: (() => {
+      const { resolvePreloadPath, resolvePreloadWebPreferences } = require("../preloadPath.cjs");
+      const trayPreload = resolvePreloadPath(path.join(__dirname, ".."));
+      return {
+        preload: trayPreload,
+        contextIsolation: true,
+        nodeIntegration: false,
+        ...resolvePreloadWebPreferences(trayPreload),
+        spellcheck: false,
+        // Tray must not inherit Chromium page-zoom from the main window origin.
+        zoomFactor: 1,
+      };
+    })(),
   });
 
   require("./windowManager.cjs").applyTrayPanelBackgroundBlur(trayPanelWindow);
@@ -470,16 +474,22 @@ function ensureTrayPanelWindow() {
     }
   });
 
+  panelWin.on("show", () => {
+    clearTrayPanelIdleDestroyTimer();
+  });
+
   panelWin.on("hide", () => {
     if (trayPanelWindow === panelWin) {
       trayPanelShowWhenReady = false;
       clearTrayPanelRefreshTimer();
+      scheduleTrayPanelIdleDestroy(panelWin);
     }
   });
 
   panelWin.on("closed", () => {
     if (trayPanelWindow === panelWin) {
       clearTrayPanelRefreshTimer();
+      clearTrayPanelIdleDestroyTimer();
       trayPanelWindow = null;
       trayPanelReady = false;
       trayPanelShowWhenReady = false;
@@ -499,6 +509,7 @@ function ensureTrayPanelWindow() {
     }
     if (trayPanelShowWhenReady && trayPanelWindow && !trayPanelWindow.isDestroyed()) {
       trayPanelShowWhenReady = false;
+      clearTrayPanelIdleDestroyTimer();
       try {
         trayPanelWindow.show();
         trayPanelWindow.focus();
@@ -510,6 +521,48 @@ function ensureTrayPanelWindow() {
   });
 
   return trayPanelWindow;
+}
+
+const DEFAULT_TRAY_PANEL_IDLE_DESTROY_MS = 20_000;
+let trayPanelIdleDestroyTimer = null;
+
+function resolveTrayPanelIdleDestroyMs() {
+  const raw = process.env.NETCATTY_TRAY_IDLE_DESTROY_MS;
+  if (raw !== undefined) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return DEFAULT_TRAY_PANEL_IDLE_DESTROY_MS;
+}
+
+function clearTrayPanelIdleDestroyTimer() {
+  if (trayPanelIdleDestroyTimer) {
+    clearTimeout(trayPanelIdleDestroyTimer);
+    trayPanelIdleDestroyTimer = null;
+  }
+}
+
+function scheduleTrayPanelIdleDestroy(panelWin) {
+  clearTrayPanelIdleDestroyTimer();
+  const delayMs = resolveTrayPanelIdleDestroyMs();
+  if (delayMs <= 0) return;
+  trayPanelIdleDestroyTimer = setTimeout(() => {
+    trayPanelIdleDestroyTimer = null;
+    try {
+      if (
+        trayPanelWindow === panelWin
+        && panelWin
+        && !panelWin.isDestroyed()
+        && !panelWin.isVisible()
+        && !trayPanelShowWhenReady
+      ) {
+        panelWin.destroy();
+      }
+    } catch {
+      // ignore
+    }
+  }, delayMs);
+  trayPanelIdleDestroyTimer.unref?.();
 }
 
 function readTrayBounds() {
@@ -537,6 +590,7 @@ function clearTrayPanelRefreshTimer() {
 
 function showTrayPanel(eventBounds) {
   if (!tray) return;
+  clearTrayPanelIdleDestroyTimer();
   const { screen } = electronModule;
   const win = ensureTrayPanelWindow();
 
@@ -587,11 +641,13 @@ function hideTrayPanel() {
   trayPanelShowWhenReady = false;
   clearTrayPanelRefreshTimer();
   if (trayPanelWindow && !trayPanelWindow.isDestroyed()) {
+    const panelWin = trayPanelWindow;
     try {
-      trayPanelWindow.hide();
+      panelWin.hide();
     } catch {
       // ignore
     }
+    scheduleTrayPanelIdleDestroy(panelWin);
   }
 }
 

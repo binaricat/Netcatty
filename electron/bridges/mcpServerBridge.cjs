@@ -2302,6 +2302,11 @@ function cancelWorkerBackgroundJobsForSession(chatSessionId) {
       deleteWorkerRoute(jobId, job, "chat-session-cancel");
     }
   }
+  // If the terminal worker has not been started, no worker-side background jobs
+  // exist; avoid waking a fresh utilityProcess just to send a cancel no-op.
+  if (typeof terminalWorkerManager?.isRunning === "function" && !terminalWorkerManager.isRunning()) {
+    return;
+  }
   try {
     terminalWorkerManager?.send?.("netcatty:ai:catty:cancel", { chatSessionId }, {});
   } catch {

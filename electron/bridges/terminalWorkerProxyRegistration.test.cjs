@@ -394,3 +394,35 @@ test("fallback log restart guard wraps all six starts only when main explicitly 
   terminalBridge.registerHandlers(proxyHandlers, { terminalWorkerManager, manageSessionLogRestart: true });
   assert.equal(wrappers.size, 0, "worker proxies must not also apply the main fallback guard");
 });
+
+test("terminal worker mode handles stateless local shell and path queries in main without waking worker", async () => {
+  const ipcMain = createFakeIpcMain();
+  const terminalWorkerManager = createFakeWorkerManager();
+
+  terminalBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+
+  const shells = await ipcMain.handlers.get("netcatty:shells:discover")(fakeEvent);
+  assert.ok(Array.isArray(shells), "discoverShells should return an array");
+
+  const defaultShell = await ipcMain.handlers.get("netcatty:local:defaultShell")(fakeEvent);
+  assert.ok(
+    (typeof defaultShell === "string" && defaultShell.length > 0)
+      || (defaultShell && typeof defaultShell === "object"),
+    "defaultShell should return a non-empty shell descriptor",
+  );
+
+  const validation = await ipcMain.handlers.get("netcatty:local:validatePath")(fakeEvent, {
+    path: process.cwd(),
+    type: "directory",
+  });
+  assert.equal(validation?.exists, true, "validatePath should report an existing path");
+  assert.equal(validation?.isDirectory, true, "validatePath should identify a directory");
+
+  assert.equal(
+    terminalWorkerManager.requests.length,
+    0,
+    "stateless local queries must not wake the terminal utility worker",
+  );
+  assert.equal(terminalWorkerManager.sends.length, 0);
+});
+

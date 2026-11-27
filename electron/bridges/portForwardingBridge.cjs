@@ -1977,7 +1977,20 @@ function registerHandlers(ipcMain, options = {}) {
     const trackedTunnelIds = new Set();
     const tunnelRuleIds = new Map();
 
+    const isWorkerRunning = () => (
+      typeof terminalWorkerManager.isRunning === "function"
+        ? terminalWorkerManager.isRunning()
+        : true
+    );
+
+    const emptyRuntimeSnapshot = () => ({
+      epoch: PROCESS_EPOCH,
+      revision: 0,
+      records: [],
+    });
+
     const unsubscribeDestroyedSender = (webContentsId) => {
+      if (!isWorkerRunning()) return;
       void terminalWorkerManager.request(
         "netcatty:portforward:unsubscribeSender",
         { webContentsId },
@@ -2036,8 +2049,11 @@ function registerHandlers(ipcMain, options = {}) {
       if (ruleId) tunnelRuleIds.set(tunnelId, ruleId);
     };
 
-    const requestWorker = (channel, { track = false, cleanup = null } = {}) => {
+    const requestWorker = (channel, { track = false, cleanup = null, idleResult } = {}) => {
       ipcMain.handle(channel, async (event, payload) => {
+        if (idleResult !== undefined && !isWorkerRunning()) {
+          return typeof idleResult === "function" ? idleResult(payload) : idleResult;
+        }
         const pendingSenderEntry = track ? ensureSenderLifecycle(event?.sender) : null;
         try {
           const result = await terminalWorkerManager.request(channel, payload, {
@@ -2069,17 +2085,30 @@ function registerHandlers(ipcMain, options = {}) {
     };
 
     requestWorker("netcatty:portforward:start", { track: true });
-    requestWorker("netcatty:portforward:stop", { cleanup: "tunnel" });
-    requestWorker("netcatty:portforward:status");
-    requestWorker("netcatty:portforward:subscribe", { track: true });
-    requestWorker("netcatty:portforward:list");
-    requestWorker("netcatty:portforward:snapshot");
+    requestWorker("netcatty:portforward:stop", {
+      cleanup: "tunnel",
+      idleResult: (payload) => ({ tunnelId: payload?.tunnelId, success: false, error: "Tunnel not found" }),
+    });
+    requestWorker("netcatty:portforward:status", {
+      idleResult: (payload) => ({ tunnelId: payload?.tunnelId, status: "inactive" }),
+    });
+    requestWorker("netcatty:portforward:subscribe", {
+      track: true,
+      idleResult: (payload) => ({ tunnelId: payload?.tunnelId, status: "inactive" }),
+    });
+    requestWorker("netcatty:portforward:list", { idleResult: () => [] });
+    requestWorker("netcatty:portforward:snapshot", { idleResult: emptyRuntimeSnapshot });
     // Runtime subscriptions are process-scoped (no tunnelId). Keep the sender
     // lifecycle entry so a destroyed window still calls unsubscribeSender,
-    // which clears worker-side runtimeEventSubscribers.
+    // which clears worker-side runtimeEventSubscribers. Do not cold-start the
+    // terminal worker solely to observe an empty runtime; replay active
+    // subscribers once the worker actually boots.
     ipcMain.handle("netcatty:portforward:subscribeRuntime", async (event, payload) => {
       const entry = ensureSenderLifecycle(event?.sender);
       if (entry) entry.runtimeSubscribed = true;
+      if (!isWorkerRunning()) {
+        return emptyRuntimeSnapshot();
+      }
       try {
         return await terminalWorkerManager.request(
           "netcatty:portforward:subscribeRuntime",
@@ -2096,6 +2125,11 @@ function registerHandlers(ipcMain, options = {}) {
     });
     ipcMain.handle("netcatty:portforward:unsubscribeRuntime", async (event, payload) => {
       const entry = subscriptionsBySender.get(event?.sender?.id);
+      if (!isWorkerRunning()) {
+        if (entry) entry.runtimeSubscribed = false;
+        releaseEmptySenderLifecycle(event?.sender, entry);
+        return { success: true };
+      }
       try {
         return await terminalWorkerManager.request(
           "netcatty:portforward:unsubscribeRuntime",
@@ -2107,8 +2141,28 @@ function registerHandlers(ipcMain, options = {}) {
         releaseEmptySenderLifecycle(event?.sender, entry);
       }
     });
-    requestWorker("netcatty:portforward:stopAll", { cleanup: "all" });
-    requestWorker("netcatty:portforward:stopByRuleId", { cleanup: "rule" });
+    requestWorker("netcatty:portforward:stopAll", {
+      cleanup: "all",
+      idleResult: () => {
+        for (const tunnelId of [...trackedTunnelIds]) forgetTunnel(tunnelId);
+        return undefined;
+      },
+    });
+    requestWorker("netcatty:portforward:stopByRuleId", {
+      cleanup: "rule",
+      idleResult: () => ({ stopped: 0, failed: 0, errors: [] }),
+    });
+
+    terminalWorkerManager.onWorkerStarted?.(() => {
+      for (const entry of subscriptionsBySender.values()) {
+        if (!entry.runtimeSubscribed || entry.sender?.isDestroyed?.()) continue;
+        void terminalWorkerManager.request(
+          "netcatty:portforward:subscribeRuntime",
+          undefined,
+          { webContentsId: entry.sender.id },
+        ).catch(() => {});
+      }
+    });
 
     terminalWorkerManager.onWorkerRendererEvent?.((message) => {
       if (message?.channel === "netcatty:portforward:runtime") {
