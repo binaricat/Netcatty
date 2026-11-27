@@ -1,4 +1,4 @@
-import cattyToolSpecs from './generated/cattyToolSpecs.json';
+import toolNameIndex from './generated/toolNameIndex.json';
 import {
   buildAlwaysAllowCommandPatterns,
   extractGrantableShellCommandSegments,
@@ -37,42 +37,22 @@ function ruleMatchesCapability(rule: PermissionGrantRule, ctx: PermissionGrantMa
     && ruleMatchesTarget(rule, ctx);
 }
 
-type CattyToolSpecRef = {
-  capabilityId: string;
-  toolName: string;
-  rpcMethod: string | null;
-  policy?: {
-    write?: boolean;
-    bypassesApproval?: boolean;
-    requiresFreshApproval?: boolean;
-  };
-};
-
 export const HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID = 'harness.remote_desktop.act:high-risk';
 
-const TOOL_NAME_TO_CAPABILITY = new Map<string, string>();
-const RPC_METHOD_TO_CAPABILITY = new Map<string, string>();
+const TOOL_NAME_TO_CAPABILITY = toolNameIndex.sidebarToolNameToCapability as Record<string, string>;
+const RPC_METHOD_TO_CAPABILITY = toolNameIndex.sidebarRpcMethodToCapability as Record<string, string>;
 const FRESH_APPROVAL_ONLY_CAPABILITIES = new Set<string>([
   HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID,
+  ...toolNameIndex.freshApprovalOnlyCapabilities,
 ]);
-
-for (const spec of cattyToolSpecs as CattyToolSpecRef[]) {
-  TOOL_NAME_TO_CAPABILITY.set(spec.toolName, spec.capabilityId);
-  if (spec.rpcMethod) {
-    RPC_METHOD_TO_CAPABILITY.set(spec.rpcMethod, spec.capabilityId);
-  }
-  if (spec.policy?.requiresFreshApproval) {
-    FRESH_APPROVAL_ONLY_CAPABILITIES.add(spec.capabilityId);
-  }
-}
 
 export function isFreshApprovalOnlyCapability(capabilityId: string | undefined): boolean {
   return Boolean(capabilityId && FRESH_APPROVAL_ONLY_CAPABILITIES.has(capabilityId));
 }
 
 export function resolveCapabilityId(toolOrRpcName: string): string {
-  return TOOL_NAME_TO_CAPABILITY.get(toolOrRpcName)
-    ?? RPC_METHOD_TO_CAPABILITY.get(toolOrRpcName)
+  return TOOL_NAME_TO_CAPABILITY[toolOrRpcName]
+    ?? RPC_METHOD_TO_CAPABILITY[toolOrRpcName]
     ?? toolOrRpcName;
 }
 
@@ -237,11 +217,7 @@ const COMMAND_GRANT_CAPABILITIES = new Set([
 ]);
 
 const GRANTABLE_CAPABILITY_IDS: readonly string[] = Object.freeze(
-  [...new Set(
-    (cattyToolSpecs as CattyToolSpecRef[])
-      .filter((spec) => spec.policy?.write && !spec.policy?.bypassesApproval && !spec.policy?.requiresFreshApproval)
-      .map((spec) => spec.capabilityId),
-  )].sort(),
+  [...toolNameIndex.grantableCapabilityIds],
 );
 
 export function listGrantableCapabilityIds(): readonly string[] {

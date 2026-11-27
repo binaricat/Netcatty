@@ -9,10 +9,11 @@ import {
   Search,
   Square,
 } from 'lucide-react';
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { cn } from '../lib/utils';
 import { matchesHostSearchQuery, matchesSearchQuery } from '../domain/searchMatcher';
 import { useI18n } from '../application/i18n/I18nProvider';
+import { usePinyinMatcherVersion } from '../application/state/usePinyinMatcherVersion';
 import {
   collectSelectableHostIdsInGroup,
   getGroupSelectionState,
@@ -21,7 +22,7 @@ import {
 import { Host, ProxyProfile, SSHKey } from '../types';
 import { ManagedSource } from '../domain/models';
 import { DistroAvatar } from './DistroAvatar';
-import HostDetailsPanel from './HostDetailsPanel';
+const HostDetailsPanel = lazy(() => import('./HostDetailsPanel'));
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { SortDropdown, SortMode } from './ui/sort-dropdown';
@@ -186,7 +187,9 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
     return groups;
   }, [allGroupPaths, currentPath, groupHostCounts]);
 
+  const pinyinMatcherVersion = usePinyinMatcherVersion();
   const filteredHosts = useMemo(() => {
+    void pinyinMatcherVersion;
     let result = selectableHosts;
 
     if (currentPath) {
@@ -227,7 +230,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
     });
 
     return result;
-  }, [selectableHosts, currentPath, searchQuery, selectedTags, sortMode]);
+  }, [selectableHosts, currentPath, searchQuery, selectedTags, sortMode, pinyinMatcherVersion]);
 
   const breadcrumbs = useMemo(() => {
     if (!currentPath) return [];
@@ -655,21 +658,23 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
         </div>
 
         {showNewHostPanel && onSaveHost ? (
-          <HostDetailsPanel
-            initialData={null}
-            availableKeys={availableKeys}
-            identities={identities}
-            proxyProfiles={proxyProfiles}
-            groups={customGroups}
-            managedSources={managedSources}
-            allHosts={hosts}
-            onSave={(host) => {
-              onSaveHost(host);
-              setShowNewHostPanel(false);
-            }}
-            onCancel={() => setShowNewHostPanel(false)}
-            onCreateGroup={onCreateGroup}
-          />
+          <Suspense fallback={null}>
+            <HostDetailsPanel
+              initialData={null}
+              availableKeys={availableKeys}
+              identities={identities}
+              proxyProfiles={proxyProfiles}
+              groups={customGroups}
+              managedSources={managedSources}
+              allHosts={hosts}
+              onSave={(host) => {
+                onSaveHost(host);
+                setShowNewHostPanel(false);
+              }}
+              onCancel={() => setShowNewHostPanel(false)}
+              onCreateGroup={onCreateGroup}
+            />
+          </Suspense>
         ) : null}
       </div>
     </TooltipProvider>

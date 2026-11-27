@@ -14,6 +14,8 @@ import {
   getAvailableRemoteDesktopProtocols,
   hasCompanionRdp,
   hasCompanionVnc,
+  hasValidRdpFixedResolution,
+  parseRdpDimensionDraft,
   isRdpProtocol,
   isRemoteDesktopProtocol,
   isVncProtocol,
@@ -417,4 +419,26 @@ test('mapViewportToVirtualDesktopCoords maps full view and cropped single-monito
     mapViewportToVirtualDesktopCoords(1200, 600, rect, virtualSize, { left: 1920, top: 0, width: 1920, height: 1080 }),
     { x: 3839, y: 1079 },
   );
+});
+
+test('fixed RDP resolution validation rejects invalid drafts before sanitization', () => {
+  const config = { resolutionMode: 'fixed' as const, width: 1920, height: 1080 };
+  for (const value of ['', ' ', '19', '192', '199', '8193', '3840.5', 'abc', 'Infinity']) {
+    assert.equal(parseRdpDimensionDraft(value), undefined, value);
+    assert.equal(hasValidRdpFixedResolution(config, { width: value }), false, value);
+    assert.equal(hasValidRdpFixedResolution(config, { height: value }), false, value);
+  }
+  for (const value of ['200', '3840', '8192']) {
+    assert.equal(parseRdpDimensionDraft(value), Number(value));
+    assert.equal(hasValidRdpFixedResolution(config, { width: value, height: value }), true);
+  }
+  for (const dimension of [192, 8193, 3840.5, NaN]) {
+    assert.equal(hasValidRdpFixedResolution({ ...config, width: dimension }), false);
+    assert.equal(hasValidRdpFixedResolution({ ...config, height: dimension }), false);
+  }
+  assert.equal(hasValidRdpFixedResolution(config), true);
+  assert.equal(hasValidRdpFixedResolution({ resolutionMode: 'fixed' }), true);
+  for (const resolutionMode of ['dynamic', 'fit'] as const) {
+    assert.equal(hasValidRdpFixedResolution({ ...config, resolutionMode }, { width: '' }), true);
+  }
 });

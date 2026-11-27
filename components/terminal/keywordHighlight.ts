@@ -36,10 +36,11 @@ type InternalBufferLine = {
 };
 
 type LineOriginals = {
-  fg: Uint32Array;
-  content: Uint32Array;
-  mask: Uint8Array;
-  fingerprint: string;
+  /** Packed [col, origFg, origContent] triples for highlighted cells only. */
+  cells: Uint32Array;
+  /** Number of active triples stored in `cells`. */
+  count: number;
+  fingerprint: number;
 };
 
 type LogicalLine = {
@@ -66,6 +67,7 @@ export type KeywordHighlighterOptions = {
 const CELL_INDICES = 3;
 const CELL_CONTENT = 0;
 const CELL_FG = 1;
+const SPARSE_STRIDE = 3;
 const STYLE_MASK = 0xfc000000;
 const CM_MASK = 0x3000000;
 const CM_RGB = 0x3000000;
@@ -76,6 +78,19 @@ const RECOLOR_SLICE_BUDGET_MS = 4;
 const BULK_WRITE_LINE_BREAKS = 8;
 const MAX_LOGICAL_LINE_ROWS = 128;
 const ABSOLUTE_ROW_CONTROL_RE = /(?:\x1b\[|\x9b)\d*(?:(?:;\d*)?[Hf]|d)/; // eslint-disable-line no-control-regex
+
+/**
+ * Fast 53-bit fingerprint (21-bit length + 32-bit FNV-1a, safe integer, zero
+ * retained row strings).
+ */
+const hashRowFingerprint = (text: string): number => {
+  let h = 0x811c9dc5;
+  const len = text.length;
+  for (let i = 0; i < len; i += 1) {
+    h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  }
+  return ((len & 0x1fffff) * 0x100000000) + (h >>> 0);
+};
 
 const withRgbFg = (originalFg: number, rgb: number): number => (
   (originalFg & STYLE_MASK) | CM_RGB | (rgb & 0xffffff)
@@ -214,8 +229,8 @@ export class KeywordHighlighter implements IDisposable {
   lastRebuildTimings: Record<string, number> = {};
 
   private readonly originals = new WeakMap<InternalBufferLine, LineOriginals>();
-  /** No-match rows only need a fingerprint; do not allocate cell snapshots. */
-  private readonly fingerprints = new WeakMap<InternalBufferLine, string>();
+  /** No-match rows only need a numeric fingerprint; do not allocate cell snapshots or retain row strings. */
+  private readonly fingerprints = new WeakMap<InternalBufferLine, number>();
   private readonly originalWrite: XTerm["write"];
   private readonly originalReset: XTerm["reset"];
   private readonly originalClear: XTerm["clear"];
@@ -992,15 +1007,15 @@ export class KeywordHighlighter implements IDisposable {
   }
 
   private readLogicalLineFingerprints(startY: number, endY: number): {
-    rowFingerprints: string[];
+    rowFingerprints: number[];
     fastText: string;
   } {
     const buffer = this.term.buffer.active;
-    const rowFingerprints: string[] = [];
+    const rowFingerprints: number[] = [];
     let fastText = "";
     for (let y = startY; y <= endY; y += 1) {
       const raw = buffer.getLine(y)?.translateToString(false) ?? "";
-      rowFingerprints.push(raw);
+      rowFingerprints.push(hashRowFingerprint(raw));
       fastText += y === endY ? raw.trimEnd() : raw;
     }
     return { rowFingerprints, fastText };
@@ -1058,7 +1073,7 @@ export class KeywordHighlighter implements IDisposable {
         return false;
       }
       const originals = this.originals.get(internal);
-      const fingerprint = publicLine?.translateToString(false) ?? "";
+      const fingerprint = hashRowFingerprint(publicLine?.translateToString(false) ?? "");
       const stamped = originals ? originals.fingerprint : this.fingerprints.get(internal);
       // An empty/no-match stamp must not survive when the row is later filled
       // or recycled with the same BufferLine identity (yes/log floods).
@@ -1072,14 +1087,17 @@ export class KeywordHighlighter implements IDisposable {
     line: InternalBufferLine,
     originals: LineOriginals,
   ): boolean {
-    for (let x = 0; x < line.length; x += 1) {
-      if (!originals.mask[x]) continue;
-      if (line._data[x * CELL_INDICES + CELL_FG] === originals.fg[x]) return false;
+    const { cells, count } = originals;
+    for (let i = 0; i < count; i += 1) {
+      const base = i * SPARSE_STRIDE;
+      const x = cells[base];
+      if (x >= line.length) continue;
+      if (line._data[x * CELL_INDICES + CELL_FG] === cells[base + 1]) return false;
     }
     return true;
   }
 
-  private stampLogicalLine(startY: number, endY: number, rowFingerprints?: readonly string[]): void {
+  private stampLogicalLine(startY: number, endY: number, rowFingerprints?: readonly number[]): void {
     const buffer = this.term.buffer.active;
     for (let y = startY; y <= endY; y += 1) {
       const publicLine = buffer.getLine(y);
@@ -1087,35 +1105,105 @@ export class KeywordHighlighter implements IDisposable {
       if (!internal) continue;
       this.coloredGeneration.set(internal, this.ruleGeneration);
       const fingerprint = rowFingerprints
-        ? rowFingerprints[y - startY] ?? ""
-        : (publicLine?.translateToString(false) ?? "");
+        ? rowFingerprints[y - startY] ?? hashRowFingerprint("")
+        : hashRowFingerprint(publicLine?.translateToString(false) ?? "");
       const originals = this.originals.get(internal);
       if (originals) originals.fingerprint = fingerprint;
       else this.fingerprints.set(internal, fingerprint);
     }
   }
 
+  private findSparseCellBase(originals: LineOriginals, x: number): number {
+    const { cells, count } = originals;
+    if (count === 0) return -1;
+    // Matches are applied left-to-right, so new columns are almost always
+    // strictly greater than the last stored column (O(1) fast path).
+    const lastBase = (count - 1) * SPARSE_STRIDE;
+    if (x > cells[lastBase]) return -1;
+    if (x === cells[lastBase]) return lastBase;
+    for (let i = count - 2; i >= 0; i -= 1) {
+      const base = i * SPARSE_STRIDE;
+      if (cells[base] === x) return base;
+    }
+    return -1;
+  }
+
+  private growSparseCells(originals: LineOriginals, requiredCount: number): Uint32Array {
+    const minNeeded = requiredCount * SPARSE_STRIDE;
+    if (minNeeded <= originals.cells.length) return originals.cells;
+    const nextLength = Math.max(minNeeded, originals.cells.length * 2);
+    const next = new Uint32Array(nextLength);
+    next.set(originals.cells.subarray(0, originals.count * SPARSE_STRIDE));
+    originals.cells = next;
+    return next;
+  }
+
   private colorPhysicalRange(y: number, startX: number, endX: number, rgb: number): void {
     const internal = getInternalLine(this.term.buffer.active.getLine(y));
     if (!internal || endX <= startX) return;
-    const originals = this.ensureOriginals(internal);
+    const first = Math.max(0, startX);
     const last = Math.min(internal.length, endX);
-    for (let x = Math.max(0, startX); x < last; x += 1) {
+    if (last <= first) return;
+    const data = internal._data;
+    const span = last - first;
+    let originals = this.originals.get(internal);
+    // Fast path: matches are applied left-to-right, so when `first` is strictly
+    // past the last stored column (or the line has no stored cells yet), every
+    // cell in [first, last) is guaranteed new — skip per-cell lookup entirely.
+    const countBefore = originals ? originals.count : 0;
+    const strictlyAfter = countBefore === 0
+      || first > originals!.cells[(countBefore - 1) * SPARSE_STRIDE];
+    if (strictlyAfter) {
+      let cells = originals
+        ? this.growSparseCells(originals, countBefore + span)
+        : null;
+      let count = countBefore;
+      for (let x = first; x < last; x += 1) {
+        const dataIndex = x * CELL_INDICES;
+        const currentFg = data[dataIndex + CELL_FG];
+        if ((currentFg & CM_MASK) !== 0) continue;
+        if (!originals) {
+          originals = this.ensureOriginals(internal, span);
+          cells = originals.cells;
+        }
+        const offset = count * SPARSE_STRIDE;
+        cells![offset] = x;
+        cells![offset + 1] = currentFg;
+        cells![offset + 2] = data[dataIndex + CELL_CONTENT];
+        count += 1;
+        data[dataIndex + CELL_FG] = withRgbFg(currentFg, rgb);
+      }
+      if (originals) originals.count = count;
+      return;
+    }
+
+    for (let x = first; x < last; x += 1) {
       const dataIndex = x * CELL_INDICES;
-      const content = internal._data[dataIndex + CELL_CONTENT];
-      const currentFg = internal._data[dataIndex + CELL_FG];
+      const content = data[dataIndex + CELL_CONTENT];
+      const currentFg = data[dataIndex + CELL_FG];
       // A cell already carrying a PTY palette/truecolor foreground (starship
       // directory segments, ANSI logs) must keep that color. Keyword RGB is
       // only for the default foreground.
-      const maskedForContent = originals.mask[x] === 1 && originals.content[x] === content;
-      const ptyFg = maskedForContent ? originals.fg[x] : currentFg;
+      const existingBase = this.findSparseCellBase(originals!, x);
+      const maskedForContent = existingBase >= 0
+        && originals!.cells[existingBase + 2] === content;
+      const ptyFg = maskedForContent ? originals!.cells[existingBase + 1] : currentFg;
       if ((ptyFg & CM_MASK) !== 0) continue;
-      if (!maskedForContent) {
-        originals.fg[x] = currentFg;
-        originals.content[x] = content;
-        originals.mask[x] = 1;
+      let origFg = currentFg;
+      if (maskedForContent) {
+        origFg = originals!.cells[existingBase + 1];
+      } else if (existingBase >= 0) {
+        originals!.cells[existingBase + 1] = currentFg;
+        originals!.cells[existingBase + 2] = content;
+      } else {
+        const cells = this.growSparseCells(originals!, originals!.count + (last - x));
+        const offset = originals!.count * SPARSE_STRIDE;
+        cells[offset] = x;
+        cells[offset + 1] = currentFg;
+        cells[offset + 2] = content;
+        originals!.count += 1;
       }
-      internal._data[dataIndex + CELL_FG] = withRgbFg(originals.fg[x], rgb);
+      data[dataIndex + CELL_FG] = withRgbFg(origFg, rgb);
     }
   }
 
@@ -1126,17 +1214,16 @@ export class KeywordHighlighter implements IDisposable {
     const originals = this.originals.get(internal);
     if (!originals) return;
     this.coloredGeneration.delete(internal);
-    for (let x = 0; x < internal.length; x += 1) {
-      if (!originals.mask[x]) continue;
+    const { cells, count } = originals;
+    for (let i = 0; i < count; i += 1) {
+      const base = i * SPARSE_STRIDE;
+      const x = cells[base];
+      if (x >= internal.length) continue;
       const dataIndex = x * CELL_INDICES;
-      const content = internal._data[dataIndex + CELL_CONTENT];
-      if (originals.content[x] !== content) {
-        originals.mask[x] = 0;
-        continue;
-      }
-      internal._data[dataIndex + CELL_FG] = originals.fg[x];
-      originals.mask[x] = 0;
+      if (internal._data[dataIndex + CELL_CONTENT] !== cells[base + 2]) continue;
+      internal._data[dataIndex + CELL_FG] = cells[base + 1];
     }
+    this.originals.delete(internal);
   }
 
   private restoreBuffer(): void {
@@ -1144,14 +1231,14 @@ export class KeywordHighlighter implements IDisposable {
     for (let y = 0; y < buffer.length; y += 1) this.restorePhysicalLine(y, buffer);
   }
 
-  private ensureOriginals(line: InternalBufferLine): LineOriginals {
+  private ensureOriginals(line: InternalBufferLine, initialCells: number): LineOriginals {
     let originals = this.originals.get(line);
-    if (!originals || originals.fg.length < line.length) {
+    if (!originals) {
+      const capacity = Math.max(16, initialCells);
       originals = {
-        fg: new Uint32Array(line.length),
-        content: new Uint32Array(line.length),
-        mask: new Uint8Array(line.length),
-        fingerprint: this.fingerprints.get(line) ?? originals?.fingerprint ?? "",
+        cells: new Uint32Array(capacity * SPARSE_STRIDE),
+        count: 0,
+        fingerprint: this.fingerprints.get(line) ?? hashRowFingerprint(""),
       };
       this.originals.set(line, originals);
       this.fingerprints.delete(line);
@@ -1164,7 +1251,8 @@ export class KeywordHighlighter implements IDisposable {
     const last = Math.min(buffer.length - 1, Math.max(startY, endY));
     for (let y = Math.max(0, Math.min(startY, endY)); y <= last; y += 1) {
       const internal = getInternalLine(buffer.getLine(y));
-      if (internal && this.originals.get(internal)) return true;
+      const originals = internal ? this.originals.get(internal) : undefined;
+      if (originals && originals.count > 0) return true;
     }
     return false;
   }

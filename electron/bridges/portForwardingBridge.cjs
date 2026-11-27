@@ -5,31 +5,66 @@
 
 const net = require("node:net");
 const { createSocks5RequestParser } = require("./socks5Request.cjs");
-require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
-const { Client: SSHClient } = require("ssh2");
-const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
-const { connectThroughChain, buildAlgorithms } = require("./sshBridge.cjs");
-const { resolveSshConnectionTimeouts } = require("./sshBridge/startSession.cjs");
 const { remoteSoftwareRequiresSingleChannel } = require("../../domain/singleChannelSshBanner.shared.cjs");
 const hostKeyVerifier = require("./hostKeyVerifier.cjs");
-const { createProxySocket, runWhenProxyConnectionReady } = require("./proxyUtils.cjs");
 const {
   openBoundedForwardInCallback,
   openBoundedForwardOutCallback,
 } = require("./boundedSshChannelOpen.cjs");
-const { 
-  buildAuthHandler, 
-  createKeyboardInteractiveHandler, 
-  applyAuthToConnOpts,
-  shouldSkipKiPasswordAutoFill,
-  findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
-  preparePrivateKeyForAuth,
-  loadFirstIdentityFileForAuth,
-  getAvailableAgentSocket,
-  prepareSystemSshAgentForAuth,
-  isPassphraseCancelledError,
-} = require("./sshAuthHelper.cjs");
+
+let _ssh2ClientCtor = null;
+function getSshClientCtor() {
+  if (!_ssh2ClientCtor) {
+    require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
+    ({ Client: _ssh2ClientCtor } = require("ssh2"));
+  }
+  return _ssh2ClientCtor;
+}
+if (!process.versions?.electron) {
+  getSshClientCtor();
+}
+let _netcattyAgentCtor = null;
+function getNetcattyAgentCtor() {
+  if (!_netcattyAgentCtor) ({ NetcattyAgent: _netcattyAgentCtor } = require("./netcattyAgent.cjs"));
+  return _netcattyAgentCtor;
+}
+let _sshBridgeMod = null;
+function getSshBridge() {
+  if (!_sshBridgeMod) _sshBridgeMod = require("./sshBridge.cjs");
+  return _sshBridgeMod;
+}
+let _startSessionMod = null;
+function getStartSessionMod() {
+  if (!_startSessionMod) _startSessionMod = require("./sshBridge/startSession.cjs");
+  return _startSessionMod;
+}
+let _proxyUtilsMod = null;
+function getProxyUtils() {
+  if (!_proxyUtilsMod) _proxyUtilsMod = require("./proxyUtils.cjs");
+  return _proxyUtilsMod;
+}
+let _sshAuthHelperMod = null;
+function getSshAuthHelper() {
+  if (!_sshAuthHelperMod) _sshAuthHelperMod = require("./sshAuthHelper.cjs");
+  return _sshAuthHelperMod;
+}
+
+const connectThroughChain = (...args) => getSshBridge().connectThroughChain(...args);
+const buildAlgorithms = (...args) => getSshBridge().buildAlgorithms(...args);
+const resolveSshConnectionTimeouts = (...args) => getStartSessionMod().resolveSshConnectionTimeouts(...args);
+const createProxySocket = (...args) => getProxyUtils().createProxySocket(...args);
+const runWhenProxyConnectionReady = (...args) => getProxyUtils().runWhenProxyConnectionReady(...args);
+const buildAuthHandler = (...args) => getSshAuthHelper().buildAuthHandler(...args);
+const createKeyboardInteractiveHandler = (...args) => getSshAuthHelper().createKeyboardInteractiveHandler(...args);
+const applyAuthToConnOpts = (...args) => getSshAuthHelper().applyAuthToConnOpts(...args);
+const shouldSkipKiPasswordAutoFill = (...args) => getSshAuthHelper().shouldSkipKiPasswordAutoFill(...args);
+const findAllDefaultPrivateKeysFromHelper = (...args) => getSshAuthHelper().findAllDefaultPrivateKeys(...args);
+const preparePrivateKeyForAuth = (...args) => getSshAuthHelper().preparePrivateKeyForAuth(...args);
+const loadFirstIdentityFileForAuth = (...args) => getSshAuthHelper().loadFirstIdentityFileForAuth(...args);
+const getAvailableAgentSocket = (...args) => getSshAuthHelper().getAvailableAgentSocket(...args);
+const prepareSystemSshAgentForAuth = (...args) => getSshAuthHelper().prepareSystemSshAgentForAuth(...args);
+const isPassphraseCancelledError = (...args) => getSshAuthHelper().isPassphraseCancelledError(...args);
 const {
   createTransport,
   borrowTransport,
@@ -1374,6 +1409,7 @@ async function startPortForward(event, payload, { bindChannels = bindPortForward
     }
   }
 
+  const SSHClient = getSshClientCtor();
   const conn = new SSHClient();
   tunnelState.conn = conn;
   tunnelState.chainConnections = chainConnections;
@@ -1496,6 +1532,7 @@ async function startPortForward(event, payload, { bindChannels = bindPortForward
       connectOpts.agent = systemAuthAgent;
     }
     if (hasCertificate && !isFido) {
+      const NetcattyAgent = getNetcattyAgentCtor();
       connectOpts.agent = new NetcattyAgent({
         mode: "certificate",
         webContents: sender,
@@ -1977,7 +2014,20 @@ function registerHandlers(ipcMain, options = {}) {
     const trackedTunnelIds = new Set();
     const tunnelRuleIds = new Map();
 
+    const isWorkerRunning = () => (
+      typeof terminalWorkerManager.isRunning === "function"
+        ? terminalWorkerManager.isRunning()
+        : true
+    );
+
+    const emptyRuntimeSnapshot = () => ({
+      epoch: PROCESS_EPOCH,
+      revision: 0,
+      records: [],
+    });
+
     const unsubscribeDestroyedSender = (webContentsId) => {
+      if (!isWorkerRunning()) return;
       void terminalWorkerManager.request(
         "netcatty:portforward:unsubscribeSender",
         { webContentsId },
@@ -2036,8 +2086,11 @@ function registerHandlers(ipcMain, options = {}) {
       if (ruleId) tunnelRuleIds.set(tunnelId, ruleId);
     };
 
-    const requestWorker = (channel, { track = false, cleanup = null } = {}) => {
+    const requestWorker = (channel, { track = false, cleanup = null, idleResult } = {}) => {
       ipcMain.handle(channel, async (event, payload) => {
+        if (idleResult !== undefined && !isWorkerRunning()) {
+          return typeof idleResult === "function" ? idleResult(payload) : idleResult;
+        }
         const pendingSenderEntry = track ? ensureSenderLifecycle(event?.sender) : null;
         try {
           const result = await terminalWorkerManager.request(channel, payload, {
@@ -2069,17 +2122,30 @@ function registerHandlers(ipcMain, options = {}) {
     };
 
     requestWorker("netcatty:portforward:start", { track: true });
-    requestWorker("netcatty:portforward:stop", { cleanup: "tunnel" });
-    requestWorker("netcatty:portforward:status");
-    requestWorker("netcatty:portforward:subscribe", { track: true });
-    requestWorker("netcatty:portforward:list");
-    requestWorker("netcatty:portforward:snapshot");
+    requestWorker("netcatty:portforward:stop", {
+      cleanup: "tunnel",
+      idleResult: (payload) => ({ tunnelId: payload?.tunnelId, success: false, error: "Tunnel not found" }),
+    });
+    requestWorker("netcatty:portforward:status", {
+      idleResult: (payload) => ({ tunnelId: payload?.tunnelId, status: "inactive" }),
+    });
+    requestWorker("netcatty:portforward:subscribe", {
+      track: true,
+      idleResult: (payload) => ({ tunnelId: payload?.tunnelId, status: "inactive" }),
+    });
+    requestWorker("netcatty:portforward:list", { idleResult: () => [] });
+    requestWorker("netcatty:portforward:snapshot", { idleResult: emptyRuntimeSnapshot });
     // Runtime subscriptions are process-scoped (no tunnelId). Keep the sender
     // lifecycle entry so a destroyed window still calls unsubscribeSender,
-    // which clears worker-side runtimeEventSubscribers.
+    // which clears worker-side runtimeEventSubscribers. Do not cold-start the
+    // terminal worker solely to observe an empty runtime; replay active
+    // subscribers once the worker actually boots.
     ipcMain.handle("netcatty:portforward:subscribeRuntime", async (event, payload) => {
       const entry = ensureSenderLifecycle(event?.sender);
       if (entry) entry.runtimeSubscribed = true;
+      if (!isWorkerRunning()) {
+        return emptyRuntimeSnapshot();
+      }
       try {
         return await terminalWorkerManager.request(
           "netcatty:portforward:subscribeRuntime",
@@ -2096,6 +2162,11 @@ function registerHandlers(ipcMain, options = {}) {
     });
     ipcMain.handle("netcatty:portforward:unsubscribeRuntime", async (event, payload) => {
       const entry = subscriptionsBySender.get(event?.sender?.id);
+      if (!isWorkerRunning()) {
+        if (entry) entry.runtimeSubscribed = false;
+        releaseEmptySenderLifecycle(event?.sender, entry);
+        return { success: true };
+      }
       try {
         return await terminalWorkerManager.request(
           "netcatty:portforward:unsubscribeRuntime",
@@ -2107,8 +2178,28 @@ function registerHandlers(ipcMain, options = {}) {
         releaseEmptySenderLifecycle(event?.sender, entry);
       }
     });
-    requestWorker("netcatty:portforward:stopAll", { cleanup: "all" });
-    requestWorker("netcatty:portforward:stopByRuleId", { cleanup: "rule" });
+    requestWorker("netcatty:portforward:stopAll", {
+      cleanup: "all",
+      idleResult: () => {
+        for (const tunnelId of [...trackedTunnelIds]) forgetTunnel(tunnelId);
+        return undefined;
+      },
+    });
+    requestWorker("netcatty:portforward:stopByRuleId", {
+      cleanup: "rule",
+      idleResult: () => ({ stopped: 0, failed: 0, errors: [] }),
+    });
+
+    terminalWorkerManager.onWorkerStarted?.(() => {
+      for (const entry of subscriptionsBySender.values()) {
+        if (!entry.runtimeSubscribed || entry.sender?.isDestroyed?.()) continue;
+        void terminalWorkerManager.request(
+          "netcatty:portforward:subscribeRuntime",
+          undefined,
+          { webContentsId: entry.sender.id },
+        ).catch(() => {});
+      }
+    });
 
     terminalWorkerManager.onWorkerRendererEvent?.((message) => {
       if (message?.channel === "netcatty:portforward:runtime") {

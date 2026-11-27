@@ -500,7 +500,7 @@ test("findReusableSession refuses reuse when the source has no recorded endpoint
 
 test("default idle TTL constant is 5 minutes", () => {
   assert.equal(DEFAULT_SSH_TRANSPORT_IDLE_TTL_MS, 5 * 60_000);
-  assert.equal(DEFAULT_MAX_IDLE_SSH_TRANSPORTS, 128);
+  assert.equal(DEFAULT_MAX_IDLE_SSH_TRANSPORTS, 24);
 });
 
 test("TTL-zero idle pool enforces a hard global limit without ending active transports", () => {

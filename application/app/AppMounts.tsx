@@ -196,9 +196,9 @@ export const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
   const isVisible = isTerminalSurfaceActive || !!props.draggingSessionId;
   // Silent MCP sessions never become the activeTabId, so `isVisible` alone
   // would leave this whole layer (and its PTY-starting TerminalPane) unmounted
-  // for up to 5s (the idle-callback fallback below) after host_open returns —
-  // long enough for an immediate terminal_execute to race an unstarted session.
+  // after host_open returns — racing an immediate terminal_execute.
   const hasHiddenSession = props.sessions.some((session) => session.hiddenFromTabs);
+  const hasTerminalContent = props.sessions.length > 0 || props.workspaces.length > 0;
   const [shouldMount, setShouldMount] = useState(isVisible || hasHiddenSession);
 
   useEffect(() => {
@@ -206,19 +206,8 @@ export const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
   }, [isVisible, hasHiddenSession]);
 
   useEffect(() => {
-    if (shouldMount) return;
-    type IdleWindow = Window & {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-      cancelIdleCallback?: (id: number) => void;
-    };
-    const idleWindow = window as IdleWindow;
-    if (typeof idleWindow.requestIdleCallback === "function") {
-      const id = idleWindow.requestIdleCallback(() => setShouldMount(true), { timeout: 5000 });
-      return () => idleWindow.cancelIdleCallback?.(id);
-    }
-    const id = window.setTimeout(() => setShouldMount(true), 5000);
-    return () => window.clearTimeout(id);
-  }, [shouldMount]);
+    if (hasTerminalContent) setShouldMount(true);
+  }, [hasTerminalContent]);
 
   const shouldRender = shouldRenderTerminalLayerMount(isVisible, shouldMount);
 

@@ -64,7 +64,7 @@ import { useI18n } from '../application/i18n/I18nProvider';
 import { SftpSidePanel } from './SftpSidePanel';
 import { ScriptsSidePanel } from './ScriptsSidePanel';
 import { HistorySidePanel } from './HistorySidePanel';
-import { NotesManager } from './notes/NotesManager';
+import { LazyNotesManager as NotesManager } from './notes/LazyNotesManager';
 import { terminalCwdStore } from '../application/state/terminalCwdStore';
 import { resolveSnippetCommand } from './SnippetExecutionProvider';
 import type { Snippet } from '../types';

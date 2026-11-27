@@ -1783,39 +1783,43 @@ export async function handleRemoteDesktopScreenRead(
   };
 }
 
+export async function dispatchVaultAgentBridgeRequest(
+  payload: { requestId: string; op: string; params?: Record<string, unknown> },
+): Promise<void> {
+  const bridge = netcattyBridge.get();
+  if (!bridge?.respondVaultAgent) return;
+  const { requestId, op, params } = payload;
+  const safeParams = params || {};
+  const runHandler = async () => {
+    try {
+      const result = op === 'terminal.readContext'
+        ? await handleTerminalContextRead(safeParams)
+        : op === 'remoteDesktop.readScreen'
+          ? await handleRemoteDesktopScreenRead(safeParams)
+          : activeHandler ? await activeHandler(op, safeParams)
+          : { ok: false, error: 'Vault agent bridge is not ready.' };
+      await bridge.respondVaultAgent?.(requestId, result);
+    } catch (err) {
+      await bridge.respondVaultAgent?.(requestId, {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  if (shouldBypassVaultAgentSerialization(op, safeParams)) {
+    await runHandler();
+    return;
+  }
+
+  await runSerializedVaultAgentRequest(runHandler);
+}
+
 export function setupVaultAgentBridge(): () => void {
   const bridge = netcattyBridge.get();
   if (!bridge?.onVaultAgentRequest || !bridge.respondVaultAgent) {
     return () => {};
   }
 
-  const unsubscribe = bridge.onVaultAgentRequest(async (payload) => {
-    const { requestId, op, params } = payload;
-    const safeParams = params || {};
-    const runHandler = async () => {
-      try {
-        const result = op === 'terminal.readContext'
-          ? await handleTerminalContextRead(safeParams)
-          : op === 'remoteDesktop.readScreen'
-            ? await handleRemoteDesktopScreenRead(safeParams)
-            : activeHandler ? await activeHandler(op, safeParams)
-            : { ok: false, error: 'Vault agent bridge is not ready.' };
-        await bridge.respondVaultAgent?.(requestId, result);
-      } catch (err) {
-        await bridge.respondVaultAgent?.(requestId, {
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    };
-
-    if (shouldBypassVaultAgentSerialization(op, safeParams)) {
-      await runHandler();
-      return;
-    }
-
-    await runSerializedVaultAgentRequest(runHandler);
-  });
-
-  return unsubscribe;
+  return bridge.onVaultAgentRequest((payload) => dispatchVaultAgentBridgeRequest(payload));
 }

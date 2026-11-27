@@ -2,6 +2,9 @@
 const {
   windowsFramelessContentChromeOptions,
 } = require("./windowsWindowChrome.cjs");
+const {
+  resolvePreloadWebPreferences,
+} = require("../../preloadPath.cjs");
 const { attachDisplayRecovery } = require("./displayRecovery.cjs");
 const {
   attachRemoteDesktopKeyboardGrab,
@@ -505,12 +508,30 @@ function createMainWindowApi(ctx) {
           preload,
           contextIsolation: true,
           nodeIntegration: false,
-          sandbox: false,
+          ...resolvePreloadWebPreferences(preload),
           spellcheck: false,
           backgroundThrottling: false,
           v8CacheOptions: V8_CACHE_OPTIONS,
         },
       });
+
+      // Dynamically enable background throttling when the window is minimized
+      // or hidden to tray (SSH/PTY I/O runs in main/worker, not renderer),
+      // cutting background CPU/heat on macOS (#3278) and allowing Chromium to
+      // reclaim hidden renderer resources.
+      const setWindowBackgroundThrottling = (throttled) => {
+        try {
+          if (!win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+            win.webContents.setBackgroundThrottling?.(throttled);
+          }
+        } catch {
+          // ignore
+        }
+      };
+      win.on("minimize", () => setWindowBackgroundThrottling(true));
+      win.on("hide", () => setWindowBackgroundThrottling(true));
+      win.on("restore", () => setWindowBackgroundThrottling(false));
+      win.on("show", () => setWindowBackgroundThrottling(false));
     
       if (registerAsMainWindow) {
         if (typeof registerMainWindow === "function") {

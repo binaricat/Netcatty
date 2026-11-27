@@ -8,11 +8,8 @@ const validateManagedPluginId = createDefinitionValidator("PluginId");
 const validatePluginViewResourceRequest = createDefinitionValidator("PluginViewResourceRequest");
 
 const { raceWithAbort } = require("./rpcRouter.cjs");
-const {
-  INLINE_SYNC_OBJECT_SAFE_BYTES,
-  MAX_SYNC_OBJECT_BYTES,
-  STREAM_WINDOW_BYTES,
-} = require("./extensionProviderService.cjs");
+const extensionProviderServiceModule = require("./extensionProviderService.cjs");
+const { STREAM_WINDOW_BYTES } = extensionProviderServiceModule;
 const { assertSecretKey } = require("./secretStore.cjs");
 
 const CHANNELS = Object.freeze({
@@ -980,7 +977,7 @@ function registerPluginBridge(ipcMain, options) {
         ? result.bytes
         : new Uint8Array(result.bytes);
       const preferStream = payload?.preferStream === true;
-      if (!preferStream && bytes.byteLength <= INLINE_SYNC_OBJECT_SAFE_BYTES) {
+      if (!preferStream && bytes.byteLength <= extensionProviderServiceModule.INLINE_SYNC_OBJECT_SAFE_BYTES) {
         extensionRequestMap(event.sender).delete(requestId);
         return {
           found: true,
@@ -1055,10 +1052,10 @@ function registerPluginBridge(ipcMain, options) {
   ipcMain.handle(CHANNELS.syncWriteObject, async (event, payload) => runExtensionRequest(event, payload, async (signal) => {
     if (!extensionProviderService) throw new Error("Plugin sync Providers are unavailable");
     const data = coerceIpcBytes(payload?.data ?? payload?.bytes, "Sync writeObject data");
-    if (data.byteLength > INLINE_SYNC_OBJECT_SAFE_BYTES) {
+    if (data.byteLength > extensionProviderServiceModule.INLINE_SYNC_OBJECT_SAFE_BYTES) {
       throw new Error("Sync writeObject payload requires the streamed write path");
     }
-    if (data.byteLength > MAX_SYNC_OBJECT_BYTES) {
+    if (data.byteLength > extensionProviderServiceModule.MAX_SYNC_OBJECT_BYTES) {
       throw new Error("Sync writeObject payload exceeds the size limit");
     }
     return extensionProviderService.writeSyncObject({
@@ -1079,7 +1076,7 @@ function registerPluginBridge(ipcMain, options) {
       throw error;
     };
     const byteLength = payload?.byteLength;
-    if (!Number.isSafeInteger(byteLength) || byteLength < 1 || byteLength > MAX_SYNC_OBJECT_BYTES) {
+    if (!Number.isSafeInteger(byteLength) || byteLength < 1 || byteLength > extensionProviderServiceModule.MAX_SYNC_OBJECT_BYTES) {
       failBegin(new TypeError("Sync writeObject byteLength is invalid"));
     }
     const providerId = payload?.providerId;

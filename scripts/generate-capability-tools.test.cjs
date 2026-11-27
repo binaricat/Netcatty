@@ -31,3 +31,51 @@ test("committed globalAgentToolSpecs.json matches listAgentToolSpecs(global)", (
   const fresh = listAgentToolSpecs(AGENT_KINDS.GLOBAL);
   assert.deepEqual(committed, fresh);
 });
+
+test("committed toolNameIndex.json matches sidebar and global capability tool specs", () => {
+  const committed = JSON.parse(
+    fs.readFileSync(path.join(GENERATED_DIR, "toolNameIndex.json"), "utf8"),
+  );
+  const globalByCapabilityId = {};
+  for (const spec of listAgentToolSpecs(AGENT_KINDS.GLOBAL)) {
+    if (spec.capabilityId && spec.toolName && !globalByCapabilityId[spec.capabilityId]) {
+      globalByCapabilityId[spec.capabilityId] = spec.toolName;
+    }
+  }
+  const sidebarByRpcMethod = {};
+  const sidebarToolNameToCapability = {};
+  const sidebarRpcMethodToCapability = {};
+  const freshApprovalSet = new Set();
+  const grantableSet = new Set();
+  for (const spec of listCattyToolSpecs()) {
+    if (spec.rpcMethod && spec.toolName && !sidebarByRpcMethod[spec.rpcMethod]) {
+      sidebarByRpcMethod[spec.rpcMethod] = spec.toolName;
+    }
+    if (spec.toolName && spec.capabilityId) {
+      sidebarToolNameToCapability[spec.toolName] = spec.capabilityId;
+    }
+    if (spec.rpcMethod && spec.capabilityId) {
+      sidebarRpcMethodToCapability[spec.rpcMethod] = spec.capabilityId;
+    }
+    if (spec.policy?.requiresFreshApproval && spec.capabilityId) {
+      freshApprovalSet.add(spec.capabilityId);
+    }
+    if (
+      spec.policy?.write
+      && !spec.policy?.bypassesApproval
+      && !spec.policy?.requiresFreshApproval
+      && spec.capabilityId
+    ) {
+      grantableSet.add(spec.capabilityId);
+    }
+  }
+  assert.deepEqual(committed, {
+    globalByCapabilityId,
+    sidebarByRpcMethod,
+    sidebarToolNameToCapability,
+    sidebarRpcMethodToCapability,
+    freshApprovalOnlyCapabilities: [...freshApprovalSet].sort(),
+    grantableCapabilityIds: [...grantableSet].sort(),
+  });
+});
+

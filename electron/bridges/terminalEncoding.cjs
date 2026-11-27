@@ -13,7 +13,11 @@
  * with the *same* charset closes that gap.
  */
 
-const iconv = require("iconv-lite");
+let _iconv = null;
+function getIconv() {
+  if (!_iconv) _iconv = require("iconv-lite");
+  return _iconv;
+}
 
 // Normalize user-facing charset names into an iconv-lite encoding identifier.
 // iconv-lite accepts a wide range of aliases directly ("utf-8", "gbk", etc.),
@@ -32,7 +36,7 @@ function normalizeTerminalEncoding(charset) {
     if (["gb18030", "gbk", "gb2312", "cp936", "ms936"].includes(normalized)) {
       return "gb18030";
     }
-    if (iconv.encodingExists(candidate)) return candidate;
+    if (getIconv().encodingExists(candidate)) return candidate;
   }
 
   return "utf-8";
@@ -67,8 +71,8 @@ function isAsciiCompatibleEncoding(encoding) {
   try {
     // \r and ESC cover the control bytes we care about; a single C0 probe is
     // enough since ASCII-incompatible encodings widen every code point.
-    const cr = iconv.encode("\r", encoding);
-    const esc = iconv.encode("\x1b", encoding);
+    const cr = getIconv().encode("\r", encoding);
+    const esc = getIconv().encode("\x1b", encoding);
     compatible = cr.length === 1 && cr[0] === 0x0d && esc.length === 1 && esc[0] === 0x1b;
   } catch {
     compatible = false;
@@ -95,9 +99,9 @@ function isAsciiCompatibleEncoding(encoding) {
 function encodeTerminalInput(data, encoding) {
   if (typeof data !== "string") return data;
   if (isUtf8Encoding(encoding)) return data;
-  if (!iconv.encodingExists(encoding)) return data;
+  if (!getIconv().encodingExists(encoding)) return data;
   if (!isAsciiCompatibleEncoding(encoding)) return data;
-  return iconv.encode(data, encoding);
+  return getIconv().encode(data, encoding);
 }
 
 // Only expand a single Backspace. Other input (including plugin replacements)

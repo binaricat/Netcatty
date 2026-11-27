@@ -2,9 +2,11 @@ const {
   clearTerminalDataSession,
   hasPluginPipelineIngressMarker,
 } = require("./terminalDataBacklog.cjs");
-const { randomUUID } = require("node:crypto");
-const fs = require("node:fs");
-const { stageRendererFileToTemp } = require("./stageUploadFile.cjs");
+const {
+  stageRendererFileToTemp,
+  stageRendererFileViaIpc,
+} = require("./stageUploadFile.cjs");
+const randomUUID = () => globalThis.crypto.randomUUID();
 
 function createPreloadApi(ctx) {
   const sessionLogFinalizers = new Set();
@@ -1963,11 +1965,21 @@ function createPreloadApi(ctx) {
     uploadStageControllers.set(transferId, controller);
     let localPath = null;
     try {
-      localPath = await ipcRenderer.invoke("netcatty:tempdir:createUploadPath", {
-        transferId: `${transferId}-${randomUUID()}`,
-        fileName: file?.name || "upload.bin",
-      });
-      return await stageRendererFileToTemp(file, localPath, fs, controller.signal);
+      const stagedTransferId = `${transferId}-${randomUUID()}`;
+      const fileName = file?.name || "upload.bin";
+      if (ctx.fs) {
+        localPath = await ipcRenderer.invoke("netcatty:tempdir:createUploadPath", {
+          transferId: stagedTransferId,
+          fileName,
+        });
+        return await stageRendererFileToTemp(file, localPath, ctx.fs, controller.signal);
+      }
+      return await stageRendererFileViaIpc(
+        file,
+        ipcRenderer,
+        { transferId: stagedTransferId, fileName },
+        controller.signal,
+      );
     } catch (error) {
       if (localPath) {
         await ipcRenderer.invoke("netcatty:deleteTempFile", { filePath: localPath }).catch(() => {});

@@ -48,6 +48,7 @@ import { Switch } from "../ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { HostDetailsSettingRow } from "./HostDetailsSection";
 import { IdentitySuggestInput } from "./IdentitySuggestInput";
+import { RdpResolutionFields, type RdpResolutionDraftProps } from "./RdpResolutionFields";
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
@@ -65,7 +66,7 @@ interface CompanionRemoteDesktopSectionsProps {
   t: Translate;
 }
 
-interface CompanionRemoteDesktopInlineFieldsProps extends CompanionRemoteDesktopSectionsProps {
+interface CompanionRemoteDesktopInlineFieldsProps extends CompanionRemoteDesktopSectionsProps, RdpResolutionDraftProps {
   protocol: "vnc" | "rdp";
   credentialDraft?: CompanionCredentialDraft;
   onCredentialDraftChange?: (draft: CompanionCredentialDraft | undefined) => void;
@@ -83,6 +84,8 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
   availableKeys = [],
   credentialDraft,
   onCredentialDraftChange,
+  resolutionDraft,
+  onResolutionDraftChange,
   t,
 }) => {
   const [vncPortInput, setVncPortInput] = useState<string>(() =>
@@ -542,6 +545,16 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
           </SelectContent>
         </Select>
       </HostDetailsSettingRow>
+
+      {rdpNormalized.resolutionMode === "fixed" && (
+        <RdpResolutionFields
+          form={form}
+          setForm={setForm}
+          t={t}
+          resolutionDraft={resolutionDraft}
+          onResolutionDraftChange={onResolutionDraftChange}
+        />
+      )}
 
       <HostDetailsSettingRow
         icon={<ShieldCheck />}

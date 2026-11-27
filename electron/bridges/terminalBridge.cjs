@@ -15,13 +15,29 @@ const { ensureNodePtySpawnHelperExecutable } = require("./nodePtySpawnHelperPerm
 const { createTerminalFlowPauseArbiter } = require("./terminalFlowPauseArbiter.cjs");
 const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
 
-ensureNodePtySpawnHelperExecutable();
+const isElectronRuntime = Boolean(process.versions?.electron);
 
 const terminalFlowPauseArbiter = createTerminalFlowPauseArbiter();
 const trackedFlowPauseSenders = new WeakSet();
 
-const pty = require("node-pty");
-const { SerialPort } = require("serialport");
+let _pty = null;
+let _serialPort = null;
+if (!isElectronRuntime) {
+  ensureNodePtySpawnHelperExecutable();
+  _pty = require("node-pty");
+  ({ SerialPort: _serialPort } = require("serialport"));
+}
+function getPty() {
+  if (!_pty) {
+    ensureNodePtySpawnHelperExecutable();
+    _pty = require("node-pty");
+  }
+  return _pty;
+}
+function getSerialPort() {
+  if (!_serialPort) ({ SerialPort: _serialPort } = require("serialport"));
+  return _serialPort;
+}
 const { createSerialTransport } = require("./serialNamedPipe.cjs");
 const {
   configureTerminalSessionDataEmitter,
@@ -53,16 +69,31 @@ const {
   stashPendingInterruptOutputMeta,
   takePendingInterruptOutputMeta,
 } = require("./terminalInterruptOutputGate.cjs");
-const iconv = require("iconv-lite");
+let _iconv = null;
+function getIconv() {
+  if (!_iconv) _iconv = require("iconv-lite");
+  return _iconv;
+}
 const ptyProcessTree = require("./ptyProcessTree.cjs");
 
 const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
-const { detectShellKind } = require("./ai/ptyExec.cjs");
-const { stripAnsi, trackSessionIdlePrompt } = require("./ai/shellUtils.cjs");
+let _ptyExecHelpers = null;
+const detectShellKind = (...args) => (_ptyExecHelpers ??= require("./ai/ptyExecHelpers.cjs")).detectShellKind(...args);
+let _shellUtils = null;
+function getShellUtils() {
+  if (!_shellUtils) _shellUtils = require("./ai/shellUtils.cjs");
+  return _shellUtils;
+}
+const stripAnsi = (...args) => getShellUtils().stripAnsi(...args);
+const trackSessionIdlePrompt = (...args) => getShellUtils().trackSessionIdlePrompt(...args);
 const { createZmodemSentry } = require("./zmodemHelper.cjs");
 const { discoverShells } = require("./shellDiscovery.cjs");
 const { isWindowsAppExecutionAliasPath } = require("../../lib/localShell.cjs");
-const moshHandshake = require("./moshHandshake.cjs");
+let _moshHandshake = null;
+function getMoshHandshake() {
+  if (!_moshHandshake) _moshHandshake = require("./moshHandshake.cjs");
+  return _moshHandshake;
+}
 const tempDirBridge = require("./tempDirBridge.cjs");
 const { preparePowerShellDirectoryIntegration } = require('./powerShellDirectoryIntegration.cjs');
 const { prepareCmdDirectoryIntegration } = require('./cmdDirectoryIntegration.cjs');
@@ -75,11 +106,14 @@ const { releaseConnectionRef } = require("./sshConnectionPool.cjs");
 const { normalizeTerminalEncoding, encodeTerminalInput, expandSerialBackspace } = require("./terminalEncoding.cjs");
 const { isTerminalReportSequence } = require("./terminalReportSequence.cjs");
 const { receiveYmodemFiles, sendYmodemCancel, sendYmodemFile } = require("./ymodemTransfer.cjs");
-const {
-  getNativeOpenSshAgentSocket,
-  getNativeOpenSshForwardingAgentSocket,
-  prepareSystemSshAgentForAuth,
-} = require("./sshAuthHelper.cjs");
+let _sshAuthHelper = null;
+function getSshAuthHelper() {
+  if (!_sshAuthHelper) _sshAuthHelper = require("./sshAuthHelper.cjs");
+  return _sshAuthHelper;
+}
+const getNativeOpenSshAgentSocket = (...args) => getSshAuthHelper().getNativeOpenSshAgentSocket(...args);
+const getNativeOpenSshForwardingAgentSocket = (...args) => getSshAuthHelper().getNativeOpenSshForwardingAgentSocket(...args);
+const prepareSystemSshAgentForAuth = (...args) => getSshAuthHelper().prepareSystemSshAgentForAuth(...args);
 
 const execFileAsync = promisify(execFile);
 
@@ -1133,7 +1167,7 @@ async function startLocalSession(event, payload) {
       ? prepareGitBashDirectoryIntegration(shell, shellArgs, env, discoverShells().find(item => item.id === 'git-bash')?.command) : null);
   let proc;
   try {
-    proc = pty.spawn(shell, directoryIntegration?.args ?? shellArgs, {
+    proc = getPty().spawn(shell, directoryIntegration?.args ?? shellArgs, {
       name: env.TERM || "xterm-256color",
       cols: payload?.cols || 80,
       rows: payload?.rows || 24,
@@ -1313,91 +1347,126 @@ async function startLocalSession(event, payload) {
 /**
  * Start a Telnet session using native Node.js net module
  */
-const { createTelnetSessionApi } = require("./terminalBridge/telnetSession.cjs");
-const telnetSessionApi = createTelnetSessionApi({
-  get sessions() { return sessions; },
-  get electronModule() { return electronModule; },
-  net, randomUUID, StringDecoder, iconv, Buffer, console, setTimeout, clearTimeout,
-  normalizeTerminalEncoding, encodeTerminalInput, createTelnetAutoLogin, telnetProtocol,
-  createPtyOutputBuffer, sessionLogStreamManager, createZmodemSentry, ptyProcessTree,
-  enableTcpNoDelay, trackSessionIdlePrompt, stripAnsi, clearPendingAutomatedWrites,
-  openTerminalOutputSession, closeTerminalOutputSession,
-  get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
-  get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
-});
-const { startTelnetSession } = telnetSessionApi;
+let _telnetSessionApi = null;
+function getTelnetSessionApi() {
+  if (!_telnetSessionApi) {
+    const { createTelnetSessionApi } = require("./terminalBridge/telnetSession.cjs");
+    _telnetSessionApi = createTelnetSessionApi({
+      get sessions() { return sessions; },
+      get electronModule() { return electronModule; },
+      get iconv() { return getIconv(); },
+      net, randomUUID, StringDecoder, Buffer, console, setTimeout, clearTimeout,
+      normalizeTerminalEncoding, encodeTerminalInput, createTelnetAutoLogin, telnetProtocol,
+      createPtyOutputBuffer, sessionLogStreamManager, createZmodemSentry, ptyProcessTree,
+      enableTcpNoDelay, trackSessionIdlePrompt, stripAnsi, clearPendingAutomatedWrites,
+      openTerminalOutputSession, closeTerminalOutputSession,
+      get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
+      get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
+    });
+  }
+  return _telnetSessionApi;
+}
+const startTelnetSession = (...args) => getTelnetSessionApi().startTelnetSession(...args);
 
 /**
  * Resolve Netcatty's bundled bare `mosh-client` binary.
  *
  * Returns the absolute path or null.
  */
-const { createMoshSessionApi } = require("./terminalBridge/moshSession.cjs");
-const moshSessionApi = createMoshSessionApi({
-  get sessions() { return sessions; },
-  get electronModule() { return electronModule; },
-  os, fs, net, path, pty, iconv, Buffer, StringDecoder, process, console,
-  setTimeout, clearTimeout, setInterval, clearInterval,
-  randomUUID, execFileAsync, ptyProcessTree, sessionLogStreamManager,
-  stripAnsi, trackSessionIdlePrompt, createZmodemSentry, moshHandshake, tempDirBridge,
-  createPtyOutputBuffer, enableTcpNoDelay, normalizeTerminalEncoding,
-  resolvePosixExecutable, findExecutable, isExecutableFile,
-  openTerminalOutputSession, closeTerminalOutputSession,
-  get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
-  get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
-  ensureMoshStatsConnection: (...args) => require("./sshBridge.cjs").ensureMoshStatsConnection(...args),
-  getAvailableAgentSocket: getNativeOpenSshAgentSocket,
-  getAvailableForwardingAgentSocket: getNativeOpenSshForwardingAgentSocket,
-  prepareSystemSshAgentForAuth,
-  bundledMoshClient: (...args) => bundledMoshClient(...args),
-});
-const {
-  resolveBareMoshClient,
-  addBundledMoshRuntimeEnv,
-  createMoshUtf8Decoder,
-  buildMoshSshAuthArgs,
-  cleanupMoshAuthTempFiles,
-  startMoshSessionViaHandshake,
-  swapToMoshClient,
-  resolveLangFromCharsetForMosh,
-  startMoshSession,
-} = moshSessionApi;
+let _moshSessionApi = null;
+function getMoshSessionApi() {
+  if (!_moshSessionApi) {
+    const { createMoshSessionApi } = require("./terminalBridge/moshSession.cjs");
+    _moshSessionApi = createMoshSessionApi({
+      get sessions() { return sessions; },
+      get electronModule() { return electronModule; },
+      get pty() { return getPty(); },
+      get iconv() { return getIconv(); },
+      get moshHandshake() { return getMoshHandshake(); },
+      os, fs, net, path, Buffer, StringDecoder, process, console,
+      setTimeout, clearTimeout, setInterval, clearInterval,
+      randomUUID, execFileAsync, ptyProcessTree, sessionLogStreamManager,
+      stripAnsi, trackSessionIdlePrompt, createZmodemSentry, tempDirBridge,
+      createPtyOutputBuffer, enableTcpNoDelay, normalizeTerminalEncoding,
+      resolvePosixExecutable, findExecutable, isExecutableFile,
+      openTerminalOutputSession, closeTerminalOutputSession,
+      get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
+      get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
+      ensureMoshStatsConnection: (...args) => require("./sshBridge.cjs").ensureMoshStatsConnection(...args),
+      getAvailableAgentSocket: getNativeOpenSshAgentSocket,
+      getAvailableForwardingAgentSocket: getNativeOpenSshForwardingAgentSocket,
+      prepareSystemSshAgentForAuth,
+      bundledMoshClient: (...args) => bundledMoshClient(...args),
+    });
+  }
+  return _moshSessionApi;
+}
+const resolveBareMoshClient = (...args) => getMoshSessionApi().resolveBareMoshClient(...args);
+const addBundledMoshRuntimeEnv = (...args) => getMoshSessionApi().addBundledMoshRuntimeEnv(...args);
+const createMoshUtf8Decoder = (...args) => getMoshSessionApi().createMoshUtf8Decoder(...args);
+const buildMoshSshAuthArgs = (...args) => getMoshSessionApi().buildMoshSshAuthArgs(...args);
+const cleanupMoshAuthTempFiles = (...args) => getMoshSessionApi().cleanupMoshAuthTempFiles(...args);
+const startMoshSessionViaHandshake = (...args) => getMoshSessionApi().startMoshSessionViaHandshake(...args);
+const swapToMoshClient = (...args) => getMoshSessionApi().swapToMoshClient(...args);
+const resolveLangFromCharsetForMosh = (...args) => getMoshSessionApi().resolveLangFromCharsetForMosh(...args);
+const startMoshSession = (...args) => getMoshSessionApi().startMoshSession(...args);
 
 /**
  * EternalTerminal session API. `et` is a self-contained client that performs
  * its own SSH bootstrap + ET protocol handshake, so Netcatty just spawns the
  * bundled `et` binary as a PTY (no Node handshake wrapper like Mosh needs).
  */
-const { createEtSessionApi } = require("./terminalBridge/etSession.cjs");
-const etSessionApi = createEtSessionApi({
-  get sessions() { return sessions; },
-  get electronModule() { return electronModule; },
-  os, fs, path, pty, process, console,
-  randomUUID, execFile, execFileSync, StringDecoder,
-  sessionLogStreamManager, tempDirBridge,
-  createZmodemSentry, trackSessionIdlePrompt, createPtyOutputBuffer,
-  findExecutable,
-  openTerminalOutputSession, closeTerminalOutputSession,
-  getAvailableAgentSocket: getNativeOpenSshAgentSocket,
-  getAvailableForwardingAgentSocket: getNativeOpenSshForwardingAgentSocket,
-  prepareSystemSshAgentForAuth,
-  get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
-  get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
-  bundledEtClient: (...args) => bundledEtClient(...args),
-});
-const {
-  startEtSession,
-  execOnEtSession,
-  cleanupStaleEtTempDirs,
-  cleanupSessionExternalAuthArtifacts,
-} = etSessionApi;
+let _etSessionApi = null;
+function getEtSessionApi() {
+  if (!_etSessionApi) {
+    const { createEtSessionApi } = require("./terminalBridge/etSession.cjs");
+    _etSessionApi = createEtSessionApi({
+      get sessions() { return sessions; },
+      get electronModule() { return electronModule; },
+      get pty() { return getPty(); },
+      os, fs, path, process, console,
+      randomUUID, execFile, execFileSync, StringDecoder,
+      sessionLogStreamManager, tempDirBridge,
+      createZmodemSentry, trackSessionIdlePrompt, createPtyOutputBuffer,
+      findExecutable,
+      openTerminalOutputSession, closeTerminalOutputSession,
+      getAvailableAgentSocket: getNativeOpenSshAgentSocket,
+      getAvailableForwardingAgentSocket: getNativeOpenSshForwardingAgentSocket,
+      prepareSystemSshAgentForAuth,
+      get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
+      get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
+      bundledEtClient: (...args) => bundledEtClient(...args),
+    });
+  }
+  return _etSessionApi;
+}
+const startEtSession = (...args) => getEtSessionApi().startEtSession(...args);
+const execOnEtSession = (...args) => getEtSessionApi().execOnEtSession(...args);
+function cleanupStaleEtTempDirs() {
+  try {
+    const tempDir = tempDirBridge.getTempDir();
+    if (!fs.existsSync(tempDir)) return;
+    const entries = fs.readdirSync(tempDir);
+    for (const entry of entries) {
+      if (!entry.startsWith("et-ssh-home-")) continue;
+      try {
+        fs.rmSync(path.join(tempDir, entry), { recursive: true, force: true });
+      } catch {
+        // ignore per-entry cleanup failures
+      }
+    }
+  } catch {
+    // ignore — best-effort cleanup
+  }
+}
+const cleanupSessionExternalAuthArtifacts = (...args) => getEtSessionApi().cleanupSessionExternalAuthArtifacts(...args);
 
 /**
  * List available serial ports (hardware only)
  */
 async function listSerialPorts() {
   try {
-    const ports = await SerialPort.list();
+    const ports = await getSerialPort().list();
     return ports.map(port => ({
       path: port.path,
       manufacturer: port.manufacturer || '',
@@ -1464,7 +1533,7 @@ async function startSerialSession(event, options) {
         xon: flowControl === 'xon/xoff',
         xoff: flowControl === 'xon/xoff',
         autoOpen: false,
-      }, SerialPort);
+      }, getSerialPort());
 
       const abortPendingOpen = () => {
         try { serialPort.close(); } catch { /* ignore */ }
@@ -1496,7 +1565,7 @@ async function startSerialSession(event, options) {
         console.log(`[Serial] Connected to ${portPath}`);
 
         const initialSerialEncoding = normalizeTerminalEncoding(options.charset);
-        const serialDecoderRef = { current: iconv.getDecoder(initialSerialEncoding) };
+        const serialDecoderRef = { current: getIconv().getDecoder(initialSerialEncoding) };
 
         const session = {
           serialPort,
@@ -2548,7 +2617,7 @@ function setSessionEncoding(_event, { sessionId, encoding }) {
     return { ok: false, encoding: encoding || 'utf-8' };
   }
   const enc = normalizeTerminalEncoding(encoding);
-  if (!iconv.encodingExists(enc)) {
+  if (!getIconv().encodingExists(enc)) {
     return { ok: false, encoding: enc };
   }
   session.encoding = enc;
@@ -2559,7 +2628,7 @@ function setSessionEncoding(_event, { sessionId, encoding }) {
   }
   // iconv stateful decoders carry partial-byte state from the previous
   // encoding, so swap in a fresh decoder rather than reconfiguring.
-  session.decoderRef.current = iconv.getDecoder(enc);
+  session.decoderRef.current = getIconv().getDecoder(enc);
   return { ok: true, encoding: enc };
 }
 
@@ -2743,12 +2812,15 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:serial:list",
       "netcatty:serial:ymodem-send",
       "netcatty:serial:ymodem-receive",
-      "netcatty:local:defaultShell",
-      "netcatty:local:validatePath",
-      "netcatty:shells:discover",
       "netcatty:terminal:setEncoding",
       "netcatty:telnet:getEchoMode",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    // Stateless local shell/path queries do not depend on worker session state;
+    // serving them directly in main avoids spawning the terminal utilityProcess
+    // (45+ MiB) during cold 0-host startup or host-editor validation.
+    ipcMain.handle("netcatty:local:defaultShell", getDefaultShell);
+    ipcMain.handle("netcatty:local:validatePath", validatePath);
+    ipcMain.handle("netcatty:shells:discover", () => discoverShells());
     ipcMain.handle("netcatty:close:await", async (event, payload) => {
       const result = await terminalWorkerManager.request("netcatty:close:await", payload, {
         webContentsId: event?.sender?.id,

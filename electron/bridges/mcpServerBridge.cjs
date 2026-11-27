@@ -10,18 +10,47 @@ const net = require("node:net");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { PluginAgentMcpDelegations } = require("../plugins/agent/mcpDelegation.cjs");
-const pluginAgentDelegations = new PluginAgentMcpDelegations();
+let _pluginAgentDelegations = null;
+function getPluginAgentDelegations() {
+  if (!_pluginAgentDelegations) {
+    const { PluginAgentMcpDelegations } = require("../plugins/agent/mcpDelegation.cjs");
+    _pluginAgentDelegations = new PluginAgentMcpDelegations();
+  }
+  return _pluginAgentDelegations;
+}
+const pluginAgentDelegations = {
+  authenticate: (token, socket) => _pluginAgentDelegations?.authenticate(token, socket) ?? false,
+  boundChat: (socket) => _pluginAgentDelegations?.boundChat(socket) ?? null,
+  isReserved: (chatSessionId) => _pluginAgentDelegations?.isReserved(chatSessionId) ?? false,
+  isApproved: (context) => _pluginAgentDelegations?.isApproved(context) ?? false,
+  dispatch: (...args) => getPluginAgentDelegations().dispatch(...args),
+  shutdown: () => _pluginAgentDelegations?.shutdown(),
+  register: (...args) => getPluginAgentDelegations().register(...args),
+  configuration: (...args) => getPluginAgentDelegations().configuration(...args),
+  assertCaller: (...args) => getPluginAgentDelegations().assertCaller(...args),
+  onRelease: (...args) => getPluginAgentDelegations().onRelease(...args),
+  beginModelRequest: (...args) => getPluginAgentDelegations().beginModelRequest(...args),
+};
 const { existsSync } = require("node:fs");
 
-const { toUnpackedAsarPath, getFreshIdlePrompt, getVisibleIdlePrompt, formatSyntheticEcho } = require("./ai/shellUtils.cjs");
+let _shellUtils = null;
+const getShellUtils = () => (_shellUtils ??= require("./ai/shellUtils.cjs"));
+const toUnpackedAsarPath = (...args) => getShellUtils().toUnpackedAsarPath(...args);
+const getFreshIdlePrompt = (...args) => getShellUtils().getFreshIdlePrompt(...args);
+const getVisibleIdlePrompt = (...args) => getShellUtils().getVisibleIdlePrompt(...args);
+const formatSyntheticEcho = (...args) => getShellUtils().formatSyntheticEcho(...args);
 const { appendVaultAgentGuidance } = require("../shared/vaultAgentGuidance.cjs");
-const {
-  checkBlocklistForShell,
-  checkBlocklistCommonOnly,
-  resolveSessionBlocklistShellKind,
-} = require("./ai/commandSafety.cjs");
-const { execViaPty, startPtyJob, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
+let _commandSafety = null;
+const getCommandSafety = () => (_commandSafety ??= require("./ai/commandSafety.cjs"));
+const checkBlocklistForShell = (...args) => getCommandSafety().checkBlocklistForShell(...args);
+const checkBlocklistCommonOnly = (...args) => getCommandSafety().checkBlocklistCommonOnly(...args);
+const resolveSessionBlocklistShellKind = (...args) => getCommandSafety().resolveSessionBlocklistShellKind(...args);
+let _ptyExec = null;
+const getPtyExec = () => (_ptyExec ??= require("./ai/ptyExec.cjs"));
+const execViaPty = (...args) => getPtyExec().execViaPty(...args);
+const startPtyJob = (...args) => getPtyExec().startPtyJob(...args);
+const execViaChannel = (...args) => getPtyExec().execViaChannel(...args);
+const execViaRawPty = (...args) => getPtyExec().execViaRawPty(...args);
 const { emitJobDiag } = require("./ai/jobStartupDiagnostics.cjs");
 const { safeSend } = require("./ipcUtils.cjs");
 const { emitTerminalSessionData } = require("./emitTerminalSessionData.cjs");
@@ -66,7 +95,11 @@ const DISCOVERY_SELF_HEAL_INTERVAL_MS = 15000;
 // Track which sockets have completed authentication
 const authenticatedSockets = new WeakSet();
 const managedPrivacyScopes = new WeakMap();
-const aiPrivacyService = require("../shared/aiPrivacyService.cjs");
+let _aiPrivacyService = null;
+function getAiPrivacyService() {
+  if (!_aiPrivacyService) _aiPrivacyService = require("../shared/aiPrivacyService.cjs");
+  return _aiPrivacyService;
+}
 const { createManagedPrivacyBoundary } = require("../shared/managedPrivacyBoundary.cjs");
 // Sockets authenticated with the External MCP token (or that used the reserved scope).
 const externalMcpSockets = new Set();
@@ -1585,6 +1618,7 @@ async function handleMessage(socket, line) {
       );
     }
     notifyExternalMcpActivity(method, callParams);
+    const aiPrivacyService = getAiPrivacyService();
     let result;
     if (isExternalScope || externalMcpSockets.has(socket)) {
       result = await dispatch(method, callParams, {
@@ -1618,21 +1652,18 @@ async function handleMessage(socket, line) {
 
 // ── RPC Dispatch ──
 
-const {
-  evaluateRpcPermission,
-  evaluatePermissionWithGrants,
-  USER_DENIED_MESSAGE,
-  CHAT_SESSION_CANCELLED_MESSAGE,
-} = require("../capabilities/policy.cjs");
-const { CAPABILITY_SURFACES } = require("../capabilities/constants.cjs");
-const { getCapabilityByRpcMethod } = require("../capabilities/registry.cjs");
-const { listMcpTools } = require("../capabilities/codegen/toolSurfaces.cjs");
-const {
-  createCapabilityRpcDispatcher,
-  UNROUTED,
-} = require("./mcpServerBridge/capabilityRpcDispatch.cjs");
-const { buildBuiltinRpcHandlerRegistry } = require("./mcpServerBridge/builtinRpcHandlers.cjs");
-const { createSessionService } = require("../capabilities/services/sessionService.cjs");
+let _capabilitiesPolicy = null;
+const getCapabilitiesPolicy = () => (_capabilitiesPolicy ??= require("../capabilities/policy.cjs"));
+const evaluateRpcPermission = (...args) => getCapabilitiesPolicy().evaluateRpcPermission(...args);
+const evaluatePermissionWithGrants = (...args) => getCapabilitiesPolicy().evaluatePermissionWithGrants(...args);
+let _capabilitiesConstants = null;
+const getCapabilitySurfaces = () => (_capabilitiesConstants ??= require("../capabilities/constants.cjs")).CAPABILITY_SURFACES;
+const getCapabilityByRpcMethod = (...args) => require("../capabilities/registry.cjs").getCapabilityByRpcMethod(...args);
+const listMcpTools = (...args) => require("../capabilities/codegen/toolSurfaces.cjs").listMcpTools(...args);
+let _capabilityRpcDispatchMod = null;
+const getCapabilityRpcDispatchMod = () => (_capabilityRpcDispatchMod ??= require("./mcpServerBridge/capabilityRpcDispatch.cjs"));
+const buildBuiltinRpcHandlerRegistry = (...args) =>
+  require("./mcpServerBridge/builtinRpcHandlers.cjs").buildBuiltinRpcHandlerRegistry(...args);
 
 let invokeVaultAgentFn = null;
 
@@ -1654,7 +1685,7 @@ const sessionIdleManager = createSessionIdleManager({
     if (!sessionIdleManager.beginIdleClose(sessionId, activityVersion)) {
       return;
     }
-    await sessionService?.closeTracked({ chatSessionId, sessionId });
+    await getSessionService().closeTracked({ chatSessionId, sessionId });
   },
 });
 
@@ -1749,98 +1780,108 @@ async function rehydrateWorkerPromptFromVisibleContext(sessionId, chatSessionId)
   }
 }
 
-sessionService = createSessionService({
-  validateReconnect: (params = {}) => {
-    const scopeErr = validateSessionScope(params.sessionId, params.chatSessionId, params.scopedSessionIds);
-    if (scopeErr) return { ok: false, error: scopeErr };
-    if (isChatSessionCancelled(params.chatSessionId)) return { ok: false, error: "Chat session is cancelled." };
-    if (permissionMode === "observer") return { ok: false, error: "Recovery is unavailable in observer mode." };
-    if (sessionIdleManager.isClosing(params.sessionId)) return { ok: false, error: "Session is closing." };
-    return { ok: true };
-  },
-  inspectRecovery: async (params, timeoutMs) => {
-    if (typeof invokeVaultAgentFn !== "function") return { ok: false, error: "Session recovery bridge is unavailable." };
-    sessionIdleManager.touch(null, params.sessionId);
-    const state = await invokeVaultAgentFn("session.inspectRecovery", { sessionId: params.sessionId }, { timeoutMs });
-    if (state?.ok !== true) return state;
-    const runtime = sessions?.get(params.sessionId);
-    const meta = getSessionMeta(params.sessionId, params.chatSessionId);
-    const probe = runtime ? {
-      trackedShell: typeof runtime._promptTrackTail === "string",
-      ready: Boolean(getFreshIdlePrompt(runtime) || getVisibleIdlePrompt(runtime)),
-    } : await queryWorkerShellReadiness(params.sessionId, state.status);
-    const trackedShell = Boolean(probe?.trackedShell) && !isNetworkDeviceLikeMeta(meta);
-    // shellReady semantics: transport not connected → false; connected but
-    // the shell is untracked or the probe missed/timed out → null (unknown);
-    // a tracked shell reports its observed readiness. It is advisory for
-    // callers: recovery never writes to the PTY, so an unknown or false
-    // readiness only asks for an inspect_shell step, never blocks.
-    const shellReady = state.status !== "connected" ? false : !probe ? null : trackedShell
-      ? Boolean(probe.ready) : null;
-    return { ...state, shellReady, busy: Boolean(getSessionBusyError(params.sessionId)) };
-  },
-  invokeSessionAgent: (...args) => {
-    if (typeof invokeVaultAgentFn !== "function") {
-      return Promise.resolve({ ok: false, error: "Vault agent bridge is unavailable." });
-    }
-    return invokeVaultAgentFn(...args);
-  },
-  validateClose: (params = {}) => {
-    const scopeErr = validateSessionScope(
-      params.sessionId,
-      params.chatSessionId,
-      params.scopedSessionIds,
-    );
-    if (scopeErr) return { ok: false, error: scopeErr };
-    if (sessionIdleManager.isClosing(params.sessionId)) {
-      return { ok: false, error: `Session "${params.sessionId}" is closing.` };
-    }
-    return openedSessionOwnership.validate(params.chatSessionId, params.sessionId);
-  },
-  beforeClose: async (params = {}) => {
-    sessionIdleManager.beginClose(params.sessionId);
-    beginTerminalSessionClose(params.sessionId);
-    cancelBackgroundJobsForTerminalSession(params.sessionId);
-    await cancelWorkerBackgroundJobsForTerminalSession(params.sessionId);
-    await cancelSftpOpsForTerminalSession(params.sessionId);
-  },
-  afterClose: (params = {}, outcome = {}) => {
-    endTerminalSessionClose(params.sessionId);
-    if (outcome.closed) return;
-    if (outcome.notFound) {
-      forgetClosedTerminalSession(params.sessionId);
-      return;
-    }
-    sessionIdleManager.resume(params.sessionId);
-  },
-  onClosed: async (sessionId) => {
-    await settleBackgroundJobsForTerminalSession(sessionId);
-    forgetClosedTerminalSession(sessionId);
-  },
-});
+function getSessionService() {
+  if (!sessionService) {
+    const { createSessionService } = require("../capabilities/services/sessionService.cjs");
+    sessionService = createSessionService({
+      validateReconnect: (params = {}) => {
+        const scopeErr = validateSessionScope(params.sessionId, params.chatSessionId, params.scopedSessionIds);
+        if (scopeErr) return { ok: false, error: scopeErr };
+        if (isChatSessionCancelled(params.chatSessionId)) return { ok: false, error: "Chat session is cancelled." };
+        if (permissionMode === "observer") return { ok: false, error: "Recovery is unavailable in observer mode." };
+        if (sessionIdleManager.isClosing(params.sessionId)) return { ok: false, error: "Session is closing." };
+        return { ok: true };
+      },
+      inspectRecovery: async (params, timeoutMs) => {
+        if (typeof invokeVaultAgentFn !== "function") return { ok: false, error: "Session recovery bridge is unavailable." };
+        sessionIdleManager.touch(null, params.sessionId);
+        const state = await invokeVaultAgentFn("session.inspectRecovery", { sessionId: params.sessionId }, { timeoutMs });
+        if (state?.ok !== true) return state;
+        const runtime = sessions?.get(params.sessionId);
+        const meta = getSessionMeta(params.sessionId, params.chatSessionId);
+        const probe = runtime ? {
+          trackedShell: typeof runtime._promptTrackTail === "string",
+          ready: Boolean(getFreshIdlePrompt(runtime) || getVisibleIdlePrompt(runtime)),
+        } : await queryWorkerShellReadiness(params.sessionId, state.status);
+        const trackedShell = Boolean(probe?.trackedShell) && !isNetworkDeviceLikeMeta(meta);
+        // shellReady semantics: transport not connected → false; connected but
+        // the shell is untracked or the probe missed/timed out → null (unknown);
+        // a tracked shell reports its observed readiness. It is advisory for
+        // callers: recovery never writes to the PTY, so an unknown or false
+        // readiness only asks for an inspect_shell step, never blocks.
+        const shellReady = state.status !== "connected" ? false : !probe ? null : trackedShell
+          ? Boolean(probe.ready) : null;
+        return { ...state, shellReady, busy: Boolean(getSessionBusyError(params.sessionId)) };
+      },
+      invokeSessionAgent: (...args) => {
+        if (typeof invokeVaultAgentFn !== "function") {
+          return Promise.resolve({ ok: false, error: "Vault agent bridge is unavailable." });
+        }
+        return invokeVaultAgentFn(...args);
+      },
+      validateClose: (params = {}) => {
+        const scopeErr = validateSessionScope(
+          params.sessionId,
+          params.chatSessionId,
+          params.scopedSessionIds,
+        );
+        if (scopeErr) return { ok: false, error: scopeErr };
+        if (sessionIdleManager.isClosing(params.sessionId)) {
+          return { ok: false, error: `Session "${params.sessionId}" is closing.` };
+        }
+        return openedSessionOwnership.validate(params.chatSessionId, params.sessionId);
+      },
+      beforeClose: async (params = {}) => {
+        sessionIdleManager.beginClose(params.sessionId);
+        beginTerminalSessionClose(params.sessionId);
+        cancelBackgroundJobsForTerminalSession(params.sessionId);
+        await cancelWorkerBackgroundJobsForTerminalSession(params.sessionId);
+        await cancelSftpOpsForTerminalSession(params.sessionId);
+      },
+      afterClose: (params = {}, outcome = {}) => {
+        endTerminalSessionClose(params.sessionId);
+        if (outcome.closed) return;
+        if (outcome.notFound) {
+          forgetClosedTerminalSession(params.sessionId);
+          return;
+        }
+        sessionIdleManager.resume(params.sessionId);
+      },
+      onClosed: async (sessionId) => {
+        await settleBackgroundJobsForTerminalSession(sessionId);
+        forgetClosedTerminalSession(sessionId);
+      },
+    });
+  }
+  return sessionService;
+}
 
-const dispatchCapabilityRpc = createCapabilityRpcDispatcher({
-  invokeVaultAgent: (...args) => {
-    if (typeof invokeVaultAgentFn !== "function") {
-      return Promise.resolve({ ok: false, error: "Vault agent bridge is unavailable." });
-    }
-    return invokeVaultAgentFn(...args);
-  },
-  evaluatePermissionWithGrants,
-  isDelegatedApproval: (context) => pluginAgentDelegations.isApproved(context),
-  get permissionMode() {
-    return permissionMode;
-  },
-  get permissionGrantsSnapshot() {
-    return permissionGrantsSnapshot;
-  },
-  isChatSessionCancelled,
-  requestApprovalFromRenderer,
-  getApprovalTarget,
-  hasSessionApproval: (socket) => Boolean(socket && sessionApprovedExternalSockets.has(socket)),
-  USER_DENIED_MESSAGE,
-  listPortForwards: () => listActivePortForwards(),
-  sessionService,
+let _dispatchCapabilityRpc = null;
+function getDispatchCapabilityRpc() {
+  if (!_dispatchCapabilityRpc) {
+    const { createCapabilityRpcDispatcher } = getCapabilityRpcDispatchMod();
+    _dispatchCapabilityRpc = createCapabilityRpcDispatcher({
+      invokeVaultAgent: (...args) => {
+        if (typeof invokeVaultAgentFn !== "function") {
+          return Promise.resolve({ ok: false, error: "Vault agent bridge is unavailable." });
+        }
+        return invokeVaultAgentFn(...args);
+      },
+      evaluatePermissionWithGrants,
+      isDelegatedApproval: (context) => pluginAgentDelegations.isApproved(context),
+      get permissionMode() {
+        return permissionMode;
+      },
+      get permissionGrantsSnapshot() {
+        return permissionGrantsSnapshot;
+      },
+      isChatSessionCancelled,
+      requestApprovalFromRenderer,
+      getApprovalTarget,
+      hasSessionApproval: (socket) => Boolean(socket && sessionApprovedExternalSockets.has(socket)),
+      USER_DENIED_MESSAGE: getCapabilitiesPolicy().USER_DENIED_MESSAGE,
+      listPortForwards: () => listActivePortForwards(),
+      sessionService: getSessionService(),
   captureHostOpenScope: (chatSessionId) => ({
     ownershipGeneration: openedSessionOwnership.captureGeneration(chatSessionId),
     closeRevision: terminalSessionCloseRevision,
@@ -1889,7 +1930,11 @@ const dispatchCapabilityRpc = createCapabilityRpcDispatcher({
     sessionIdleManager.track(chatSessionId, sessionId);
     return true;
   },
-});
+    });
+  }
+  return _dispatchCapabilityRpc;
+}
+const dispatchCapabilityRpc = (...args) => getDispatchCapabilityRpc()(...args);
 
 /**
  * Validate that a sessionId is allowed in the current scope.
@@ -2345,6 +2390,11 @@ function cancelWorkerBackgroundJobsForSession(chatSessionId) {
       deleteWorkerRoute(jobId, job, "chat-session-cancel");
     }
   }
+  // If the terminal worker has not been started, no worker-side background jobs
+  // exist; avoid waking a fresh utilityProcess just to send a cancel no-op.
+  if (typeof terminalWorkerManager?.isRunning === "function" && !terminalWorkerManager.isRunning()) {
+    return;
+  }
   try {
     terminalWorkerManager?.send?.("netcatty:ai:catty:cancel", { chatSessionId }, {});
   } catch {
@@ -2517,8 +2567,8 @@ function getBuiltinRpcHandlerRegistry() {
         ok: false,
         error: "terminal_start_bulk must be dispatched through the bulk job starter.",
       }),
-      "terminal.pollBulk": (params) => jobBulkHandler.poll(params),
-      "terminal.stopBulk": (params) => jobBulkHandler.stop(params),
+      "terminal.pollBulk": (params) => getJobBulkHandler().poll(params),
+      "terminal.stopBulk": (params) => getJobBulkHandler().stop(params),
     });
   }
   return builtinRpcHandlerRegistry;
@@ -2539,11 +2589,12 @@ async function dispatchCore(method, params, approvalContext = {}) {
 
   if (!method.startsWith("netcatty/")) {
     const capabilityResult = await dispatchCapabilityRpc(method, params || {}, approvalContext);
-    if (capabilityResult !== UNROUTED) {
+    if (capabilityResult !== getCapabilityRpcDispatchMod().UNROUTED) {
       return capabilityResult;
     }
   }
 
+  const CAPABILITY_SURFACES = getCapabilitySurfaces();
   const capability = getCapabilityByRpcMethod(method, CAPABILITY_SURFACES.BUILTIN);
   const sessionWriteLockId = (capability?.id === "terminal.execute" || capability?.id === "terminal.start")
     ? params?.sessionId
@@ -2570,13 +2621,13 @@ async function dispatchCore(method, params, approvalContext = {}) {
   if (capability?.id === "terminal.executeBulk") {
     // Plugin-delegated agents never get fan-out execution.
     if (delegated) return { ok: false, error: "terminal_execute_bulk is not available to this client." };
-    return execBulkHandler.run(params, approvalContext, permission);
+    return getExecBulkHandler().run(params, approvalContext, permission);
   }
 
   if (capability?.id === "terminal.startBulk" || capability?.id === "terminal.pollBulk" || capability?.id === "terminal.stopBulk") {
     // Plugin-delegated agents never get fan-out execution.
     if (delegated) return { ok: false, error: `${capability.surfaces?.builtin?.mcpTool || method} is not available to this client.` };
-    if (capability.id === "terminal.startBulk") return jobBulkHandler.start(params, approvalContext, permission);
+    if (capability.id === "terminal.startBulk") return getJobBulkHandler().start(params, approvalContext, permission);
   }
 
   // Validate session scope *first* so out-of-scope callers cannot infer the
@@ -2636,7 +2687,7 @@ async function dispatchCore(method, params, approvalContext = {}) {
         target: approvalTarget,
       });
       if (!approved) {
-        return { ok: false, error: USER_DENIED_MESSAGE };
+        return { ok: false, error: getCapabilitiesPolicy().USER_DENIED_MESSAGE };
       }
     }
     if (
@@ -2879,58 +2930,65 @@ async function handleSetCancelled(params) {
   return applyChatSessionCancelled(chatSessionId, cancelled);
 }
 
-const { createSftpHandlerApi } = require("./mcpServerBridge/sftpHandlers.cjs");
-const sftpHandlerApi = createSftpHandlerApi({
-  get commandTimeoutMs() { return commandTimeoutMs; },
-  get sessions() { return sessions; },
-  get terminalWorkerManager() { return terminalWorkerManager; },
-  sftpBridge, registerSftpOp, setTimeout, clearTimeout, AbortController, Promise, Error,
-  createTransferId: () => require("node:crypto").randomUUID(),
-  reportTransferEvent: (payload) => broadcastApprovalEvent("netcatty:sftp:global-transfer", payload),
-  get transferBridge() { return fileTransferBridge; },
-});
-const {
-  getSessionSftpEncodingStateKey,
-  withSessionBackedSftp,
-  handleSftpList,
-  handleSftpRead,
-  handleSftpWrite,
-  handleSftpDownload,
-  handleSftpUpload,
-  handleSftpMkdir,
-  handleSftpDelete,
-  handleSftpRename,
-  handleSftpStat,
-  handleSftpChmod,
-  handleSftpHome,
-} = sftpHandlerApi;
+let _sftpHandlerApi = null;
+function getSftpHandlerApi() {
+  if (!_sftpHandlerApi) {
+    const { createSftpHandlerApi } = require("./mcpServerBridge/sftpHandlers.cjs");
+    _sftpHandlerApi = createSftpHandlerApi({
+      get commandTimeoutMs() { return commandTimeoutMs; },
+      get sessions() { return sessions; },
+      get terminalWorkerManager() { return terminalWorkerManager; },
+      sftpBridge, registerSftpOp, setTimeout, clearTimeout, AbortController, Promise, Error,
+      createTransferId: () => require("node:crypto").randomUUID(),
+      reportTransferEvent: (payload) => broadcastApprovalEvent("netcatty:sftp:global-transfer", payload),
+      get transferBridge() { return fileTransferBridge; },
+    });
+  }
+  return _sftpHandlerApi;
+}
+const getSessionSftpEncodingStateKey = (...args) => getSftpHandlerApi().getSessionSftpEncodingStateKey(...args);
+const withSessionBackedSftp = (...args) => getSftpHandlerApi().withSessionBackedSftp(...args);
+const handleSftpList = (...args) => getSftpHandlerApi().handleSftpList(...args);
+const handleSftpRead = (...args) => getSftpHandlerApi().handleSftpRead(...args);
+const handleSftpWrite = (...args) => getSftpHandlerApi().handleSftpWrite(...args);
+const handleSftpDownload = (...args) => getSftpHandlerApi().handleSftpDownload(...args);
+const handleSftpUpload = (...args) => getSftpHandlerApi().handleSftpUpload(...args);
+const handleSftpMkdir = (...args) => getSftpHandlerApi().handleSftpMkdir(...args);
+const handleSftpDelete = (...args) => getSftpHandlerApi().handleSftpDelete(...args);
+const handleSftpRename = (...args) => getSftpHandlerApi().handleSftpRename(...args);
+const handleSftpStat = (...args) => getSftpHandlerApi().handleSftpStat(...args);
+const handleSftpChmod = (...args) => getSftpHandlerApi().handleSftpChmod(...args);
+const handleSftpHome = (...args) => getSftpHandlerApi().handleSftpHome(...args);
 
 // ── Handler: exec ──
 
-const { createExecHandlerApi } = require("./mcpServerBridge/execHandlers.cjs");
-const execHandlerApi = createExecHandlerApi({
-  get sessions() { return sessions; },
-  get commandTimeoutMs() { return commandTimeoutMs; },
-  DEFAULT_BACKGROUND_JOB_TIMEOUT_MS, DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS, MAX_BACKGROUND_JOB_OUTPUT_CHARS,
-  backgroundJobs, activePtyExecs,
-  debugLog, getSessionMeta, checkCommandSafetyForShell, checkCommandSafetyCommonOnly, resolveSessionBlocklistShellKind, reserveSessionExecution, releaseSessionExecution,
-  beginChatExecution, execViaRawPty, execViaPty, execViaChannel, startPtyJob,
-  getFreshIdlePrompt, echoCommandToSession, createBackgroundJobId, storeCompletedJobOutput,
-  serializeBackgroundJob, validateSessionScope, Date, Error,
-});
-const {
-  resolveExecContext,
-  preflightExec,
-  preflightJobStart,
-  handleExec,
-  handleJobStart,
-  getScopedJob,
-  handleJobPoll,
-  handleJobStop,
-} = execHandlerApi;
+let _execHandlerApi = null;
+function getExecHandlerApi() {
+  if (!_execHandlerApi) {
+    const { createExecHandlerApi } = require("./mcpServerBridge/execHandlers.cjs");
+    _execHandlerApi = createExecHandlerApi({
+      get sessions() { return sessions; },
+      get commandTimeoutMs() { return commandTimeoutMs; },
+      DEFAULT_BACKGROUND_JOB_TIMEOUT_MS, DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS, MAX_BACKGROUND_JOB_OUTPUT_CHARS,
+      backgroundJobs, activePtyExecs,
+      debugLog, getSessionMeta, checkCommandSafetyForShell, checkCommandSafetyCommonOnly, resolveSessionBlocklistShellKind, reserveSessionExecution, releaseSessionExecution,
+      beginChatExecution, execViaRawPty, execViaPty, execViaChannel, startPtyJob,
+      getFreshIdlePrompt, echoCommandToSession, createBackgroundJobId, storeCompletedJobOutput,
+      serializeBackgroundJob, validateSessionScope, Date, Error,
+    });
+  }
+  return _execHandlerApi;
+}
+const resolveExecContext = (...args) => getExecHandlerApi().resolveExecContext(...args);
+const preflightExec = (...args) => getExecHandlerApi().preflightExec(...args);
+const preflightJobStart = (...args) => getExecHandlerApi().preflightJobStart(...args);
+const handleExec = (...args) => getExecHandlerApi().handleExec(...args);
+const handleJobStart = (...args) => getExecHandlerApi().handleJobStart(...args);
+const getScopedJob = (...args) => getExecHandlerApi().getScopedJob(...args);
+const handleJobPoll = (...args) => getExecHandlerApi().handleJobPoll(...args);
+const handleJobStop = (...args) => getExecHandlerApi().handleJobStop(...args);
 
 // terminal_execute_bulk: validate every target, ask once, then fan out.
-const { createExecBulkHandler } = require("./mcpServerBridge/execBulk.cjs");
 function execOnSessionForBulk(params, executionContext) {
   // Mirrors dispatchCore: sessions not in the main-process map live in the terminal worker.
   if (!sessions?.get?.(params.sessionId)) {
@@ -2938,85 +2996,108 @@ function execOnSessionForBulk(params, executionContext) {
   }
   return handleExec(params, executionContext);
 }
-const execBulkHandler = createExecBulkHandler({
-  getSessions: () => sessions,
-  getSessionMeta,
-  validateSessionScope,
-  closingTerminalSessions,
-  getSessionBusyError,
-  pendingSessionWriteApprovals,
-  getActiveChatExecution,
-  beginChatExecution,
-  isChatSessionCancelled,
-  preflightMainExec: preflightExec,
-  preflightWorkerExec,
-  execOnSession: execOnSessionForBulk,
-  requestApproval: requestApprovalFromRenderer,
-  sessionIdleManager,
-  getCommandTimeoutMs: () => commandTimeoutMs,
-  getLivePermission: (params) => evaluateRpcPermission({
-    rpcMethod: "netcatty/execBulk",
-    surface: CAPABILITY_SURFACES.BUILTIN,
-    permissionMode,
-    params,
-    context: { chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId) },
-  }),
-  cancelExecsForChat: (chatSessionId) => {
-    cancelPtyExecsForSession(chatSessionId);
-    cancelWorkerExecsForChat(chatSessionId);
-  },
-  USER_DENIED_MESSAGE,
-  CHAT_SESSION_CANCELLED_MESSAGE,
-  debugLog,
-});
+let _execBulkHandler = null;
+function getExecBulkHandler() {
+  if (!_execBulkHandler) {
+    const { createExecBulkHandler } = require("./mcpServerBridge/execBulk.cjs");
+    const { USER_DENIED_MESSAGE, CHAT_SESSION_CANCELLED_MESSAGE } = getCapabilitiesPolicy();
+    _execBulkHandler = createExecBulkHandler({
+      getSessions: () => sessions,
+      getSessionMeta,
+      validateSessionScope,
+      closingTerminalSessions,
+      getSessionBusyError,
+      pendingSessionWriteApprovals,
+      getActiveChatExecution,
+      beginChatExecution,
+      isChatSessionCancelled,
+      preflightMainExec: preflightExec,
+      preflightWorkerExec,
+      execOnSession: execOnSessionForBulk,
+      requestApproval: requestApprovalFromRenderer,
+      sessionIdleManager,
+      getCommandTimeoutMs: () => commandTimeoutMs,
+      getLivePermission: (params) => evaluateRpcPermission({
+        rpcMethod: "netcatty/execBulk",
+        surface: getCapabilitySurfaces().BUILTIN,
+        permissionMode,
+        params,
+        context: { chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId) },
+      }),
+      cancelExecsForChat: (chatSessionId) => {
+        cancelPtyExecsForSession(chatSessionId);
+        cancelWorkerExecsForChat(chatSessionId);
+      },
+      USER_DENIED_MESSAGE,
+      CHAT_SESSION_CANCELLED_MESSAGE,
+      debugLog,
+    });
+  }
+  return _execBulkHandler;
+}
 // terminal_start_bulk / terminal_poll_bulk / terminal_stop_bulk: background jobs on many sessions.
-const { createJobBulkHandler } = require("./mcpServerBridge/jobBulk.cjs");
-const jobBulkHandler = createJobBulkHandler({
-  getSessions: () => sessions,
-  getSessionMeta,
-  validateSessionScope,
-  closingTerminalSessions,
-  getSessionBusyError,
-  pendingSessionWriteApprovals,
-  isChatSessionCancelled,
-  preflightMainJobStart: preflightJobStart,
-  preflightWorkerJobStart,
-  // Mirrors dispatchCore: sessions not in the main-process map live in the terminal worker.
-  startJobOnSession: (params, beforeExecute) => (sessions?.get?.(params.sessionId)
-    ? handleJobStart(params, { beforeExecute })
-    : handleWorkerJobStart(params, beforeExecute)),
-  pollJob: (params) => (workerBackgroundJobs.has(params.jobId)
-    ? handleWorkerJobPoll(params)
-    : handleJobPoll(params)),
-  stopJob: (params) => (workerBackgroundJobs.has(params.jobId)
-    ? handleWorkerJobStop(params)
-    : handleJobStop(params)),
-  requestApproval: requestApprovalFromRenderer,
-  sessionIdleManager,
-  getLivePermission: (params) => evaluateRpcPermission({
-    rpcMethod: "netcatty/jobStartBulk",
-    surface: CAPABILITY_SURFACES.BUILTIN,
-    permissionMode,
-    params,
-    context: { chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId) },
-  }),
-  USER_DENIED_MESSAGE,
-  CHAT_SESSION_CANCELLED_MESSAGE,
-});
-const { createConfigAndCleanupApi } = require("./mcpServerBridge/configAndCleanup.cjs");
-const configAndCleanupApi = createConfigAndCleanupApi({
-  get authToken() { return authToken; },
-  get permissionMode() { return permissionMode; },
-  process, existsSync, path, __dirname, toUnpackedAsarPath, DEBUG_MCP,
-  getScopedSessionIds, scopedMetadata, scopedAttachments, cancelledChatSessions, cancelBackgroundJobsForSession,
-  cancelWorkerBackgroundJobsForSession,
-  cancelWorkerBackgroundJobsForTerminalSession,
-  clearPendingApprovals, cancelSftpOpsForSession, sftpBridge,
-  get terminalWorkerManager() { return terminalWorkerManager; },
-  preserveIdleSessionCleanup: sessionIdleManager.scopeCleared,
-  clearOpenedSessionScope: openedSessionOwnership.clearScope,
-});
-const { resolveMcpServerRuntimeCommand, buildMcpServerConfig, cleanupScopedMetadata } = configAndCleanupApi;
+let _jobBulkHandler = null;
+function getJobBulkHandler() {
+  if (!_jobBulkHandler) {
+    const { createJobBulkHandler } = require("./mcpServerBridge/jobBulk.cjs");
+    const { USER_DENIED_MESSAGE, CHAT_SESSION_CANCELLED_MESSAGE } = getCapabilitiesPolicy();
+    _jobBulkHandler = createJobBulkHandler({
+      getSessions: () => sessions,
+      getSessionMeta,
+      validateSessionScope,
+      closingTerminalSessions,
+      getSessionBusyError,
+      pendingSessionWriteApprovals,
+      isChatSessionCancelled,
+      preflightMainJobStart: preflightJobStart,
+      preflightWorkerJobStart,
+      // Mirrors dispatchCore: sessions not in the main-process map live in the terminal worker.
+      startJobOnSession: (params, beforeExecute) => (sessions?.get?.(params.sessionId)
+        ? handleJobStart(params, { beforeExecute })
+        : handleWorkerJobStart(params, beforeExecute)),
+      pollJob: (params) => (workerBackgroundJobs.has(params.jobId)
+        ? handleWorkerJobPoll(params)
+        : handleJobPoll(params)),
+      stopJob: (params) => (workerBackgroundJobs.has(params.jobId)
+        ? handleWorkerJobStop(params)
+        : handleJobStop(params)),
+      requestApproval: requestApprovalFromRenderer,
+      sessionIdleManager,
+      getLivePermission: (params) => evaluateRpcPermission({
+        rpcMethod: "netcatty/jobStartBulk",
+        surface: getCapabilitySurfaces().BUILTIN,
+        permissionMode,
+        params,
+        context: { chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId) },
+      }),
+      USER_DENIED_MESSAGE,
+      CHAT_SESSION_CANCELLED_MESSAGE,
+    });
+  }
+  return _jobBulkHandler;
+}
+let _configAndCleanupApi = null;
+function getConfigAndCleanupApi() {
+  if (!_configAndCleanupApi) {
+    const { createConfigAndCleanupApi } = require("./mcpServerBridge/configAndCleanup.cjs");
+    _configAndCleanupApi = createConfigAndCleanupApi({
+      get authToken() { return authToken; },
+      get permissionMode() { return permissionMode; },
+      process, existsSync, path, __dirname, toUnpackedAsarPath, DEBUG_MCP,
+      getScopedSessionIds, scopedMetadata, scopedAttachments, cancelledChatSessions, cancelBackgroundJobsForSession,
+      cancelWorkerBackgroundJobsForSession,
+      cancelWorkerBackgroundJobsForTerminalSession,
+      clearPendingApprovals, cancelSftpOpsForSession, sftpBridge,
+      get terminalWorkerManager() { return terminalWorkerManager; },
+      preserveIdleSessionCleanup: sessionIdleManager.scopeCleared,
+      clearOpenedSessionScope: openedSessionOwnership.clearScope,
+    });
+  }
+  return _configAndCleanupApi;
+}
+const resolveMcpServerRuntimeCommand = (...args) => getConfigAndCleanupApi().resolveMcpServerRuntimeCommand(...args);
+const buildMcpServerConfig = (...args) => getConfigAndCleanupApi().buildMcpServerConfig(...args);
+const cleanupScopedMetadata = (...args) => getConfigAndCleanupApi().cleanupScopedMetadata(...args);
 
 function cleanup() {
   pluginAgentDelegations.shutdown();

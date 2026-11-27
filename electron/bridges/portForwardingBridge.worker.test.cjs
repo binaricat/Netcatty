@@ -326,3 +326,44 @@ test("worker final-tunnel stop then renderer destruction prevents stale runtime 
   assert.deepEqual(events, []);
   assert.equal((await bridge.unsubscribePortForwardSender(null, { webContentsId: sender.id })).removed, 0);
 });
+
+test("idle port-forward subscriptions do not cold-start the worker and replay once started", async () => {
+  const ipcMain = createIpcMain();
+  const requests = [];
+  let running = false;
+  let onWorkerStartedListener = null;
+  const terminalWorkerManager = {
+    isRunning: () => running,
+    onWorkerStarted(listener) {
+      onWorkerStartedListener = listener;
+      return { dispose() {} };
+    },
+    request(channel, payload, options) {
+      requests.push({ channel, payload, options });
+      return Promise.resolve({ epoch: "w", revision: 1, records: [] });
+    },
+    onWorkerExit() {
+      return { dispose() {} };
+    },
+  };
+  registerHandlers(ipcMain, { terminalWorkerManager });
+  const sender = createSender(77);
+  const event = { sender };
+
+  const snapshot = await ipcMain.handlers.get("netcatty:portforward:subscribeRuntime")(event);
+  assert.deepEqual(snapshot.records, []);
+  assert.deepEqual(await ipcMain.handlers.get("netcatty:portforward:list")(event), []);
+  assert.deepEqual(
+    await ipcMain.handlers.get("netcatty:portforward:status")(event, { tunnelId: "missing" }),
+    { tunnelId: "missing", status: "inactive" },
+  );
+  assert.equal(requests.length, 0, "idle port-forward calls must not wake the worker");
+
+  running = true;
+  onWorkerStartedListener?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].channel, "netcatty:portforward:subscribeRuntime");
+  assert.equal(requests[0].options.webContentsId, 77);
+});
+

@@ -2,18 +2,11 @@
 
 const { getDriver, listBackends } = require("./index.cjs");
 const { buildSdkAgentEnv } = require("./env.cjs");
-const { buildInjectedMcpServers } = require("./injectMcp.cjs");
 const { createStreamEmitter } = require("./emit.cjs");
-const { buildNetcattySkillsOpenCodePathAllowlist } = require("./netcattySkillsOpenCodePermissions.cjs");
 const { getToolCliStateDir } = require("../../../cli/discoveryPath.cjs");
 const tempDirBridge = require("../../tempDirBridge.cjs");
 const { realpathSync } = require("node:fs");
 const { createHash } = require("node:crypto");
-const { CodexAppServerRuntime } = require("../codexAppServer/runtime.cjs");
-const { probeCodexAppServer } = require("../codexAppServer/probe.cjs");
-const { codebuddySessionManager } = require("./codebuddySessionManager.cjs");
-const codebuddyDriver = require("./codebuddyDriver.cjs");
-const { OPENCODE_SERVER_START_TIMEOUT_MS } = require("./opencodeDriver.cjs");
 const {
   buildLastKnownCatalogPath,
   readLastKnownCatalogAlias,
@@ -23,6 +16,21 @@ const {
   writeLastKnownCatalogAlias,
   writeLastKnownCatalogEntry,
 } = require("./modelCatalogLastKnown.cjs");
+
+const buildInjectedMcpServers = (...args) => require("./injectMcp.cjs").buildInjectedMcpServers(...args);
+const buildNetcattySkillsOpenCodePathAllowlist = (...args) =>
+  require("./netcattySkillsOpenCodePermissions.cjs").buildNetcattySkillsOpenCodePathAllowlist(...args);
+const probeCodexAppServer = (...args) => require("../codexAppServer/probe.cjs").probeCodexAppServer(...args);
+const getCodebuddyDriver = () => require("./codebuddyDriver.cjs");
+const getCodebuddySessionManager = () => require("./codebuddySessionManager.cjs").codebuddySessionManager;
+function getCodebuddySessionManagerIfLoaded() {
+  try {
+    const resolved = require.resolve("./codebuddySessionManager.cjs");
+    return require.cache[resolved]?.exports?.codebuddySessionManager || null;
+  } catch {
+    return null;
+  }
+}
 
 const VALID_BACKENDS = new Set(listBackends());
 
@@ -727,7 +735,13 @@ function redactSdkAnswerContent(privacyService, chatSessionId, value) {
 }
 
 function registerSdkStreamHandlers(ctx) {
-  const privacyService = ctx.aiPrivacyService || require("../../../shared/aiPrivacyService.cjs");
+  let _privacyService = ctx.aiPrivacyService || null;
+  const getPrivacyService = () => (_privacyService ??= require("../../../shared/aiPrivacyService.cjs"));
+  const privacyService = {
+    checkSession: (...args) => getPrivacyService().checkSession(...args),
+    redact: (...args) => getPrivacyService().redact(...args),
+    restore: (...args) => getPrivacyService().restore(...args),
+  };
   const injectCliEnv = typeof ctx.withCliDiscoveryEnv === "function"
     ? ctx.withCliDiscoveryEnv
     : (env) => env;
@@ -741,44 +755,51 @@ function registerSdkStreamHandlers(ctx) {
     // Only native IDs observed in this process under the current chat mapping
     // are eligible for a protected resume.
     const sdkPrivateSessionIds = new Map();
-    const codexAppServerRuntime = new CodexAppServerRuntime({
-      appVersion: electronModule?.app?.getVersion?.() || "0.0.0",
-      transformUserInputAnswers(answers, context) {
-        privacyService.checkSession(context.chatSessionId);
-        return redactSdkAnswerContent(privacyService, context.chatSessionId, answers);
-      },
-      sendInteractionRequest(payload, context) {
-        const sender = context?.sender;
-        if (!sender || sender.isDestroyed?.()) return false;
-        // Native approval arguments must remain exact: accepting them cannot
-        // replace the command/path that Codex will actually execute.
-        const displayed = { ...payload };
-        if (privacyService.checkSession(context.chatSessionId)) {
-          const restore = (value) => privacyService.restore(context.chatSessionId, value);
-          if (Array.isArray(displayed.questions)) {
-            displayed.questions = displayed.questions.map((question) => ({
-              ...question,
-              ...(typeof question.question === "string" ? { question: restore(question.question) } : {}),
-              ...(typeof question.header === "string" ? { header: restore(question.header) } : {}),
-              ...(Array.isArray(question.options) ? {
-                options: question.options.map((option) => ({
-                  ...option,
-                  ...(typeof option.label === "string" ? { label: restore(option.label) } : {}),
-                  ...(typeof option.description === "string" ? { description: restore(option.description) } : {}),
-                })),
-              } : {}),
-            }));
-          }
-        }
-        safeSend(sender, "netcatty:ai:codex-app-server:interaction-request", displayed);
-        return true;
-      },
-      sendInteractionCleared(payload, context) {
-        const sender = context?.sender;
-        if (!sender || sender.isDestroyed?.()) return;
-        safeSend(sender, "netcatty:ai:codex-app-server:interaction-cleared", payload);
-      },
-    });
+    let _codexAppServerRuntime = null;
+    const getCodexAppServerRuntime = () => {
+      if (!_codexAppServerRuntime) {
+        const { CodexAppServerRuntime } = require("../codexAppServer/runtime.cjs");
+        _codexAppServerRuntime = new CodexAppServerRuntime({
+          appVersion: electronModule?.app?.getVersion?.() || "0.0.0",
+          transformUserInputAnswers(answers, context) {
+            privacyService.checkSession(context.chatSessionId);
+            return redactSdkAnswerContent(privacyService, context.chatSessionId, answers);
+          },
+          sendInteractionRequest(payload, context) {
+            const sender = context?.sender;
+            if (!sender || sender.isDestroyed?.()) return false;
+            // Native approval arguments must remain exact: accepting them cannot
+            // replace the command/path that Codex will actually execute.
+            const displayed = { ...payload };
+            if (privacyService.checkSession(context.chatSessionId)) {
+              const restore = (value) => privacyService.restore(context.chatSessionId, value);
+              if (Array.isArray(displayed.questions)) {
+                displayed.questions = displayed.questions.map((question) => ({
+                  ...question,
+                  ...(typeof question.question === "string" ? { question: restore(question.question) } : {}),
+                  ...(typeof question.header === "string" ? { header: restore(question.header) } : {}),
+                  ...(Array.isArray(question.options) ? {
+                    options: question.options.map((option) => ({
+                      ...option,
+                      ...(typeof option.label === "string" ? { label: restore(option.label) } : {}),
+                      ...(typeof option.description === "string" ? { description: restore(option.description) } : {}),
+                    })),
+                  } : {}),
+                }));
+              }
+            }
+            safeSend(sender, "netcatty:ai:codex-app-server:interaction-request", displayed);
+            return true;
+          },
+          sendInteractionCleared(payload, context) {
+            const sender = context?.sender;
+            if (!sender || sender.isDestroyed?.()) return;
+            safeSend(sender, "netcatty:ai:codex-app-server:interaction-cleared", payload);
+          },
+        });
+      }
+      return _codexAppServerRuntime;
+    };
 
     ipcMain.handle(
       "netcatty:ai:sdk-agent:stream",
@@ -1149,7 +1170,7 @@ function registerSdkStreamHandlers(ctx) {
             persistSession: persistSession != null ? persistSession : undefined,
           };
           const result = codexRuntime === "app-server"
-            ? await codexAppServerRuntime.runTurn(commonTurnContext)
+            ? await getCodexAppServerRuntime().runTurn(commonTurnContext)
             : await driver.runTurn(commonTurnContext);
 
           // Persist any new session id for resume on the next turn.
@@ -1549,7 +1570,7 @@ function registerSdkStreamHandlers(ctx) {
             // win over both the shared default and OpenCode's budget.
             const catalogBudgetMs = MODEL_LIST_TIMEOUT_OVERRIDES_MS[backendKey]
               ?? (backendKey === "opencode"
-                ? OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
+                ? require("./opencodeDriver.cjs").OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
                 : MODEL_LIST_TIMEOUT_MS);
             const raw = await withTimeout(
               fetchSdkModelCatalog({
@@ -1562,7 +1583,7 @@ function registerSdkStreamHandlers(ctx) {
                 catalogDeadlineTs: Date.now() + catalogBudgetMs - MODEL_LIST_DEADLINE_HEADROOM_MS,
                 cursorAuthMode: backendKey === "cursor" ? cursorAuthMode : undefined,
                 cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
-                codexAppServerRuntime,
+                codexAppServerRuntime: backendKey === "codex" ? getCodexAppServerRuntime() : null,
               }),
               catalogBudgetMs,
               abortController,
@@ -1754,7 +1775,7 @@ function registerSdkStreamHandlers(ctx) {
       } catch (error) {
         return { status: "failed", message: error.message };
       }
-      const result = await codexAppServerRuntime.steerTurn(requestId, {
+      const result = await getCodexAppServerRuntime().steerTurn(requestId, {
         chatSessionId,
         prompt: protectedSteerPrompt,
         attachments: stagedAttachments,
@@ -1785,7 +1806,7 @@ function registerSdkStreamHandlers(ctx) {
       mcpServerBridge.cancelWorkerBackgroundJobsForSession?.(effectiveChatSessionId);
       mcpServerBridge.clearPendingApprovals(effectiveChatSessionId);
       void mcpServerBridge.cancelSftpOpsForSession?.(effectiveChatSessionId);
-      await codexAppServerRuntime.cancelTurn(requestId);
+      await _codexAppServerRuntime?.cancelTurn(requestId);
       const controller = sdkActiveStreams.get(requestId);
       if (controller) {
         controller.abort();
@@ -1820,8 +1841,8 @@ function registerSdkStreamHandlers(ctx) {
       // Keep privacy mappings and native-history provenance until explicit chat
       // deletion clears the shared privacy service. Its tombstone then prevents
       // any stale native ID from being reused.
-      codebuddySessionManager.closeForChat(chatSessionId);
-      await codexAppServerRuntime.cleanupChatSession(chatSessionId);
+      getCodebuddySessionManagerIfLoaded()?.closeForChat(chatSessionId);
+      await _codexAppServerRuntime?.cleanupChatSession(chatSessionId);
       await mcpServerBridge.cleanupScopedMetadata(chatSessionId);
       return { ok: true };
     });
@@ -1829,7 +1850,7 @@ function registerSdkStreamHandlers(ctx) {
     ipcMain.handle("netcatty:ai:codex-app-server:interaction-response", async (event, payload) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       try {
-        const ok = codexAppServerRuntime.respondInteraction(payload?.interactionId, payload, event.sender);
+        const ok = _codexAppServerRuntime?.respondInteraction(payload?.interactionId, payload, event.sender) === true;
         return ok ? { ok: true } : { ok: false, error: "Interaction not found" };
       } catch (error) {
         return { ok: false, error: error.message };
@@ -1838,7 +1859,7 @@ function registerSdkStreamHandlers(ctx) {
 
     ipcMain.handle("netcatty:ai:codex-app-server:interaction-cancel-timeout", async (event, payload) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
-      const cancelled = codexAppServerRuntime.cancelInteractionTimeout(
+      const cancelled = _codexAppServerRuntime?.cancelInteractionTimeout(
         payload?.interactionId,
         event.sender,
       ) === true;
@@ -1894,7 +1915,7 @@ function registerSdkStreamHandlers(ctx) {
           resolveCliFromPath, normalizeCliPathForPlatform, resolveSdkBinPath,
           resolveClaudeCodeExecutableForSdk, resolveCodexExecutableForSdk, resolveCodebuddyExecutableForSdk,
         });
-        const status = await codebuddyDriver.getCodebuddyMcpStatus({ pathToCodebuddyCode: binPath, env });
+        const status = await getCodebuddyDriver().getCodebuddyMcpStatus({ pathToCodebuddyCode: binPath, env });
         return { ok: true, servers: status };
       } catch (err) {
         return { ok: false, error: err?.message || String(err) };
@@ -1918,7 +1939,7 @@ function registerSdkStreamHandlers(ctx) {
           resolveCliFromPath, normalizeCliPathForPlatform, resolveSdkBinPath,
           resolveClaudeCodeExecutableForSdk, resolveCodexExecutableForSdk, resolveCodebuddyExecutableForSdk,
         });
-        const info = await codebuddyDriver.getCodebuddyAccountInfo({ pathToCodebuddyCode: binPath, env });
+        const info = await getCodebuddyDriver().getCodebuddyAccountInfo({ pathToCodebuddyCode: binPath, env });
         return { ok: true, account: info };
       } catch (err) {
         return { ok: false, error: err?.message || String(err) };
@@ -1929,7 +1950,8 @@ function registerSdkStreamHandlers(ctx) {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       const { elicitationId, action, content } = payload || {};
       if (!elicitationId) return { ok: false, error: "Missing elicitationId" };
-      const pending = codebuddySessionManager.elicitationPending.get(elicitationId);
+      const sessionManager = getCodebuddySessionManagerIfLoaded();
+      const pending = sessionManager?.elicitationPending?.get(elicitationId);
       if (!pending) return { ok: false, error: "Elicitation not found or already resolved" };
       let protectedContent = content;
       if (content !== undefined && content !== null) {
@@ -1940,7 +1962,7 @@ function registerSdkStreamHandlers(ctx) {
           return { ok: false, error: error.message };
         }
       }
-      const resolved = codebuddySessionManager.resolveElicitation(elicitationId, {
+      const resolved = sessionManager.resolveElicitation(elicitationId, {
         action: action || "cancel",
         content: protectedContent || undefined,
       });
@@ -1950,7 +1972,7 @@ function registerSdkStreamHandlers(ctx) {
     ipcMain.handle("netcatty:ai:sdk-agent:plugin-install", async (event, payload) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       try {
-        const result = await codebuddyDriver.codebuddyInstallPlugin(payload?.options || {});
+        const result = await getCodebuddyDriver().codebuddyInstallPlugin(payload?.options || {});
         return { ok: true, result };
       } catch (err) {
         return { ok: false, error: err?.message || String(err) };
@@ -1960,7 +1982,7 @@ function registerSdkStreamHandlers(ctx) {
     ipcMain.handle("netcatty:ai:sdk-agent:plugin-enable", async (event, payload) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       try {
-        const result = await codebuddyDriver.codebuddyEnablePlugin(payload?.name, payload?.marketplace);
+        const result = await getCodebuddyDriver().codebuddyEnablePlugin(payload?.name, payload?.marketplace);
         return { ok: true, result };
       } catch (err) {
         return { ok: false, error: err?.message || String(err) };
@@ -1970,7 +1992,7 @@ function registerSdkStreamHandlers(ctx) {
     ipcMain.handle("netcatty:ai:sdk-agent:plugin-disable", async (event, payload) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       try {
-        const result = await codebuddyDriver.codebuddyDisablePlugin(payload?.name, payload?.marketplace);
+        const result = await getCodebuddyDriver().codebuddyDisablePlugin(payload?.name, payload?.marketplace);
         return { ok: true, result };
       } catch (err) {
         return { ok: false, error: err?.message || String(err) };
@@ -1980,7 +2002,7 @@ function registerSdkStreamHandlers(ctx) {
     ipcMain.handle("netcatty:ai:sdk-agent:marketplace-install", async (event, payload) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       try {
-        const result = await codebuddyDriver.codebuddyInstallMarketplace(payload?.options || {});
+        const result = await getCodebuddyDriver().codebuddyInstallMarketplace(payload?.options || {});
         return { ok: true, result };
       } catch (err) {
         return { ok: false, error: err?.message || String(err) };
@@ -1990,7 +2012,7 @@ function registerSdkStreamHandlers(ctx) {
     ipcMain.handle("netcatty:ai:sdk-agent:marketplace-remove", async (event, payload) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       try {
-        const result = await codebuddyDriver.codebuddyRemoveMarketplace(payload?.options || {});
+        const result = await getCodebuddyDriver().codebuddyRemoveMarketplace(payload?.options || {});
         return { ok: true, result };
       } catch (err) {
         return { ok: false, error: err?.message || String(err) };
@@ -2007,8 +2029,22 @@ function registerSdkStreamHandlers(ctx) {
     ctx.sdkModelRefreshFailures = sdkModelRefreshFailures; // exposed for catalog tests
     ctx.sdkModelKeyAliases = sdkModelKeyAliases; // exposed for catalog tests
     ctx.cursorCliBinCache = cursorCliBinCache; // exposed for catalog tests
-    ctx.codexAppServerRuntime = codexAppServerRuntime;
-    ctx.codebuddySessionManager = codebuddySessionManager;
+    Object.defineProperty(ctx, "codexAppServerRuntime", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        return getCodexAppServerRuntime();
+      },
+    });
+    Object.defineProperty(ctx, "codebuddySessionManager", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        return getCodebuddySessionManager();
+      },
+    });
+    ctx.closeCodexAppServerRuntimeIfLoaded = () => _codexAppServerRuntime?.close?.();
+    ctx.closeCodebuddySessionsIfLoaded = () => getCodebuddySessionManagerIfLoaded()?.closeAll?.();
   }
 }
 

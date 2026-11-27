@@ -3,6 +3,7 @@ import React, { Suspense, lazy, useMemo, useState } from 'react';
 import type { QuickSwitcherProps } from '../../components/QuickSwitcher';
 import { LazyLoadBoundary } from '../../components/ui/lazy-load-boundary';
 import { getHostSearchMatch } from '../../domain/searchMatcher';
+import { usePinyinMatcherVersion } from '../state/usePinyinMatcherVersion';
 import type { Host } from '../../types';
 
 const LazyQuickSwitcher = lazy(() =>
@@ -37,7 +38,11 @@ export type QuickSwitcherOverlayProps =
  */
 export function QuickSwitcherOverlay({ hosts, ...props }: QuickSwitcherOverlayProps) {
   const [query, setQuery] = useState('');
-  const results = useMemo(() => filterQuickSwitcherHosts(hosts, query), [hosts, query]);
+  const pinyinMatcherVersion = usePinyinMatcherVersion();
+  const results = useMemo(() => {
+    void pinyinMatcherVersion;
+    return filterQuickSwitcherHosts(hosts, query);
+  }, [hosts, query, pinyinMatcherVersion]);
   return (
     <LazyLoadBoundary name="Quick switcher" resetKey={query}>
       <Suspense fallback={null}>

@@ -1113,6 +1113,7 @@ export const zhCNVaultMessages: Messages = {
   'hostDetails.rdp.resolutionMode.fixed': '固定尺寸',
   'hostDetails.rdp.width': '宽度',
   'hostDetails.rdp.height': '高度',
+  'hostDetails.rdp.dimensionHint': '请输入 200 到 8192 之间的整数。',
   'hostDetails.rdp.colorDepth': '色深',
   'hostDetails.rdp.audio': '音频输出',
   'hostDetails.rdp.audioDesc': '在本地播放远程桌面声音',
