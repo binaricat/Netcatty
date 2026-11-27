@@ -9,13 +9,16 @@ const crypto = require("node:crypto");
 const { Readable } = require("node:stream");
 const tempDirBridge = require("./tempDirBridge.cjs");
 const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
-const {
-  encodePathForSession,
-  ensureRemoteDirForSession,
-  runRemoteUploadTransaction,
-  requireSftpChannel,
-  resolveEncodingForRequest,
-} = require("./sftpBridge.cjs");
+let _sftpBridge = null;
+function getSftpBridge() {
+  if (!_sftpBridge) _sftpBridge = require("./sftpBridge.cjs");
+  return _sftpBridge;
+}
+const encodePathForSession = (...args) => getSftpBridge().encodePathForSession(...args);
+const ensureRemoteDirForSession = (...args) => getSftpBridge().ensureRemoteDirForSession(...args);
+const runRemoteUploadTransaction = (...args) => getSftpBridge().runRemoteUploadTransaction(...args);
+const requireSftpChannel = (...args) => getSftpBridge().requireSftpChannel(...args);
+const resolveEncodingForRequest = (...args) => getSftpBridge().resolveEncodingForRequest(...args);
 const { isScpModeClient, getScpBackendForClient } = require("./sftpBridge/scpBackend.cjs");
 const {
   statLocal,

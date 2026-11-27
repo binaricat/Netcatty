@@ -14,38 +14,78 @@ const { executeBoundedSshCommand } = require("./boundedSshExec.cjs");
 const { remoteSoftwareRequiresSingleChannel } = require("../../domain/singleChannelSshBanner.shared.cjs");
 const { openBoundedSftpChannel } = require("./boundedSftpOpen.cjs");
 const { invalidateSshTransport } = require("./sshTransportInvalidation.cjs");
-require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
-const SftpClient = require("ssh2-sftp-client");
-const { Client: SSHClient } = require("ssh2");
-const iconv = require("iconv-lite");
-let SFTPWrapper;
-try {
-  // Try to load SFTPWrapper from ssh2 internals for sudo support
-  const sftpModule = require("ssh2/lib/protocol/SFTP");
-  SFTPWrapper = sftpModule.SFTP || sftpModule;
-} catch (e) {
-  console.warn("[SFTP] Failed to load SFTPWrapper from ssh2, sudo mode will not work:", e.message);
+const _isElectronRuntime = Boolean(process.versions?.electron);
+let _sftpClientCtor = _isElectronRuntime ? null : (require("./boringSslDhCompat.cjs").installBoringSslDhCompat(), require("ssh2-sftp-client"));
+function getSftpClientCtor() {
+  if (!_sftpClientCtor) {
+    require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
+    _sftpClientCtor = require("ssh2-sftp-client");
+  }
+  return _sftpClientCtor;
 }
-const { NetcattyAgent } = require("./netcattyAgent.cjs");
+let _sshClientCtor = _isElectronRuntime ? null : require("ssh2").Client;
+function getSshClientCtor() {
+  if (!_sshClientCtor) {
+    require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
+    ({ Client: _sshClientCtor } = require("ssh2"));
+  }
+  return _sshClientCtor;
+}
+let _iconv = null;
+function getIconv() {
+  if (!_iconv) _iconv = require("iconv-lite");
+  return _iconv;
+}
+let _sftpWrapperResolved = false;
+let _sftpWrapper = undefined;
+function getSftpWrapper() {
+  if (!_sftpWrapperResolved) {
+    _sftpWrapperResolved = true;
+    try {
+      // Try to load SFTPWrapper from ssh2 internals for sudo support
+      const sftpModule = require("ssh2/lib/protocol/SFTP");
+      _sftpWrapper = sftpModule.SFTP || sftpModule;
+    } catch (e) {
+      console.warn("[SFTP] Failed to load SFTPWrapper from ssh2, sudo mode will not work:", e.message);
+    }
+  }
+  return _sftpWrapper;
+}
+if (!_isElectronRuntime) {
+  getSftpWrapper();
+}
+let _netcattyAgentCtor = null;
+function getNetcattyAgentCtor() {
+  if (!_netcattyAgentCtor) ({ NetcattyAgent: _netcattyAgentCtor } = require("./netcattyAgent.cjs"));
+  return _netcattyAgentCtor;
+}
+let _proxyUtilsMod = _isElectronRuntime ? null : require("./proxyUtils.cjs");
+function getProxyUtils() {
+  if (!_proxyUtilsMod) _proxyUtilsMod = require("./proxyUtils.cjs");
+  return _proxyUtilsMod;
+}
+let _sshAuthHelperMod = _isElectronRuntime ? null : require("./sshAuthHelper.cjs");
+function getSshAuthHelper() {
+  if (!_sshAuthHelperMod) _sshAuthHelperMod = require("./sshAuthHelper.cjs");
+  return _sshAuthHelperMod;
+}
 const fileWatcherBridge = require("./fileWatcherBridge.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const passphraseHandler = require("./passphraseHandler.cjs");
 const hostKeyVerifier = require("./hostKeyVerifier.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
-const { createProxySocket } = require("./proxyUtils.cjs");
-const {
-  buildAuthHandler,
-  createKeyboardInteractiveHandler,
-  applyAuthToConnOpts,
-  shouldSkipKiPasswordAutoFill,
-  safeSend: authSafeSend,
-  isKeyEncrypted,
-  findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
-  getAvailableAgentSocket,
-  prepareSystemSshAgentForAuth,
-  preparePrivateKeyForAuth,
-  loadFirstIdentityFileForAuth,
-} = require("./sshAuthHelper.cjs");
+const createProxySocket = (...args) => getProxyUtils().createProxySocket(...args);
+const buildAuthHandler = (...args) => getSshAuthHelper().buildAuthHandler(...args);
+const createKeyboardInteractiveHandler = (...args) => getSshAuthHelper().createKeyboardInteractiveHandler(...args);
+const applyAuthToConnOpts = (...args) => getSshAuthHelper().applyAuthToConnOpts(...args);
+const shouldSkipKiPasswordAutoFill = (...args) => getSshAuthHelper().shouldSkipKiPasswordAutoFill(...args);
+const authSafeSend = (...args) => getSshAuthHelper().safeSend(...args);
+const isKeyEncrypted = (...args) => getSshAuthHelper().isKeyEncrypted(...args);
+const findAllDefaultPrivateKeysFromHelper = (...args) => getSshAuthHelper().findAllDefaultPrivateKeys(...args);
+const getAvailableAgentSocket = (...args) => getSshAuthHelper().getAvailableAgentSocket(...args);
+const prepareSystemSshAgentForAuth = (...args) => getSshAuthHelper().prepareSystemSshAgentForAuth(...args);
+const preparePrivateKeyForAuth = (...args) => getSshAuthHelper().preparePrivateKeyForAuth(...args);
+const loadFirstIdentityFileForAuth = (...args) => getSshAuthHelper().loadFirstIdentityFileForAuth(...args);
 const {
   buildSftpAlgorithms,
   _resetAlgorithmSupportCacheForTests,
@@ -165,13 +205,13 @@ const encodePath = (input, encoding) => {
   if (encoding === "utf-8") return input;
   // Avoid Buffer paths when ASCII-only; keeps compatibility with unpatched ssh2
   if (isAsciiString(input)) return input;
-  return iconv.encode(input, encoding);
+  return getIconv().encode(input, encoding);
 };
 
 const decodeName = (raw, encoding) => {
   if (!raw) return "";
   if (Buffer.isBuffer(raw)) {
-    return encoding === "utf-8" ? raw.toString("utf8") : iconv.decode(raw, encoding);
+    return encoding === "utf-8" ? raw.toString("utf8") : getIconv().decode(raw, encoding);
   }
   return raw;
 };
@@ -2439,7 +2479,44 @@ function sendSftpProgress(sender, sessionId, label, status, detail) {
 /**
  * Connect through a chain of jump hosts for SFTP
  */
-const { createOpenConnectionApi } = require("./sftpBridge/openConnection.cjs");
+const _createOpenConnectionApi = _isElectronRuntime
+  ? null
+  : require("./sftpBridge/openConnection.cjs").createOpenConnectionApi;
+let _openConnectionApi = null;
+function getOpenConnectionApi() {
+  if (!_openConnectionApi) {
+    const createOpenConnectionApi = _createOpenConnectionApi
+      || require("./sftpBridge/openConnection.cjs").createOpenConnectionApi;
+    _openConnectionApi = createOpenConnectionApi({
+      get sftpClients() { return sftpClients; },
+      get sessions() { return sessions; },
+      get electronModule() { return electronModule; },
+      jumpConnectionsMap,
+      get SftpClient() { return getSftpClientCtor(); },
+      get SSHClient() { return getSshClientCtor(); },
+      get NetcattyAgent() { return getNetcattyAgentCtor(); },
+      keyboardInteractiveHandler, passphraseHandler,
+      hostKeyVerifier,
+      fs, path, net, Buffer, process, console, setTimeout, clearTimeout,
+      get SFTPWrapper() { return getSftpWrapper(); },
+      createProxySocket, buildSftpAlgorithms, getAvailableAgentSocket,
+      preparePrivateKeyForAuth, loadFirstIdentityFileForAuth, prepareSystemSshAgentForAuth, findAllDefaultPrivateKeysFromHelper,
+      buildAuthHandler, applyAuthToConnOpts, createKeyboardInteractiveHandler, shouldSkipKiPasswordAutoFill,
+      isKeyEncrypted, randomUUID,
+      sendSftpProgress, safeSend, authSafeSend, copySftpEncodingState, clearSftpEncodingState, normalizeEncoding,
+      resolveEncodingForRequest, updateResolvedEncoding, requireSftpChannel, realpathAsync,
+      connectSudoSftp: undefined,
+      acquireConnectionRef, releaseConnectionRef, findReusableSession, createSessionBackedSftpClient,
+      createTransport, borrowTransport, findTransportByEndpoint,
+      beginTransportDial, waitForTransportDial, completeTransportDial, failTransportDial,
+      buildEndpointKey,
+      buildChannelAdoptionKey,
+      buildConnectionReuseEndpoint,
+      resolveConnectionKeepalivePolicy,
+    });
+  }
+  return _openConnectionApi;
+}
 const {
   acquireConnectionRef,
   releaseConnectionRef,
@@ -2457,29 +2534,8 @@ const {
   resolveConnectionKeepalivePolicy,
   endpointAllowsReuse,
 } = require("./sshConnectionPool.cjs");
-const openConnectionApi = createOpenConnectionApi({
-  get sftpClients() { return sftpClients; },
-  get sessions() { return sessions; },
-  get electronModule() { return electronModule; },
-  jumpConnectionsMap, SftpClient, SSHClient, NetcattyAgent, keyboardInteractiveHandler, passphraseHandler,
-  hostKeyVerifier,
-  fs, path, net, Buffer, process, console, setTimeout, clearTimeout,
-  SFTPWrapper, createProxySocket, buildSftpAlgorithms, getAvailableAgentSocket,
-  preparePrivateKeyForAuth, loadFirstIdentityFileForAuth, prepareSystemSshAgentForAuth, findAllDefaultPrivateKeysFromHelper,
-  buildAuthHandler, applyAuthToConnOpts, createKeyboardInteractiveHandler, shouldSkipKiPasswordAutoFill, passphraseHandler,
-  isKeyEncrypted, randomUUID,
-  sendSftpProgress, safeSend, authSafeSend, copySftpEncodingState, clearSftpEncodingState, normalizeEncoding,
-  resolveEncodingForRequest, updateResolvedEncoding, requireSftpChannel, realpathAsync,
-  connectSudoSftp: undefined,
-  acquireConnectionRef, releaseConnectionRef, findReusableSession, createSessionBackedSftpClient,
-  createTransport, borrowTransport, findTransportByEndpoint,
-  beginTransportDial, waitForTransportDial, completeTransportDial, failTransportDial,
-  buildEndpointKey,
-  buildChannelAdoptionKey,
-  buildConnectionReuseEndpoint,
-  resolveConnectionKeepalivePolicy,
-});
-const { connectThroughChainForSftp, connectSudoSftp } = openConnectionApi;
+const connectThroughChainForSftp = (...args) => getOpenConnectionApi().connectThroughChainForSftp(...args);
+const connectSudoSftp = (...args) => getOpenConnectionApi().connectSudoSftp(...args);
 async function openSftp(event, options) {
   // The main SFTP page has no explicit terminal hint. Look for the original
   // profile of a live, temporarily authenticated terminal before dialing.
@@ -2504,7 +2560,7 @@ async function openSftp(event, options) {
       }
     }
   }
-  return openConnectionApi.openSftp(event, options);
+  return getOpenConnectionApi().openSftp(event, options);
 }
 const { createFileOpsApi } = require("./sftpBridge/fileOps.cjs");
 const fileOpsApi = createFileOpsApi({

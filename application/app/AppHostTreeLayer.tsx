@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useRef } from 'react';
+import React, { Suspense, lazy, memo, useMemo, useRef, useState } from 'react';
 
 import { useActiveTabId } from '../state/activeTabStore';
 import { useAppearanceChromeStore } from '../state/appearanceChromeStore';
@@ -6,7 +6,6 @@ import type { EditorTabChrome } from '../state/editorTabStore';
 import type { LogView } from '../state/logViewState';
 import { useTerminalHostTreeOpen } from '../state/terminalHostTreeStore';
 import { useManualTerminalChromeSurfaceInjection } from '../state/useManualTerminalChromeSurfaceInjection';
-import { TerminalHostTreeSidebar } from '../../components/terminalLayer/TerminalHostTreeSidebar';
 import type {
   ResolvedAppearance,
   TerminalAppearanceHostScope,
@@ -17,6 +16,12 @@ import {
   isHostTreeWorkTabSurface,
   resolveWorkTabActiveHostId,
 } from './workTabSurface';
+
+const TerminalHostTreeSidebar = lazy(() =>
+  import('../../components/terminalLayer/TerminalHostTreeSidebar').then((mod) => ({
+    default: mod.TerminalHostTreeSidebar,
+  })),
+);
 
 interface AppHostTreeLayerProps {
   enabled: boolean;
@@ -122,6 +127,10 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
     workspaceIds,
   });
   const sidebarActive = surfaceVisible && enabled && isHostTreeOpen;
+  const [hasMountedSidebar, setHasMountedSidebar] = useState(sidebarActive);
+  if (sidebarActive && !hasMountedSidebar) {
+    setHasMountedSidebar(true);
+  }
 
   const activeHostId = useMemo(() => (
     sidebarActive
@@ -182,21 +191,25 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
       data-section="app-host-tree-layer"
       style={getAppHostTreeLayerStyle(surfaceVisible)}
     >
-      <TerminalHostTreeSidebar
-        enabled={enabled}
-        surfaceVisible={surfaceVisible}
-        hosts={hosts}
-        customGroups={customGroups}
-        groupConfigs={groupConfigs}
-        resolvedPreviewTheme={sidebarPreviewTheme}
-        activeHostId={activeHostId}
-        onConnect={onConnect}
-        onConnectRemoteDesktop={onConnectRemoteDesktop}
-        onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
-        onNewHost={onNewHost}
-        onEditHost={onEditHost}
-        onCreateLocalTerminal={onCreateLocalTerminal}
-      />
+      {hasMountedSidebar ? (
+        <Suspense fallback={null}>
+          <TerminalHostTreeSidebar
+            enabled={enabled}
+            surfaceVisible={surfaceVisible}
+            hosts={hosts}
+            customGroups={customGroups}
+            groupConfigs={groupConfigs}
+            resolvedPreviewTheme={sidebarPreviewTheme}
+            activeHostId={activeHostId}
+            onConnect={onConnect}
+            onConnectRemoteDesktop={onConnectRemoteDesktop}
+            onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
+            onNewHost={onNewHost}
+            onEditHost={onEditHost}
+            onCreateLocalTerminal={onCreateLocalTerminal}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 };

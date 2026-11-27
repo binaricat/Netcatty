@@ -2,9 +2,6 @@
 
 const path = require("node:path");
 
-const Ajv2020 = require("ajv/dist/2020").default;
-const addFormats = require("ajv-formats").default;
-const schema = require("./generated/plugin-contract.schema.json");
 const { assertPluginJsonValue } = require("./jsonBoundary.cjs");
 const {
   PLUGIN_RPC_MAX_JSON_BYTES,
@@ -12,18 +9,28 @@ const {
 } = require("./constants.cjs");
 
 let contractAjv = null;
+let cachedSchema = null;
 const compiledDefinitions = new Map();
+
+function getContractSchema() {
+  if (!cachedSchema) {
+    cachedSchema = require("./generated/plugin-contract.schema.json");
+  }
+  return cachedSchema;
+}
 
 /**
  * One Ajv instance per process with the generated plugin contract registered
- * once. Compiling the 200 KB contract used to happen in a fresh Ajv for every
- * validator (~17 ms each, ~90 validators across the plugin host at startup).
+ * once. Loading Ajv + schema is deferred until the first validation call so
+ * zero-plugin startups do not pay ~5 MiB of Ajv/schema compilation overhead.
  */
 function getContractAjv() {
   if (!contractAjv) {
+    const Ajv2020 = require("ajv/dist/2020").default;
+    const addFormats = require("ajv-formats").default;
     contractAjv = new Ajv2020({ allErrors: true, strict: false, validateFormats: true });
     addFormats(contractAjv);
-    contractAjv.addSchema(schema);
+    contractAjv.addSchema(getContractSchema());
   }
   return contractAjv;
 }
@@ -31,6 +38,10 @@ function getContractAjv() {
 function compileDefinition(definitionName) {
   let compiled = compiledDefinitions.get(definitionName);
   if (!compiled) {
+    const schema = getContractSchema();
+    if (!schema.$defs?.[definitionName]) {
+      throw new Error(`Unknown plugin contract definition: ${definitionName}`);
+    }
     compiled = getContractAjv().getSchema(`${schema.$id}#/$defs/${definitionName}`);
     if (typeof compiled !== "function") throw new Error(`Unable to compile plugin contract definition: ${definitionName}`);
     compiledDefinitions.set(definitionName, compiled);
@@ -39,12 +50,12 @@ function compileDefinition(definitionName) {
 }
 
 /**
- * Returns a validator for one contract definition. Compilation is deferred to
- * the first call and shared by every validator of the same definition; each
- * returned function still exposes its own `.errors` from its latest call.
+ * Returns a validator for one contract definition. Schema loading and
+ * compilation are deferred to the first call and shared by every validator of
+ * the same definition; each returned function still exposes its own `.errors`
+ * from its latest call.
  */
 function createDefinitionValidator(definitionName) {
-  if (!schema.$defs?.[definitionName]) throw new Error(`Unknown plugin contract definition: ${definitionName}`);
   let compiled = null;
   const validate = (value) => {
     compiled ??= compileDefinition(definitionName);

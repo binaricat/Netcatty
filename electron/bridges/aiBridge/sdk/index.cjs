@@ -9,17 +9,17 @@
  *   { prompt, attachments, cwd, model, env, binPath, injectedMcpServers, emitter,
  *     signal, resumeSessionId, apiKey, baseUrl }
  */
-const claude = require("./claudeDriver.cjs");
-const codex = require("./codexDriver.cjs");
-const copilot = require("./copilotDriver.cjs");
-const cursor = require("./cursorDriver.cjs");
-const cursorCli = require("./cursorCliDriver.cjs");
-const codebuddy = require("./codebuddyDriver.cjs");
-const opencode = require("./opencodeDriver.cjs");
-const grok = require("./grokDriver.cjs");
-const grokAcp = require("./grokAcpDriver.cjs");
-const mimo = require("./mimoDriver.cjs");
-const { codebuddySessionManager } = require("./codebuddySessionManager.cjs");
+const getClaude = () => require("./claudeDriver.cjs");
+const getCodex = () => require("./codexDriver.cjs");
+const getCopilot = () => require("./copilotDriver.cjs");
+const getCursor = () => require("./cursorDriver.cjs");
+const getCursorCli = () => require("./cursorCliDriver.cjs");
+const getCodebuddy = () => require("./codebuddyDriver.cjs");
+const getOpencode = () => require("./opencodeDriver.cjs");
+const getGrok = () => require("./grokDriver.cjs");
+const getGrokAcp = () => require("./grokAcpDriver.cjs");
+const getMimo = () => require("./mimoDriver.cjs");
+const getCodebuddySessionManager = () => require("./codebuddySessionManager.cjs").codebuddySessionManager;
 
 function hasCodebuddyQueryOnlyOptions(options) {
   return Boolean(
@@ -34,6 +34,7 @@ function hasCodebuddyQueryOnlyOptions(options) {
 const DRIVER_REGISTRY = {
   claude: {
     async runTurn(ctx) {
+      const claude = getClaude();
       const options = claude.buildClaudeQueryOptions({
         cwd: ctx.cwd,
         model: ctx.model,
@@ -50,7 +51,7 @@ const DRIVER_REGISTRY = {
         assertSessionValid: ctx.assertSessionValid, delegatedAgent: ctx.delegatedAgent === true });
     },
     async listModels(ctx) {
-      return claude.listClaudeModels({
+      return getClaude().listClaudeModels({
         pathToClaudeCodeExecutable: ctx.binPath,
         env: ctx.env,
         abortController: ctx.abortController,
@@ -60,6 +61,7 @@ const DRIVER_REGISTRY = {
   },
   codex: {
     async runTurn(ctx) {
+      const codex = getCodex();
       const constructorOptions = codex.buildCodexConstructorOptions({
         codexPath: ctx.binPath,
         env: ctx.env,
@@ -86,6 +88,7 @@ const DRIVER_REGISTRY = {
   },
   copilot: {
     async runTurn(ctx) {
+      const copilot = getCopilot();
       const clientOptions = copilot.buildCopilotClientOptions({ cliPath: ctx.binPath });
       const sessionOptions = copilot.buildCopilotSessionOptions({
         model: ctx.model,
@@ -106,7 +109,7 @@ const DRIVER_REGISTRY = {
       });
     },
     async listModels(ctx) {
-      return copilot.listCopilotModels({
+      return getCopilot().listCopilotModels({
         cliPath: ctx.binPath,
         runtimeEnv: ctx.env,
         abortController: ctx.abortController,
@@ -118,7 +121,7 @@ const DRIVER_REGISTRY = {
     async runTurn(ctx) {
       const authMode = ctx.cursorAuthMode === "cli-login" ? "cli-login" : "api-key";
       if (authMode === "cli-login") {
-        return cursorCli.runCursorCliTurn({
+        return getCursorCli().runCursorCliTurn({
           prompt: ctx.prompt,
           assertSessionValid: ctx.assertSessionValid,
           binPath: ctx.cursorCliBinPath || ctx.binPath,
@@ -134,6 +137,7 @@ const DRIVER_REGISTRY = {
           signal: ctx.signal,
         });
       }
+      const cursor = getCursor();
       const agentOptions = cursor.buildCursorAgentOptions({
         apiKey: ctx.apiKey,
         env: ctx.env,
@@ -154,14 +158,14 @@ const DRIVER_REGISTRY = {
     },
     async listModels(ctx) {
       if (ctx.cursorAuthMode === "cli-login") {
-        return cursorCli.listCursorCliModels({
+        return getCursorCli().listCursorCliModels({
           binPath: ctx.cursorCliBinPath || ctx.binPath,
           env: ctx.env,
           abortController: ctx.abortController,
           signal: ctx.signal,
         });
       }
-      return cursor.listCursorModels({
+      return getCursor().listCursorModels({
         env: ctx.env,
         abortController: ctx.abortController,
         signal: ctx.signal,
@@ -170,6 +174,8 @@ const DRIVER_REGISTRY = {
   },
   codebuddy: {
     async runTurn(ctx) {
+      const codebuddy = getCodebuddy();
+      const codebuddySessionManager = getCodebuddySessionManager();
       // Build the permission handler: when the CLI hits a security restriction,
       // auto-confirm (auto mode) or prompt the user (confirm mode) instead of
       // throwing an error.
@@ -287,7 +293,7 @@ const DRIVER_REGISTRY = {
         String(ctx.binPath || ""),
         "sdk",
       ].join("\u0000");
-      return codebuddySessionManager.steer({
+      return getCodebuddySessionManager().steer({
         sessionKey,
         prompt: ctx.prompt,
         assertSessionValid: ctx.assertSessionValid,
@@ -295,7 +301,7 @@ const DRIVER_REGISTRY = {
       });
     },
     async listModels(ctx) {
-      return codebuddy.listCodebuddyModels({
+      return getCodebuddy().listCodebuddyModels({
         pathToCodebuddyCode: ctx.binPath,
         env: ctx.env,
         abortController: ctx.abortController,
@@ -305,7 +311,7 @@ const DRIVER_REGISTRY = {
   },
   opencode: {
     async runTurn(ctx) {
-      return opencode.runOpenCodeTurn({
+      return getOpencode().runOpenCodeTurn({
         prompt: ctx.prompt,
         assertSessionValid: ctx.assertSessionValid,
         systemPrompt: ctx.systemPrompt,
@@ -323,7 +329,7 @@ const DRIVER_REGISTRY = {
       });
     },
     async listModels(ctx) {
-      return opencode.listOpenCodeModels({
+      return getOpencode().listOpenCodeModels({
         env: ctx.env,
         binPath: ctx.binPath,
         abortController: ctx.abortController,
@@ -345,7 +351,7 @@ const DRIVER_REGISTRY = {
         // Headless cannot know if -r restored history before the prompt is sent.
         // Prefer native -r without seed (common success path). Stale-id fallback
         // is handled on ACP (default runtime) via historySeed + session/new.
-        return grok.runGrokTurn({
+        return getGrok().runGrokTurn({
           prompt: ctx.prompt,
           assertSessionValid: ctx.assertSessionValid,
           binPath: ctx.binPath,
@@ -360,7 +366,7 @@ const DRIVER_REGISTRY = {
           signal: ctx.signal || ctx.abortController?.signal,
         });
       }
-      return grokAcp.runGrokAcpTurn({
+      return getGrokAcp().runGrokAcpTurn({
         prompt: ctx.prompt,
         assertSessionValid: ctx.assertSessionValid,
         systemPrompt: ctx.systemPrompt,
@@ -378,6 +384,8 @@ const DRIVER_REGISTRY = {
       });
     },
     async listModels(ctx) {
+      const grok = getGrok();
+      const grokAcp = getGrokAcp();
       // Run both probes together and union the results. ACP's
       // `_meta.modelState` reflects the negotiated agent session and can
       // advertise a subset of the account's models (observed: only
@@ -441,7 +449,7 @@ const DRIVER_REGISTRY = {
   // mimoDriver.cjs for the details.
   mimo: {
     async runTurn(ctx) {
-      return mimo.runMimoTurn({
+      return getMimo().runMimoTurn({
         prompt: ctx.prompt,
         assertSessionValid: ctx.assertSessionValid,
         systemPrompt: ctx.systemPrompt,
@@ -463,7 +471,7 @@ const DRIVER_REGISTRY = {
       });
     },
     async listModels(ctx) {
-      return mimo.listMimoModels({
+      return getMimo().listMimoModels({
         env: ctx.env,
         binPath: ctx.binPath,
         cwd: ctx.cwd,

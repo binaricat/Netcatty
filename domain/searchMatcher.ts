@@ -1,4 +1,67 @@
-import { pinyin } from "pinyin-pro";
+type PinyinFn = (text: string, options?: { pattern?: string; toneType?: string }) => string;
+
+const CJK_CHAR_REGEX = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+let pinyinImpl: PinyinFn | null = null;
+let pinyinLoadPromise: Promise<void> | null = null;
+let pinyinReadyVersion = 0;
+const pinyinReadyListeners = new Set<() => void>();
+
+const shouldEagerLoadPinyin = typeof window === "undefined"
+  || (typeof process !== "undefined" && Boolean(
+    process.env?.NODE_TEST_CONTEXT
+    || process.argv?.some((arg) => arg.includes("--test")),
+  ));
+
+if (shouldEagerLoadPinyin && typeof process !== "undefined") {
+  try {
+    const getBuiltinModule = (process as unknown as {
+      getBuiltinModule?: (id: string) => { createRequire?: (filename: string) => NodeRequire };
+    }).getBuiltinModule;
+    const nodeModule = getBuiltinModule?.("node:module");
+    const req = nodeModule?.createRequire?.(`${process.cwd()}/package.json`);
+    const mod = req?.("pinyin-pro") as { pinyin?: PinyinFn } | undefined;
+    if (typeof mod?.pinyin === "function") {
+      pinyinImpl = mod.pinyin;
+    }
+  } catch {
+    // Fall back to async dynamic import on first CJK query.
+  }
+}
+
+/**
+ * Trigger loading the 447 KB `pinyin-pro` dictionary on demand in browser
+ * builds when CJK search text is encountered. Notifies subscribers once ready
+ * so active search views can re-run matching without blocking cold startup.
+ */
+export function ensurePinyinMatcherLoaded(): void {
+  if (pinyinImpl || pinyinLoadPromise) return;
+  pinyinLoadPromise = import("pinyin-pro")
+    .then((mod) => {
+      pinyinImpl = mod.pinyin as PinyinFn;
+      pinyinReadyVersion += 1;
+      for (const listener of pinyinReadyListeners) {
+        try {
+          listener();
+        } catch {
+          // ignore listener errors
+        }
+      }
+    })
+    .catch(() => {
+      pinyinLoadPromise = null;
+    });
+}
+
+export function subscribePinyinMatcherReady(listener: () => void): () => void {
+  pinyinReadyListeners.add(listener);
+  return () => {
+    pinyinReadyListeners.delete(listener);
+  };
+}
+
+export function getPinyinMatcherVersion(): number {
+  return pinyinReadyVersion;
+}
 
 const SEARCH_SPLIT_REGEX = /[\s\p{Pd}_/\\|.,，。;；:：!！?？()（）[\]{}<>《》、"'`~·]+/u;
 const SEARCH_REMOVE_REGEX = /[\s\p{Pd}_/\\|.,，。;；:：!！?？()（）[\]{}<>《》、"'`~·]+/gu;
@@ -53,6 +116,10 @@ function pinyinCacheEntryChars(
 }
 
 function getPinyinVariants(sourceText: string): { full: string; initials: string } {
+  // Pure non-CJK strings need neither pinyin transliteration nor cache entries.
+  if (!CJK_CHAR_REGEX.test(sourceText)) {
+    return { full: "", initials: "" };
+  }
   const cacheKey = normalizeText(sourceText);
   const cached = PINYIN_CACHE.get(cacheKey);
   if (cached) {
@@ -61,17 +128,22 @@ function getPinyinVariants(sourceText: string): { full: string; initials: string
     return cached;
   }
 
+  if (!pinyinImpl) {
+    ensurePinyinMatcherLoaded();
+    return { full: "", initials: "" };
+  }
+
   let full = "";
   let initials = "";
 
   try {
     full = compactText(
-      pinyin(sourceText, {
+      pinyinImpl(sourceText, {
         toneType: "none",
       }),
     );
     initials = compactText(
-      pinyin(sourceText, {
+      pinyinImpl(sourceText, {
         pattern: "first",
         toneType: "none",
       }),

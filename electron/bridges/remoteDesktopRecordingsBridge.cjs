@@ -15,7 +15,6 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { Readable } = require("node:stream");
-const { patchWebmDurationFile } = require("./webmDurationPatch.cjs");
 
 const RECORDING_MEDIA_SCHEME = "netcatty-media";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -280,6 +279,7 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
 
       if (safeDurationMs > 0) {
         try {
+          const { patchWebmDurationFile } = require("./webmDurationPatch.cjs");
           await patchWebmDurationFile(writer.partPath, safeDurationMs);
         } catch (err) {
           console.warn("[Recordings] EBML duration patch skipped:", err?.message || err);

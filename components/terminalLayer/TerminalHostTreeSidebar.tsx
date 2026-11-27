@@ -48,6 +48,7 @@ import { themeFingerprint } from '../../application/state/useActiveChromeTheme';
 import { buildHostTreeThemeFromTerminalTheme } from '../../infrastructure/theme/terminalAppearanceTokens';
 import { cn } from '../../lib/utils';
 import { matchesHostSearchQuery, matchesSearchQuery } from '../../domain/searchMatcher';
+import { usePinyinMatcherVersion } from '../../application/state/usePinyinMatcherVersion';
 import type { GroupConfig, GroupNode, Host, TerminalTheme } from '../../types';
 import { HostTreeGroupContextMenuContent, HostTreeHostContextMenuContent } from '../host/HostTreeContextMenus';
 import { HostTreeGroupInlineRenameInput } from '../host/HostTreeGroupInlineRenameInput';
@@ -839,7 +840,9 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     return new Set([inlineEdit.groupPath]);
   }, [inlineEdit?.groupPath]);
 
+  const pinyinMatcherVersion = usePinyinMatcherVersion();
   const filteredTree = useMemo(() => {
+    void pinyinMatcherVersion;
     let tree = groupTree;
     if (tagsActive) {
       tree = tree
@@ -850,12 +853,13 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     return tree
       .map((node) => filterGroupNode(node, searchTerm, preservePaths))
       .filter((node): node is GroupNode => node !== null);
-  }, [groupTree, preservePaths, searchActive, searchTerm, tagsActive]);
+  }, [groupTree, preservePaths, searchActive, searchTerm, tagsActive, pinyinMatcherVersion]);
 
   const filteredUngrouped = useMemo(() => {
+    void pinyinMatcherVersion;
     if (!searchActive) return ungroupedHosts;
     return ungroupedHosts.filter((host) => hostMatchesSearch(host, searchTerm));
-  }, [searchActive, searchTerm, ungroupedHosts]);
+  }, [searchActive, searchTerm, ungroupedHosts, pinyinMatcherVersion]);
 
   const flatRows = useMemo(() => {
     return flattenHostGroupTree({

@@ -10,53 +10,85 @@ const { randomUUID } = require("node:crypto");
 const os = require("node:os");
 const crypto = require("node:crypto");
 const { exec } = require("node:child_process");
-require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
-const { Client: SSHClient, utils: sshUtils } = require("ssh2");
-const { NetcattyAgent } = require("./netcattyAgent.cjs");
+let _ssh2 = null;
+function getSsh2() {
+  if (!_ssh2) {
+    require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
+    _ssh2 = require("ssh2");
+  }
+  return _ssh2;
+}
+let _netcattyAgentCtor = null;
+function getNetcattyAgentCtor() {
+  if (!_netcattyAgentCtor) ({ NetcattyAgent: _netcattyAgentCtor } = require("./netcattyAgent.cjs"));
+  return _netcattyAgentCtor;
+}
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const passphraseHandler = require("./passphraseHandler.cjs");
 const fidoPromptHandler = require("./fidoPromptHandler.cjs");
 const hostKeyVerifier = require("./hostKeyVerifier.cjs");
-const { createProxySocket, runWhenProxyConnectionReady } = require("./proxyUtils.cjs");
-const { attachX11Forwarding } = require("./x11Forwarding.cjs");
+let _proxyUtilsMod = null;
+function getProxyUtils() {
+  if (!_proxyUtilsMod) _proxyUtilsMod = require("./proxyUtils.cjs");
+  return _proxyUtilsMod;
+}
+const createProxySocket = (...args) => getProxyUtils().createProxySocket(...args);
+const runWhenProxyConnectionReady = (...args) => getProxyUtils().runWhenProxyConnectionReady(...args);
+const attachX11Forwarding = (...args) => require("./x11Forwarding.cjs").attachX11Forwarding(...args);
 const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
-const {
-  PREFERRED_KEY_NAMES,
-  SSH_KEY_PATTERN,
-  buildAuthHandler,
-  createKeyboardInteractiveHandler,
-  createOrderedStringAuthHandler,
-  createAuthPhase,
-  markAuthPhasePartialSuccess,
-  canRepeatKeyboardInteractive,
-  shouldSkipKiPasswordAutoFill,
-  applyAuthToConnOpts,
-  safeSend: authSafeSend,
-  requestPassphrasesForEncryptedKeys,
-  isKeyEncrypted,
-  findDefaultPrivateKey,
-  findAllDefaultPrivateKeys,
-  findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
-  getSshAgentSocket,
-  getAvailableAgentSocket: getAvailableSystemAgentSocket,
-  getAvailableForwardingAgentSocket,
-  prepareSystemSshAgentForAuth,
-  readFileNoFollow,
-  expandIdentityFilePath,
-  isAutoFillablePasswordChallenge,
-  preparePrivateKeyForAuth,
-  loadIdentityFileForAuth,
-  loadFirstIdentityFileForAuth,
-  hasUserConfiguredKey,
-  isPasswordProvided,
-  looksLikeSkOpenSshMaterial,
-  identityFilesLookLikeSk,
-  PassphraseCancelledError,
-  isPassphraseCancelledError,
-} = require("./sshAuthHelper.cjs");
+
+const PREFERRED_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa", "id_dsa"];
+const SSH_KEY_PATTERN = /^id_[a-z0-9_-]+$/i;
+let _sshAuthHelperMod = null;
+function getSshAuthHelper() {
+  if (!_sshAuthHelperMod) _sshAuthHelperMod = require("./sshAuthHelper.cjs");
+  return _sshAuthHelperMod;
+}
+const buildAuthHandler = (...args) => getSshAuthHelper().buildAuthHandler(...args);
+const createKeyboardInteractiveHandler = (...args) => getSshAuthHelper().createKeyboardInteractiveHandler(...args);
+const createOrderedStringAuthHandler = (...args) => getSshAuthHelper().createOrderedStringAuthHandler(...args);
+const createAuthPhase = (...args) => getSshAuthHelper().createAuthPhase(...args);
+const markAuthPhasePartialSuccess = (...args) => getSshAuthHelper().markAuthPhasePartialSuccess(...args);
+const canRepeatKeyboardInteractive = (...args) => getSshAuthHelper().canRepeatKeyboardInteractive(...args);
+const shouldSkipKiPasswordAutoFill = (...args) => getSshAuthHelper().shouldSkipKiPasswordAutoFill(...args);
+const applyAuthToConnOpts = (...args) => getSshAuthHelper().applyAuthToConnOpts(...args);
+const authSafeSend = (...args) => getSshAuthHelper().safeSend(...args);
+const requestPassphrasesForEncryptedKeys = (...args) => getSshAuthHelper().requestPassphrasesForEncryptedKeys(...args);
+const isKeyEncrypted = (...args) => getSshAuthHelper().isKeyEncrypted(...args);
+const findDefaultPrivateKey = (...args) => getSshAuthHelper().findDefaultPrivateKey(...args);
+const findAllDefaultPrivateKeys = (...args) => getSshAuthHelper().findAllDefaultPrivateKeys(...args);
+const findAllDefaultPrivateKeysFromHelper = (...args) => getSshAuthHelper().findAllDefaultPrivateKeys(...args);
+const getSshAgentSocket = (...args) => getSshAuthHelper().getSshAgentSocket(...args);
+const getAvailableSystemAgentSocket = (...args) => getSshAuthHelper().getAvailableAgentSocket(...args);
+const getAvailableForwardingAgentSocket = (...args) => getSshAuthHelper().getAvailableForwardingAgentSocket(...args);
+const prepareSystemSshAgentForAuth = (...args) => getSshAuthHelper().prepareSystemSshAgentForAuth(...args);
+const readFileNoFollow = (...args) => getSshAuthHelper().readFileNoFollow(...args);
+const expandIdentityFilePath = (...args) => getSshAuthHelper().expandIdentityFilePath(...args);
+const isAutoFillablePasswordChallenge = (...args) => getSshAuthHelper().isAutoFillablePasswordChallenge(...args);
+const preparePrivateKeyForAuth = (...args) => getSshAuthHelper().preparePrivateKeyForAuth(...args);
+const loadIdentityFileForAuth = (...args) => getSshAuthHelper().loadIdentityFileForAuth(...args);
+const loadFirstIdentityFileForAuth = (...args) => getSshAuthHelper().loadFirstIdentityFileForAuth(...args);
+const hasUserConfiguredKey = (...args) => getSshAuthHelper().hasUserConfiguredKey(...args);
+const isPasswordProvided = (...args) => getSshAuthHelper().isPasswordProvided(...args);
+const looksLikeSkOpenSshMaterial = (...args) => getSshAuthHelper().looksLikeSkOpenSshMaterial(...args);
+const identityFilesLookLikeSk = (...args) => getSshAuthHelper().identityFilesLookLikeSk(...args);
+const isPassphraseCancelledError = (...args) => getSshAuthHelper().isPassphraseCancelledError(...args);
+
 const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
-const { trackSessionIdlePrompt, looksLikeIdleAutoLogout } = require("./ai/shellUtils.cjs");
-const { createZmodemSentry, waitForWritableDrain } = require("./zmodemHelper.cjs");
+let _shellUtilsMod = null;
+function getShellUtils() {
+  if (!_shellUtilsMod) _shellUtilsMod = require("./ai/shellUtils.cjs");
+  return _shellUtilsMod;
+}
+const trackSessionIdlePrompt = (...args) => getShellUtils().trackSessionIdlePrompt(...args);
+const looksLikeIdleAutoLogout = (...args) => getShellUtils().looksLikeIdleAutoLogout(...args);
+let _zmodemHelperMod = null;
+function getZmodemHelper() {
+  if (!_zmodemHelperMod) _zmodemHelperMod = require("./zmodemHelper.cjs");
+  return _zmodemHelperMod;
+}
+const createZmodemSentry = (...args) => getZmodemHelper().createZmodemSentry(...args);
+const waitForWritableDrain = (...args) => getZmodemHelper().waitForWritableDrain(...args);
 const tempDirBridge = require("./tempDirBridge.cjs");
 const {
   buildAlgorithms,
@@ -71,11 +103,13 @@ const {
 const {
   configureTerminalSessionDataEmitter,
 } = require("./emitTerminalSessionData.cjs");
-const {
-  createStartSessionApi,
-  cancelTestConnection,
-  resolveSshConnectionTimeouts,
-} = require("./sshBridge/startSession.cjs");
+let _startSessionMod = null;
+function getStartSessionMod() {
+  if (!_startSessionMod) _startSessionMod = require("./sshBridge/startSession.cjs");
+  return _startSessionMod;
+}
+const cancelTestConnection = (...args) => getStartSessionMod().cancelTestConnection(...args);
+const resolveSshConnectionTimeouts = (...args) => getStartSessionMod().resolveSshConnectionTimeouts(...args);
 const { ensureMacLocalNetworkAccess, attachMacLocalNetworkProbeResult } = require("./macLocalNetworkAccess.cjs");
 
 function quoteShellArg(value) {
@@ -261,7 +295,11 @@ const authMethodCache = createSshAuthMethodCache();
 const sessionEncodings = new Map();
 // Per-session stateful iconv decoders (keyed by sessionId, value: { stdout, stderr })
 const sessionDecoders = new Map();
-const iconv = require("iconv-lite");
+let _iconv = null;
+function getIconv() {
+  if (!_iconv) _iconv = require("iconv-lite");
+  return _iconv;
+}
 const { encodeTerminalInput, normalizeTerminalEncoding } = require("./terminalEncoding.cjs");
 
 function getSessionDecoder(sessionId, stream) {
@@ -272,14 +310,14 @@ function getSessionDecoder(sessionId, stream) {
   }
   if (!decoders[stream]) {
     const enc = sessionEncodings.get(sessionId) || "utf-8";
-    decoders[stream] = iconv.getDecoder(enc);
+    decoders[stream] = getIconv().getDecoder(enc);
   }
   return decoders[stream];
 }
 
 function resetSessionDecoders(sessionId) {
   const enc = sessionEncodings.get(sessionId) || "utf-8";
-  const decoders = { stdout: iconv.getDecoder(enc), stderr: iconv.getDecoder(enc) };
+  const decoders = { stdout: getIconv().getDecoder(enc), stderr: getIconv().getDecoder(enc) };
   sessionDecoders.set(sessionId, decoders);
 }
 
@@ -397,6 +435,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
 
       sendProgress(i + 1, totalHops + 1, hopLabel, 'connecting');
 
+      const SSHClient = getSsh2().Client;
       const conn = new SSHClient();
       if (options?._tunnelRef) {
         options._tunnelRef.pendingConn = conn;
@@ -565,6 +604,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         require("./attachFidoAgentRelease.cjs").attachFidoAgentRelease(conn, systemAuthAgent);
       }
       if (hasCertificate && !forceJumpFidoAgent) {
+        const NetcattyAgent = getNetcattyAgentCtor();
         authAgent = new NetcattyAgent({
           mode: "certificate",
           webContents: event.sender,
@@ -605,6 +645,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
             // key so buildAuthHandler won't try it and stall auth.
             delete connOpts.privateKey;
             if (result?.cancelled) {
+              const { PassphraseCancelledError } = getSshAuthHelper();
               throw new PassphraseCancelledError(hopLabel);
             }
           }
@@ -860,45 +901,64 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
 /**
  * Start an SSH session
  */
-const startSessionApi = createStartSessionApi({
-  get sessions() { return sessions; },
-  get electronModule() { return electronModule; },
-  SSHClient, sshUtils, NetcattyAgent, keyboardInteractiveHandler, passphraseHandler, hostKeyVerifier,
-  quoteShellArg,
-  fs, path, os, net, crypto, Buffer, process, console, setTimeout, clearTimeout,
-  createProxySocket, attachX11Forwarding, createPtyOutputBuffer, sessionLogStreamManager,
-  trackSessionIdlePrompt, looksLikeIdleAutoLogout, createZmodemSentry, waitForWritableDrain, enableSshNoDelay, enableTcpNoDelay,
-  iconv, getSessionDecoder, resetSessionDecoders, sessionEncodings, sessionDecoders, encodeTerminalInput,
-  normalizeTerminalEncoding,
-  connectThroughChain, getAvailableAgentSocket, getAvailableForwardingAgentSocket, getCachedAuthMethod, setCachedAuthMethod, clearCachedAuthMethod,
-  attachSshDebugLogger, logSshAlgorithms, safeSend, zmodemOverwritePending,
-  shouldLogSshDebugMessage, log, createSshDiagnosticLogger,
-  buildAlgorithms, randomUUID, findDefaultPrivateKey, findAllDefaultPrivateKeys,
-  openTerminalOutputSession, closeTerminalOutputSession,
-  get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
-  get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
-  preparePrivateKeyForAuth, loadFirstIdentityFileForAuth, prepareSystemSshAgentForAuth, hasUserConfiguredKey, isPasswordProvided, createKeyboardInteractiveHandler, createOrderedStringAuthHandler, createAuthPhase, markAuthPhasePartialSuccess, canRepeatKeyboardInteractive, shouldSkipKiPasswordAutoFill,
-  createConnectionRef, acquireConnectionRef, releaseConnectionRef, transferConnectionRef,
-  consumePendingShellReconnectRisk, markEndpointNoIdlePark,
-  findReusableSession, findTransportByEndpoint, resolveTransportForReuse, discardAllTransports,
-  beginTransportDial, waitForTransportDial, completeTransportDial, failTransportDial,
-  buildConnectionReuseEndpoint,
-  resolveConnectionKeepalivePolicy,
-  normalizeEndpoint,
-  get probeReceiveConflicts() { return probeReceiveConflicts; },
-  get removeRemoteFiles() { return removeRemoteFiles; },
-  get restoreRemoteModes() { return restoreRemoteModes; },
-});
-const { startSSHSession } = startSessionApi;
-const { createExecCommandApi } = require("./sshBridge/execCommand.cjs");
-const execCommandApi = createExecCommandApi({
-  SSHClient, NetcattyAgent, randomUUID, console, setTimeout, clearTimeout, Error,
-  findAllDefaultPrivateKeysFromHelper, preparePrivateKeyForAuth, loadIdentityFileForAuth,
-  prepareSystemSshAgentForAuth, getAvailableAgentSocket,
-  isPassphraseCancelledError, buildAlgorithms, buildAuthHandler, applyAuthToConnOpts,
-  createKeyboardInteractiveHandler, shouldSkipKiPasswordAutoFill, resolveSshConnectionTimeouts,
-});
-const { execCommand } = execCommandApi;
+let _startSessionApi = null;
+function getStartSessionApi() {
+  if (!_startSessionApi) {
+    _startSessionApi = getStartSessionMod().createStartSessionApi({
+      get sessions() { return sessions; },
+      get electronModule() { return electronModule; },
+      get SSHClient() { return getSsh2().Client; },
+      get sshUtils() { return getSsh2().utils; },
+      get NetcattyAgent() { return getNetcattyAgentCtor(); },
+      get iconv() { return getIconv(); },
+      keyboardInteractiveHandler, passphraseHandler, hostKeyVerifier,
+      quoteShellArg,
+      fs, path, os, net, crypto, Buffer, process, console, setTimeout, clearTimeout,
+      createProxySocket, attachX11Forwarding, createPtyOutputBuffer, sessionLogStreamManager,
+      trackSessionIdlePrompt, looksLikeIdleAutoLogout, createZmodemSentry, waitForWritableDrain, enableSshNoDelay, enableTcpNoDelay,
+      getSessionDecoder, resetSessionDecoders, sessionEncodings, sessionDecoders, encodeTerminalInput,
+      normalizeTerminalEncoding,
+      connectThroughChain, getAvailableAgentSocket, getAvailableForwardingAgentSocket, getCachedAuthMethod, setCachedAuthMethod, clearCachedAuthMethod,
+      attachSshDebugLogger, logSshAlgorithms, safeSend, zmodemOverwritePending,
+      shouldLogSshDebugMessage, log, createSshDiagnosticLogger,
+      buildAlgorithms, randomUUID, findDefaultPrivateKey, findAllDefaultPrivateKeys,
+      openTerminalOutputSession, closeTerminalOutputSession,
+      get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
+      get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
+      preparePrivateKeyForAuth, loadFirstIdentityFileForAuth, prepareSystemSshAgentForAuth, hasUserConfiguredKey, isPasswordProvided, createKeyboardInteractiveHandler, createOrderedStringAuthHandler, createAuthPhase, markAuthPhasePartialSuccess, canRepeatKeyboardInteractive, shouldSkipKiPasswordAutoFill,
+      createConnectionRef, acquireConnectionRef, releaseConnectionRef, transferConnectionRef,
+      consumePendingShellReconnectRisk, markEndpointNoIdlePark,
+      findReusableSession, findTransportByEndpoint, resolveTransportForReuse, discardAllTransports,
+      beginTransportDial, waitForTransportDial, completeTransportDial, failTransportDial,
+      buildConnectionReuseEndpoint,
+      resolveConnectionKeepalivePolicy,
+      normalizeEndpoint,
+      get probeReceiveConflicts() { return probeReceiveConflicts; },
+      get removeRemoteFiles() { return removeRemoteFiles; },
+      get restoreRemoteModes() { return restoreRemoteModes; },
+    });
+  }
+  return _startSessionApi;
+}
+const startSSHSession = (...args) => getStartSessionApi().startSSHSession(...args);
+
+let _execCommandApi = null;
+function getExecCommandApi() {
+  if (!_execCommandApi) {
+    const { createExecCommandApi } = require("./sshBridge/execCommand.cjs");
+    _execCommandApi = createExecCommandApi({
+      get SSHClient() { return getSsh2().Client; },
+      get NetcattyAgent() { return getNetcattyAgentCtor(); },
+      randomUUID, console, setTimeout, clearTimeout, Error,
+      findAllDefaultPrivateKeysFromHelper, preparePrivateKeyForAuth, loadIdentityFileForAuth,
+      prepareSystemSshAgentForAuth, getAvailableAgentSocket,
+      isPassphraseCancelledError, buildAlgorithms, buildAuthHandler, applyAuthToConnOpts,
+      createKeyboardInteractiveHandler, shouldSkipKiPasswordAutoFill, resolveSshConnectionTimeouts,
+    });
+  }
+  return _execCommandApi;
+}
+const execCommand = (...args) => getExecCommandApi().execCommand(...args);
 
 /**
  * Generate SSH key pair
@@ -945,7 +1005,7 @@ async function generateKeyPair(event, options) {
         break;
     }
 
-    const result = sshUtils.generateKeyPairSync(keyType, {
+    const result = getSsh2().utils.generateKeyPairSync(keyType, {
       bits: keyBits,
       comment: comment || 'netcatty-generated-key',
     });
@@ -1328,40 +1388,56 @@ const { isHostKeyTrustedBySystem } = createSystemKnownHostsApi({
   fs, path, os, crypto, log,
 });
 
-const { createMoshStatsConnectionApi } = require("./sshBridge/moshStatsConnection.cjs");
-const { ensureMoshStatsConnection, ensureEtStatsConnection } = createMoshStatsConnectionApi({
-  get sessions() { return sessions; },
-  SSHClient, sshUtils, NetcattyAgent, buildAlgorithms, getSshAgentSocket, prepareSystemSshAgentForAuth,
-  readFileNoFollow, expandIdentityFilePath, isAutoFillablePasswordChallenge,
-  hostKeyVerifier, isHostKeyTrustedBySystem, log,
-});
+let _moshStatsApi = null;
+function getMoshStatsApi() {
+  if (!_moshStatsApi) {
+    const { createMoshStatsConnectionApi } = require("./sshBridge/moshStatsConnection.cjs");
+    _moshStatsApi = createMoshStatsConnectionApi({
+      get sessions() { return sessions; },
+      get SSHClient() { return getSsh2().Client; },
+      get sshUtils() { return getSsh2().utils; },
+      get NetcattyAgent() { return getNetcattyAgentCtor(); },
+      buildAlgorithms, getSshAgentSocket, prepareSystemSshAgentForAuth,
+      readFileNoFollow, expandIdentityFilePath, isAutoFillablePasswordChallenge,
+      hostKeyVerifier, isHostKeyTrustedBySystem, log,
+    });
+  }
+  return _moshStatsApi;
+}
+const ensureMoshStatsConnection = (...args) => getMoshStatsApi().ensureMoshStatsConnection(...args);
+const ensureEtStatsConnection = (...args) => getMoshStatsApi().ensureEtStatsConnection(...args);
 
-const { createSessionOpsApi } = require("./sshBridge/sessionOps.cjs");
 const measureSshPingLatency = createSshPingLatencyProbe();
-const sessionOpsApi = createSessionOpsApi({
-  get sessions() { return sessions; },
-  get electronModule() { return electronModule; },
-  fs, path, os, exec, randomUUID, iconv, Buffer, process, console, setTimeout, clearTimeout,
-  getSessionDecoder, resetSessionDecoders, sessionEncodings, normalizeTerminalEncoding,
-  safeSend,
-  quoteShellArg, log, ensureMoshStatsConnection, ensureEtStatsConnection,
-  measureSshPingLatency,
-  execOnEtSession: (...args) => require("./terminalBridge.cjs").execOnEtSession(...args),
-  getServerStats: undefined,
-});
-const {
-  getStatsForContext,
-  getSessionRemoteInfo,
-  getSessionDistroInfo,
-  readRemoteHistory,
-  getSessionPwd,
-  probeReceiveConflicts,
-  removeRemoteFiles,
-  restoreRemoteModes,
-  listSessionDir,
-  getServerStats,
-  setSessionEncoding,
-} = sessionOpsApi;
+let _sessionOpsApi = null;
+function getSessionOpsApi() {
+  if (!_sessionOpsApi) {
+    const { createSessionOpsApi } = require("./sshBridge/sessionOps.cjs");
+    _sessionOpsApi = createSessionOpsApi({
+      get sessions() { return sessions; },
+      get electronModule() { return electronModule; },
+      get iconv() { return getIconv(); },
+      fs, path, os, exec, randomUUID, Buffer, process, console, setTimeout, clearTimeout,
+      getSessionDecoder, resetSessionDecoders, sessionEncodings, normalizeTerminalEncoding,
+      safeSend,
+      quoteShellArg, log, ensureMoshStatsConnection, ensureEtStatsConnection,
+      measureSshPingLatency,
+      execOnEtSession: (...args) => require("./terminalBridge.cjs").execOnEtSession(...args),
+      getServerStats: undefined,
+    });
+  }
+  return _sessionOpsApi;
+}
+const getStatsForContext = (...args) => getSessionOpsApi().getStatsForContext(...args);
+const getSessionRemoteInfo = (...args) => getSessionOpsApi().getSessionRemoteInfo(...args);
+const getSessionDistroInfo = (...args) => getSessionOpsApi().getSessionDistroInfo(...args);
+const readRemoteHistory = (...args) => getSessionOpsApi().readRemoteHistory(...args);
+const getSessionPwd = (...args) => getSessionOpsApi().getSessionPwd(...args);
+const probeReceiveConflicts = (...args) => getSessionOpsApi().probeReceiveConflicts(...args);
+const removeRemoteFiles = (...args) => getSessionOpsApi().removeRemoteFiles(...args);
+const restoreRemoteModes = (...args) => getSessionOpsApi().restoreRemoteModes(...args);
+const listSessionDir = (...args) => getSessionOpsApi().listSessionDir(...args);
+const getServerStats = (...args) => getSessionOpsApi().getServerStats(...args);
+const setSessionEncoding = (...args) => getSessionOpsApi().setSessionEncoding(...args);
 
 const { createMonitorService } = require("./monitorBridge.cjs");
 const monitorService = createMonitorService({ startConnection: startSSHSession, cancelConnection: cancelTestConnection, getStats: getStatsForContext,

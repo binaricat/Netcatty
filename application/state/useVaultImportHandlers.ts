@@ -25,17 +25,7 @@ import {
 /** Exit the import lock so a concurrent host save can finish, then retry. */
 const RETRY_VAULT_IMPORT_AFTER_CONCURRENT_EDIT = Symbol("retry-vault-import-after-concurrent-edit");
 import { sanitizeHost } from "../../domain/host";
-import {
-  applyVaultImportDestination,
-  applyVaultHostImport,
-  buildVaultHostEndpointKey,
-  buildVaultHostMergeKey,
-  filterVaultImportKeyPassphrasesAgainstExisting,
-  mergeVaultImportIssues,
-  resolveVaultImportKeyPassphraseConflicts,
-  toVaultImportExistingHostRef,
-  type VaultImportFormat,
-} from "../../domain/vaultImport";
+import type { VaultImportFormat } from "../../domain/vaultImport";
 import type { GroupConfig, Host, ManagedSource, SSHKey } from "../../types";
 import type { VaultImportNotifier, VaultImportOptions } from "./vaultImportOptions";
 
@@ -173,6 +163,16 @@ export function useVaultImportHandlers({
         });
 
         try {
+          const {
+            applyVaultImportDestination,
+            applyVaultHostImport,
+            buildVaultHostEndpointKey,
+            buildVaultHostMergeKey,
+            filterVaultImportKeyPassphrasesAgainstExisting,
+            mergeVaultImportIssues,
+            resolveVaultImportKeyPassphraseConflicts,
+            toVaultImportExistingHostRef,
+          } = await import("../../domain/vaultImport");
           let result = await importVaultHostsInWorker({
             format,
             files,

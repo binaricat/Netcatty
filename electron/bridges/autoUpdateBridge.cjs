@@ -110,6 +110,7 @@ function getAutoUpdater() {
     // Silence the default electron-log transport (we log ourselves).
     autoUpdater.logger = null;
     _autoUpdater = autoUpdater;
+    setupGlobalListeners();
     return autoUpdater;
   } catch (err) {
     console.error("[AutoUpdate] Failed to load electron-updater:", err?.message || err);
@@ -119,12 +120,13 @@ function getAutoUpdater() {
 
 /**
  * Register persistent global IPC event listeners for auto-download flow.
- * Called once in init(). Forwards electron-updater events to the renderer
- * even when no manual download was initiated.
+ * Called lazily the first time electron-updater is loaded so startup does not
+ * eagerly require electron-updater (141 modules / ~5.7 MiB) when unsupported
+ * or before an update check actually runs.
  */
 function setupGlobalListeners() {
   if (_listenersRegistered) return;
-  const updater = getAutoUpdater();
+  const updater = _autoUpdater;
   if (!updater) return;
   _listenersRegistered = true;
 
@@ -385,7 +387,9 @@ function cancelPendingInstall() {
 
 function init(deps) {
   _deps = deps;
-  setupGlobalListeners();
+  // Global updater listeners attach lazily inside getAutoUpdater() on the
+  // first actual update check/download so startup avoids loading 141 modules
+  // of electron-updater when unsupported or idle.
 }
 
 /**
@@ -415,6 +419,9 @@ function broadcastToAllWindows(channel, payload) {
 }
 
 function registerHandlers(ipcMain) {
+  if (!process.versions?.electron) {
+    getAutoUpdater();
+  }
   // ---- Check for updates ------------------------------------------------
   ipcMain.handle("netcatty:update:check", async () => {
     // Cancel any pending auto-check to prevent concurrent checkForUpdates()
@@ -621,9 +628,8 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:update:setAutoUpdate", (_event, { enabled }) => {
     const wasEnabled = _prevAutoDownloadEnabled;
     _prevAutoDownloadEnabled = !!enabled;
-    const updater = getAutoUpdater();
-    if (updater) {
-      updater.autoDownload = !!enabled;
+    if (_autoUpdater) {
+      _autoUpdater.autoDownload = !!enabled;
       console.log("[AutoUpdate] autoDownload set to:", !!enabled);
     }
     // Persist so the preference survives app restarts

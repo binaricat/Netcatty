@@ -4,8 +4,10 @@
  * even when the Catty AI side panel has never been opened.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ToolCall } from '../ai-elements/tool-call';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+const ToolCall = lazy(() =>
+  import('../ai-elements/tool-call').then((mod) => ({ default: mod.ToolCall })),
+);
 import { Button } from '../ui/button';
 import {
   onApprovalCleared,
@@ -153,20 +155,22 @@ export const ExternalMcpApprovalsHost: React.FC = () => {
         <div className="space-y-2">
           {entries.map(([id, req]) => (
             <div key={id} className="space-y-1.5">
-              <ToolCall
-                name={externalMcpApprovalToolLabel(req.toolName)}
-                args={req.args}
-                approvalTarget={req.target}
-                isLoading={false}
-                isInterrupted={false}
-                approvalStatus="pending"
-                approvalId={id}
-                onApproveOnce={() => handleApproveOnce(id)}
-                onAlwaysAllow={req.target && !req.target.hostId ? undefined : () => handleAlwaysAllow(id, req)}
-                onReject={() => handleReject(id)}
-                alwaysAllowLabel={req.target?.hostId ? t('ai.externalMcp.allowCommandOnHost') : undefined}
-                alwaysAllowTitle={req.target?.hostId ? t('ai.externalMcp.allowCommandOnHostHint') : undefined}
-              />
+              <Suspense fallback={null}>
+                <ToolCall
+                  name={externalMcpApprovalToolLabel(req.toolName)}
+                  args={req.args}
+                  approvalTarget={req.target}
+                  isLoading={false}
+                  isInterrupted={false}
+                  approvalStatus="pending"
+                  approvalId={id}
+                  onApproveOnce={() => handleApproveOnce(id)}
+                  onAlwaysAllow={req.target && !req.target.hostId ? undefined : () => handleAlwaysAllow(id, req)}
+                  onReject={() => handleReject(id)}
+                  alwaysAllowLabel={req.target?.hostId ? t('ai.externalMcp.allowCommandOnHost') : undefined}
+                  alwaysAllowTitle={req.target?.hostId ? t('ai.externalMcp.allowCommandOnHostHint') : undefined}
+                />
+              </Suspense>
               {(req.allowSession || req.target?.hostId) && (
                 <div className="space-y-1.5">
                   <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">

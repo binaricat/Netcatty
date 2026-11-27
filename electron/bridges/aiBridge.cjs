@@ -226,7 +226,7 @@ function buildExternalAgentContextualPrompt({ mode, prompt, chatSessionId, defau
   return `${systemContext}\n\n${prompt}`;
 }
 
-const { execViaPty } = require("./ai/ptyExec.cjs");
+const execViaPty = (...args) => require("./ai/ptyExec.cjs").execViaPty(...args);
 
 let externalMcpController = null;
 let userDataDir = null;
@@ -1065,10 +1065,10 @@ function cleanup() {
     registeredContext.sdkActiveStreams.clear();
   }
   try {
-    registeredContext?.codexAppServerRuntime?.close?.();
+    registeredContext?.closeCodexAppServerRuntimeIfLoaded?.();
   } catch {}
   try {
-    registeredContext?.codebuddySessionManager?.closeAll?.();
+    registeredContext?.closeCodebuddySessionsIfLoaded?.();
   } catch {}
 
   for (const [id, session] of codexLoginSessions) {
