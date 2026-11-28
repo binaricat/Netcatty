@@ -15,6 +15,7 @@ export const zhTWTerminalMessages: Messages = {
   'terminal.directory.integrationUnavailable': 'PowerShell 目錄整合尚未就緒，啟動參數或執行原則可能阻止載入。',
   'terminal.directory.cmdIntegrationUnavailable': '正在等待原 CMD 工作階段回報目前目錄。',
   'terminal.directory.gitBashIntegrationUnavailable': '正在等待原 Git Bash 工作階段中的可存取目錄。',
+  'terminal.directory.wslIntegrationUnavailable': '正在等待所選 WSL 發行版本中的 Bash 返回閒置提示字元。',
   'terminal.directory.nonFilesystem': '目前 PowerShell 位置不是檔案系統目錄。',
   'terminal.directory.accessDenied': '沒有權限列出此目錄。',
   'terminal.directory.busy': '請等待終端回到空白命令提示字元。',

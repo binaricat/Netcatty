@@ -15,6 +15,7 @@ export const enTerminalMessages: Messages = {
   'terminal.directory.integrationUnavailable': 'PowerShell directory integration is not ready. Startup arguments or execution policy may prevent it.',
   'terminal.directory.cmdIntegrationUnavailable': 'Waiting for a directory report from the original Command Prompt session.',
   'terminal.directory.gitBashIntegrationUnavailable': 'Waiting for an accessible directory from the original Git Bash session.',
+  'terminal.directory.wslIntegrationUnavailable': 'Waiting for an idle Bash session in the selected WSL distribution.',
   'terminal.directory.nonFilesystem': 'The current PowerShell location is not a filesystem directory.',
   'terminal.directory.busy': 'Wait for an empty shell prompt.',
   'terminal.directory.readFailed': 'Could not read this directory. Try refreshing.',

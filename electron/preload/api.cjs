@@ -518,6 +518,8 @@ function createPreloadApi(ctx) {
       timeoutMs: options?.timeoutMs,
     });
   },
+  readWslSessionDirectory: (sessionId, operation, path) =>
+    ipcRenderer.invoke('netcatty:local:wslDirectory', { sessionId, operation, path }),
   getSessionRemoteInfo: async (sessionId) => {
     return ipcRenderer.invoke("netcatty:ssh:remoteInfo", { sessionId });
   },

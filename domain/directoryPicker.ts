@@ -3,8 +3,8 @@ import { resolveInteractiveTerminalCdIntent } from './sessionRestore';
 import { isAbsoluteDirectoryPath, joinDirectoryPath, labelDirectoryPath, parentDirectoryPath, type DirectoryPathFlavor } from './directoryPath';
 
 export type DirectoryEntry = { name: string; path: string; hidden: boolean };
-export type WindowsDirectoryShell = 'powershell' | 'cmd' | 'git-bash';
-export type DirectoryPickerErrorCode = 'unavailable' | 'unknown' | 'busy' | 'readFailed' | 'accessDenied' | 'changeFailed' | 'unsupportedPath' | 'integrationUnavailable' | 'cmdIntegrationUnavailable' | 'gitBashIntegrationUnavailable' | 'nonFilesystem';
+export type WindowsDirectoryShell = 'powershell' | 'cmd' | 'git-bash' | 'wsl';
+export type DirectoryPickerErrorCode = 'unavailable' | 'unknown' | 'busy' | 'readFailed' | 'accessDenied' | 'changeFailed' | 'unsupportedPath' | 'integrationUnavailable' | 'cmdIntegrationUnavailable' | 'gitBashIntegrationUnavailable' | 'wslIntegrationUnavailable' | 'nonFilesystem';
 
 export class DirectoryPickerError extends Error {
   constructor(public readonly code: DirectoryPickerErrorCode) { super(code); }
@@ -22,7 +22,7 @@ export function directoryLabel(path: string, home?: string | null, flavor: Direc
   return labelDirectoryPath(path, home, flavor);
 }
 
-export function directoryEntries(path: string, files: readonly RemoteFile[], flavor: DirectoryPathFlavor = 'posix'): DirectoryEntry[] {
+export function directoryEntries<T extends Pick<RemoteFile, 'name' | 'type' | 'linkTarget' | 'hidden'>>(path: string, files: readonly T[], flavor: DirectoryPathFlavor = 'posix'): DirectoryEntry[] {
   return files.filter(file => file.type === 'directory' || (file.type === 'symlink' && file.linkTarget === 'directory'))
     .flatMap(file => {
       const child = joinDirectoryPath(path, file.name, flavor);
@@ -55,6 +55,7 @@ export function directoryChangeCommand(path: string, shell: 'posix' | WindowsDir
     const target = path.replace(/\\/g, '/').replace(/'/g, "'\\''");
     return `\\builtin cd -- '${target}'`;
   }
+  if (shell === 'wsl') return flavor === 'posix' ? `\\builtin cd -- '${path.replace(/'/g, "'\\''")}'` : null;
   return flavor === 'posix' ? resolveInteractiveTerminalCdIntent(path)?.command ?? null : null;
 }
 

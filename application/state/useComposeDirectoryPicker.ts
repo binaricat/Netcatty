@@ -10,9 +10,11 @@ export function useComposeDirectoryPicker(sessionId: string) {
   useSyncExternalStore(terminalCwdStore.subscribe, terminalCwdStore.getVersion, terminalCwdStore.getVersion);
   const [confirmation, setConfirmation] = useState<{ sessionId: string; controller: typeof controller } | null>(null);
   const confirmed = confirmation?.sessionId === sessionId && confirmation.controller === controller;
-  const observedCwd = terminalCwdStore.getCwd(sessionId);
+  const getCurrentCwd = useCallback(() => controller?.trustsOsc7 === false && pathFlavor === 'posix'
+    ? controller.getVerifiedCwd() : terminalCwdStore.getCwd(sessionId), [controller, pathFlavor, sessionId]);
+  const observedCwd = getCurrentCwd();
   const cwd = controller && isDirectoryPath(observedCwd, pathFlavor)
-    && (confirmed || controller.hasConfirmedCwd() || (pathFlavor === 'posix' && terminalCwdStore.getSource(sessionId) === 'osc7'))
+    && (confirmed || controller.hasConfirmedCwd() || (controller.trustsOsc7 && terminalCwdStore.getSource(sessionId) === 'osc7'))
     ? observedCwd : null;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -77,7 +79,7 @@ export function useComposeDirectoryPicker(sessionId: string) {
       for (let attempt = 0; attempt < 3; attempt++) {
         const revision = terminalCwdStore.getSessionRevision(sessionId);
         const result = await controller.list(cwd, task.signal);
-        if (task.signal.aborted || id !== generation.current || terminalCwdStore.getCwd(sessionId) !== cwd) return;
+        if (task.signal.aborted || id !== generation.current || getCurrentCwd() !== cwd) return;
         if (terminalCwdStore.getSessionRevision(sessionId) !== revision) continue;
         listingBase.current = cwd; listingRevision.current = revision; setEntries(result.entries); setHome(result.home);
         return;
@@ -86,7 +88,7 @@ export function useComposeDirectoryPicker(sessionId: string) {
     } catch (failure) {
       if (!task.signal.aborted && id === generation.current) report(failure, 'readFailed');
     } finally { if (!task.signal.aborted && id === generation.current) setLoading(false); }
-  }, [controller, cwd, report, sessionId, setHome]);
+  }, [controller, cwd, getCurrentCwd, report, sessionId, setHome]);
 
   useEffect(() => {
     if (!cwd) {
@@ -102,7 +104,7 @@ export function useComposeDirectoryPicker(sessionId: string) {
   const change = useCallback(async (path: string) => {
     if (!controller) { setError('unavailable'); return; }
     if (sending.current) return;
-    if (!cwd || terminalCwdStore.getCwd(sessionId) !== cwd
+    if (!cwd || getCurrentCwd() !== cwd
       || (path !== directoryParent(cwd, pathFlavor) && (listingBase.current !== cwd
         || listingRevision.current !== terminalCwdStore.getSessionRevision(sessionId)))) { setError('unavailable'); return; }
     sending.current = true; setPending(true); setError(null);
@@ -115,12 +117,12 @@ export function useComposeDirectoryPicker(sessionId: string) {
     finally {
       if (id === generation.current) { sending.current = false; setPending(false); }
     }
-  }, [controller, report, cwd, sessionId, pathFlavor]);
+  }, [controller, report, cwd, sessionId, pathFlavor, getCurrentCwd]);
 
   const filtered = useMemo(() => filterDirectories(entries, query, showHidden), [entries, query, showHidden]);
   const cwdError = controller?.getCwdError() ?? null;
   const waitsForCwd = error === 'unknown' || error === 'integrationUnavailable' || error === 'cmdIntegrationUnavailable'
-    || error === 'gitBashIntegrationUnavailable' || error === 'nonFilesystem';
+    || error === 'gitBashIntegrationUnavailable' || error === 'wslIntegrationUnavailable' || error === 'nonFilesystem';
   return { cwd, home, display, pathFlavor, open, setOpen, query, setQuery, showHidden, setShowHidden, entries: filtered,
     parent: cwd ? directoryParent(cwd, pathFlavor) : null, loading, pending,
     error: cwdError ?? (cwd && waitsForCwd ? null : error),

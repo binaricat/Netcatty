@@ -253,12 +253,19 @@ declare global {
       },
     ): Promise<{ success: boolean; cwd?: string; error?: string; directoryState?: {
       revision: number;
-      shellKind: 'powershell' | 'cmd' | 'git-bash';
-      pathFlavor: 'win32';
+      shellKind: 'powershell' | 'cmd' | 'git-bash' | 'wsl';
+      pathFlavor: 'win32' | 'posix';
       provider: string;
       cwd: string | null;
       home: string | null;
     } }>;
+    readWslSessionDirectory?(sessionId: string, operation: 'list' | 'realpath', path: string): Promise<{
+      success: boolean;
+      error?: 'unavailable' | 'readFailed' | 'accessDenied';
+      files?: Pick<import('../../domain/models').RemoteFile, 'name' | 'type' | 'linkTarget' | 'hidden'>[];
+      home?: string | null;
+      path?: string;
+    }>;
     /**
      * Get metadata about an already-connected SSH session — currently the
      * SSH server identification string (the `software` part of the

@@ -67,11 +67,15 @@ PSDrive 根的 ProviderPath 可能带尾部反斜杠，因此路径比较按根�
 
 启动参数、profile 和提示符沿用用户配置。存在子进程时暂缓目录操作，原 Bash 恢复后重新读取。共享路径和虚拟挂载留到各自的路径语义明确后扩展。
 
+## WSL 会话集成
+
+通过 `WSLENV` 为所选发行版的交互会话传递标记。辅助进程在同一发行版和用户下读取 `/proc`，绑定原 Bash 的进程和终端，按 POSIX 路径处理 Linux 目录与挂载盘。检测到同终端的子进程时暂缓导航，原 Bash 恢复后重新读取位置。目录切换使用 Bash 内建 `cd`，以会话 cwd 确认结果。
+
 ## 后续设计方向
 
 - POSIX hook：分别处理 bash 的 PROMPT_COMMAND、zsh 的启动链和 fish 事件，补齐事件上报。
 - CMD：补充扩展关闭、提示符被启动脚本覆盖、变量展开字符和 UNC 映射场景。
-- WSL／MSYS／Cygwin：以 distro／mount authority 组织目录 helper 和路径映射。
+- WSL 扩展与 Cygwin：验证各自的发行版或挂载边界，复用目录控制器。
 - 扩展远程环境：逐项明确活动 shell 与 SFTP／provider 的文件系统对应关系。
 
 阶段交付与推进顺序统一维护在 [开发计划](directory-picker-follow-up.md)。
