@@ -605,3 +605,105 @@ test("app file exclusions prune dev schemas, test helpers/fixtures, svg sources,
   assert.equal(winFilter(macosVariantIcon, stat), false);
   assert.equal(linuxFilter(macosVariantIcon, stat), false);
 });
+
+test("merged electron-builder config never falls back to **/* and excludes repo sources/tests/docs/public on all platforms", async () => {
+  const { getConfig } = require("app-builder-lib/out/util/config/config");
+  const { getMainFileMatchers } = require("app-builder-lib/out/fileMatcher");
+  const root = path.resolve(__dirname, "..");
+  const outDir = path.join(root, "release");
+  const loadedConfig = await getConfig(
+    root,
+    path.join(root, "electron-builder.config.cjs"),
+    null,
+  );
+  const fileStat = { isDirectory: () => false };
+
+  const buildUnionFilter = (platformName) => {
+    const matchers = getMainFileMatchers(
+      root,
+      outDir,
+      (v) => v,
+      loadedConfig[platformName],
+      {
+        info: {
+          config: loadedConfig,
+          projectDir: root,
+          buildResourcesDir: "build",
+          isPrepackedAppAsar: false,
+          debugLogger: { isEnabled: false },
+        },
+      },
+      outDir,
+      false,
+    );
+    for (const matcher of matchers) {
+      assert.equal(
+        matcher.patterns.includes("**/*"),
+        false,
+        `${platformName} FileMatcher unexpectedly fell back to **/*: ${matcher.patterns.slice(0, 5).join(", ")}`,
+      );
+    }
+    const filters = matchers.map((matcher) => matcher.createFilter());
+    return (relPath) => filters.some((fn) => fn(path.join(root, relPath), fileStat));
+  };
+
+  const filters = {
+    mac: buildUnionFilter("mac"),
+    win: buildUnionFilter("win"),
+    linux: buildUnionFilter("linux"),
+  };
+
+  const mustExcludeEverywhere = [
+    "components/Terminal.tsx",
+    "application/state/useVaultState.ts",
+    "domain/models.ts",
+    "infrastructure/config/defaultData.ts",
+    "public/icon.png",
+    "public/audio/pcm-worklet.js",
+    "docs/assets/readme/overview.webp",
+    "docs/fido2-validation.md",
+    "scripts/afterPackMacUuid.cjs",
+    "examples/plugin-view-hello/index.js",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "electron-builder.config.cjs",
+    "electron/explorerContextMenu.test.cjs",
+    "electron/plugins/fixtures/inProcessBrowserRuntime.cjs",
+    "electron/bridges/aiBridge/codexAppServer/protocol.schema.json",
+    "dist/icon.svg",
+    "dist/tray-iconTemplate.svg",
+  ];
+
+  const mustIncludeEverywhere = [
+    "package.json",
+    "dist/index.html",
+    "electron/main.cjs",
+    "domain/totp.shared.cjs",
+    "domain/pluginRuntimePolicy.cjs",
+    "infrastructure/config/terminalFlowConstants.cjs",
+    "lib/localShell.cjs",
+    "skills/netcatty-tool-cli/SKILL.md",
+  ];
+
+  for (const [platformName, matches] of Object.entries(filters)) {
+    for (const relPath of mustExcludeEverywhere) {
+      assert.equal(
+        matches(relPath),
+        false,
+        `${platformName} app.asar must exclude ${relPath}`,
+      );
+    }
+    for (const relPath of mustIncludeEverywhere) {
+      assert.equal(
+        matches(relPath),
+        true,
+        `${platformName} app.asar must include ${relPath}`,
+      );
+    }
+  }
+
+  assert.equal(filters.mac("dist/icons/variants/macos/icon.png"), true);
+  assert.equal(filters.win("dist/icons/variants/macos/icon.png"), false);
+  assert.equal(filters.linux("dist/icons/variants/macos/icon.png"), false);
+});
+
