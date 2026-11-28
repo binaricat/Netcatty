@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { createRequire } = require("node:module");
 const {
   registerSdkStreamHandlers,
   MODEL_LIST_TIMEOUT_OVERRIDES_MS,
@@ -29,6 +30,7 @@ const {
 function registerWithStubbedCtx(overrides = {}) {
   const handlers = new Map();
   const ctx = {
+    require: createRequire(require.resolve("../../aiBridge.cjs")),
     ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) },
     electronModule: undefined,
     validateSender: () => true,
