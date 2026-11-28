@@ -828,7 +828,7 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2.6.2
+        uses: softprops/action-gh-release@v3.0.4
         with:
           body_path: release_notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}

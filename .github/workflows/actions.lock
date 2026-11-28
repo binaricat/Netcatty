@@ -16,7 +16,7 @@ workflows:
         - 'actions/setup-node@v7.1.0'
         - 'actions/upload-artifact@v7.0.2'
         - 'ilammy/msvc-dev-cmd@v1.13.0'
-        - 'softprops/action-gh-release@v2.6.2'
+        - 'softprops/action-gh-release@v3.0.4'
     '.github/workflows/grokbot-issue-relay.yml': []
     '.github/workflows/issue-format.yml':
         - 'actions/checkout@v7.0.1'
@@ -65,8 +65,8 @@ dependencies:
         commit: 'sha1-0b201ec74fa43914dc39ae48a89fd1d8cb592756'
         owner_id: 1256587
         repo_id: 212181767
-    'softprops/action-gh-release@v2.6.2':
-        ref: 'v2.6.2'
-        commit: 'sha1-3bb12739c298aeb8a4eeaf626c5b8d85266b0e65'
+    'softprops/action-gh-release@v3.0.4':
+        ref: 'v3.0.4'
+        commit: 'sha1-8a0cd651e5b2365bd640854a3fa5dfc70e4875f3'
         owner_id: 2242
         repo_id: 204253808
