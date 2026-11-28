@@ -318,6 +318,7 @@ export function computeAlertBadge(
   const count = Math.min(999, active.length);
   const criticalCount = active.filter((a) => a.severity === 'critical').length;
   const tone: 'warning' | 'danger' = criticalCount > 0 ? 'danger' : 'warning';
+  // eslint-disable-next-line no-control-regex
   const topMsg = (active[0]?.message ?? '').replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ').trim();
 
   const summary =

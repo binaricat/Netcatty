@@ -336,6 +336,8 @@ void electron.app
     console.error("MONITOR_ELECTRON_SMOKE_FAILED:", error);
     try {
       fs.rmSync(userData, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      // Best-effort temp dir cleanup on failure.
+    }
     electron.app.exit(1);
   });
