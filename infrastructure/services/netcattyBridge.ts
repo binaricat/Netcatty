@@ -379,6 +379,13 @@ export interface RemoteDesktopRecordingsBridgeApi {
   getPlaybackUrl(options: {
     recordingId: string;
   }): Promise<{ url: string | null; exists: boolean; bytes?: number }>;
+  saveThumbnail?(options: {
+    id?: string;
+    data: Uint8Array;
+  }): Promise<{ ok: boolean; id?: string; url?: string; bytes?: number }>;
+  getThumbnailUrl?(options: {
+    id: string;
+  }): Promise<{ url: string | null; exists: boolean; bytes?: number }>;
   export(options: {
     recordingId: string;
     defaultFileName?: string;

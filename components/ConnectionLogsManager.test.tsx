@@ -81,4 +81,64 @@ test("ConnectionLogsManager renders RDP/VNC icons and compact recording pill whe
   assert.match(markup, /vnc, 10\.0\.0\.20/);
   assert.match(markup, /bg-blue-500\/15 text-blue-600/);
   assert.match(markup, /bg-teal-500\/15 text-teal-600/);
+  assert.match(markup, /data-testid="logs-filter-bar"/);
+  assert.match(markup, /data-logs-filter="remoteDesktop"/);
+  assert.match(markup, /data-logs-filter="recorded"/);
+});
+
+test("ConnectionLogsManager renders multi-clip count and remote desktop resolution metadata", () => {
+  const logs: ConnectionLog[] = [
+    {
+      id: "log-multi-rec",
+      hostId: "h-1",
+      hostLabel: "Windows Multi",
+      hostname: "10.0.0.10",
+      username: "Administrator",
+      protocol: "rdp",
+      startTime: 1_700_000_000_000,
+      endTime: 1_700_000_200_000,
+      localUsername: "alice",
+      localHostname: "macbook",
+      saved: false,
+      recordings: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          startedAt: 1_700_000_010_000,
+          endedAt: 1_700_000_040_000,
+          durationMs: 30_000,
+          bytes: 1_048_576,
+          mimeType: "video/webm",
+          hasAudio: false,
+        },
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          startedAt: 1_700_000_060_000,
+          endedAt: 1_700_000_120_000,
+          durationMs: 60_000,
+          bytes: 2_097_152,
+          mimeType: "video/webm",
+          hasAudio: true,
+        },
+      ],
+      remoteDesktopMeta: {
+        resolution: { width: 1920, height: 1080 },
+        securityLabel: "TLS / NLA",
+      },
+    },
+  ];
+
+  const markup = renderWithI18n(
+    React.createElement(ConnectionLogsManager, {
+      logs,
+      hosts: [],
+      onToggleSaved: () => {},
+      onDelete: () => {},
+      onClearUnsaved: () => {},
+      onOpenLogView: () => {},
+    }),
+  );
+
+  assert.match(markup, /2 clips · 01:30 · 3 MB/);
+  assert.match(markup, /1920×1080/);
+  assert.match(markup, /TLS \/ NLA/);
 });

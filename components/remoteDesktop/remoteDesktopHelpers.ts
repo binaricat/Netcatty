@@ -67,11 +67,19 @@ export interface RemoteDesktopClipboardTransferState {
   error?: string;
 }
 
+export interface RemoteDesktopRecordingCaptureHandle {
+  stream: MediaStream;
+  width: number;
+  height: number;
+  dispose: () => void;
+}
+
 export interface RemoteDesktopCanvasHandle {
   sendSpecialKey: (id: RemoteDesktopSpecialKeyId) => void;
   typeText: (text: string) => void;
   releaseAllInputs: () => void;
   captureScreenshot: () => Promise<Blob | null>;
+  captureThumbnailJpeg?: () => Promise<Uint8Array | null>;
   captureFrame?: (
     options?: RemoteDesktopCaptureRequest & {
       maxWidth?: number;
@@ -83,6 +91,10 @@ export interface RemoteDesktopCanvasHandle {
   ) => Promise<RemoteDesktopProviderFrame | null> | RemoteDesktopProviderFrame | null;
   getCanvasRect?: () => DOMRect | null;
   getCaptureStream?: (fps: number, includeAudio?: boolean) => MediaStream | null;
+  createRecordingCapture?: (
+    fps: number,
+    includeAudio?: boolean,
+  ) => RemoteDesktopRecordingCaptureHandle | null;
   focusInput?: () => void;
   syncClipboardNow?: () => Promise<void> | void;
   requestRefresh?: () => void;

@@ -1125,6 +1125,7 @@ const { createTerminalPopupWindowApi } = require("./windowManager/terminalPopupW
 const terminalPopupWindowApi = createTerminalPopupWindowApi({
   get mainWindow() { return mainWindow; },
   get currentTheme() { return currentTheme; },
+  get isQuitting() { return isQuitting; },
   V8_CACHE_OPTIONS,
   __dirname,
   resolveFrontendBackgroundColor,

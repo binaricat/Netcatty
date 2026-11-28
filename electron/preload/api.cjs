@@ -2505,6 +2505,10 @@ function createPreloadApi(ctx) {
     abort: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:abort", options),
     getPlaybackUrl: (options) =>
       ipcRenderer.invoke("netcatty:remote-desktop-recording:get-playback-url", options),
+    saveThumbnail: (options) =>
+      ipcRenderer.invoke("netcatty:remote-desktop-recording:save-thumbnail", options),
+    getThumbnailUrl: (options) =>
+      ipcRenderer.invoke("netcatty:remote-desktop-recording:get-thumbnail-url", options),
     export: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:export", options),
     delete: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:delete", options),
     deleteMany: (options) =>

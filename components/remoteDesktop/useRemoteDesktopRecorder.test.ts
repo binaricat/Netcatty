@@ -400,3 +400,135 @@ test('useRemoteDesktopRecorder aborts cleanly when chunk append fails', async ()
     env.restore();
   }
 });
+
+test('useRemoteDesktopRecorder preserves multiple clips, captures thumbnails, disposes capture, and flushes on app shutdown', async () => {
+  const env = installDomEnv();
+  FakeMediaRecorder.instances = [];
+  Object.defineProperty(globalThis, 'MediaRecorder', { value: FakeMediaRecorder, configurable: true });
+
+  const finalizers = new Set<() => void | Promise<void>>();
+  let finalizerUnsubscribed = false;
+  (globalThis.window as unknown as Record<string, unknown>).netcatty = {
+    onFinalizeSessionLogs: (fn: () => void | Promise<void>) => {
+      finalizers.add(fn);
+      return () => {
+        finalizerUnsubscribed = true;
+        finalizers.delete(fn);
+      };
+    },
+  };
+
+  let currentLog: ConnectionLog = {
+    id: 'log-multi-rdp',
+    sessionId: 'sess-multi',
+    hostId: 'h1',
+    hostLabel: 'Win Multi',
+    hostname: '10.0.0.9',
+    username: 'Administrator',
+    protocol: 'rdp',
+    startTime: 10_000,
+    localUsername: 'u',
+    localHostname: 'l',
+    saved: false,
+  };
+  publishConnectionLogsSnapshot({ connectionLogs: [currentLog] });
+  registerConnectionLogsActions({
+    updateConnectionLog: (_id, updates) => {
+      currentLog = { ...currentLog, ...updates };
+      publishConnectionLogsSnapshot({ connectionLogs: [currentLog] });
+    },
+    toggleConnectionLogSaved: () => {},
+    deleteConnectionLog: () => {},
+    clearUnsavedConnectionLogs: () => {},
+  });
+
+  let nextId = 0;
+  const savedThumbs: string[] = [];
+  const { bridge } = createFakeBridge({
+    begin: async () => ({ recordingId: `11111111-1111-4111-8111-11111111111${++nextId}` }),
+    saveThumbnail: async (opts) => {
+      savedThumbs.push(opts.id || '');
+      return { ok: true, id: opts.id, bytes: opts.data.byteLength };
+    },
+  });
+
+  let disposeCount = 0;
+  let recorderApi!: UseRemoteDesktopRecorderResult;
+  let root: ReactTestRenderer | undefined;
+
+  function Harness() {
+    const canvasRef = useRef<RemoteDesktopCanvasHandle | null>({
+      sendSpecialKey: () => {},
+      typeText: () => {},
+      releaseAllInputs: () => {},
+      captureScreenshot: async () => null,
+      captureThumbnailJpeg: async () => new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+      createRecordingCapture: () => {
+        const fake = createFakeStream(false);
+        return {
+          stream: fake.stream,
+          width: 1920,
+          height: 1080,
+          dispose: () => {
+            disposeCount += 1;
+            fake.stream.getTracks().forEach((track) => track.stop());
+          },
+        };
+      },
+    });
+    recorderApi = useRemoteDesktopRecorder({
+      sessionId: 'sess-multi',
+      protocol: 'rdp',
+      hostLabel: 'Win Multi',
+      status: 'connected',
+      audioEnabled: false,
+      canvasHandleRef: canvasRef,
+      recordingsBridgeOverride: bridge,
+    });
+    return null;
+  }
+
+  try {
+    await act(async () => {
+      root = create(
+        React.createElement(I18nProvider, {
+          locale: 'en',
+          children: React.createElement(Harness),
+        }),
+      );
+    });
+
+    // Clip 1: manual start + stop
+    await act(async () => {
+      await recorderApi.startRecording({ silent: true });
+      FakeMediaRecorder.instances[0].emitChunk(new Uint8Array([1, 2, 3]));
+      await recorderApi.stopRecording({ silent: true });
+    });
+
+    assert.equal(currentLog.recordings?.length, 1);
+    assert.equal(currentLog.recordings?.[0].hasThumbnail, true);
+    assert.equal(currentLog.recordings?.[0].width, 1920);
+    assert.equal(savedThumbs.length, 1);
+
+    // Clip 2: start then flush via app shutdown finalizer (onFinalizeSessionLogs)
+    await act(async () => {
+      await recorderApi.startRecording({ silent: true });
+      FakeMediaRecorder.instances[1].emitChunk(new Uint8Array([4, 5, 6, 7]));
+      for (const fn of finalizers) {
+        await fn();
+      }
+    });
+
+    assert.equal(recorderApi.isRecording, false);
+    assert.equal(currentLog.recordings?.length, 2);
+    assert.equal(currentLog.recordings?.[0].id, '11111111-1111-4111-8111-111111111111');
+    assert.equal(currentLog.recordings?.[1].id, '11111111-1111-4111-8111-111111111112');
+    assert.ok(disposeCount >= 2, 'capture dispose() should run for every clip');
+  } finally {
+    await act(async () => { root?.unmount(); });
+    assert.equal(finalizerUnsubscribed, true, 'shutdown finalizer listener must unsubscribe on unmount');
+    registerConnectionLogsActions(null);
+    publishConnectionLogsSnapshot({ connectionLogs: [] });
+    env.restore();
+  }
+});

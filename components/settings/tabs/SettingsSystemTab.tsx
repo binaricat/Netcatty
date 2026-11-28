@@ -9,6 +9,7 @@ import {
   SystemRdpClientIcon,
 } from "../../icons/RemoteDesktopIcons";
 import { useI18n } from "../../../application/i18n/I18nProvider";
+import { clearAllRemoteDesktopRecordingsAndSyncLogs } from "../../../application/state/remoteDesktopLogActions";
 import type { AppLockSystemUnlockStatus } from "../../../application/state/useAppLockState";
 import type { AppLockSettings, AppLockSettingsChangeError, AppLockTimeoutMinutes } from "../../../domain/appLock";
 import { getCredentialProtectionAvailability } from "../../../infrastructure/services/credentialProtection";
@@ -390,13 +391,11 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   }, []);
 
   const handleConfirmClearAllRecordings = useCallback(async () => {
-    const bridge = netcattyBridge.get();
-    if (!bridge?.remoteDesktopRecordings?.clearAll) return;
     setIsClearingRecordings(true);
     setRecordingsClearDeletedCount(null);
     try {
-      const res = await bridge.remoteDesktopRecordings.clearAll({});
-      setRecordingsClearDeletedCount(res?.deleted ?? 0);
+      const res = await clearAllRemoteDesktopRecordingsAndSyncLogs();
+      setRecordingsClearDeletedCount(res.deleted);
       setClearRecordingsConfirmOpen(false);
       await loadRecordingStats();
     } catch (err) {

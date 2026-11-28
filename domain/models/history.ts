@@ -37,6 +37,50 @@ export interface RemoteHistoryEntry {
   timestamp?: number; // Only set when the history file carries one (zsh EXTENDED_HISTORY, fish `when`)
 }
 
+export interface RemoteDesktopRecordingClip {
+  id: string; // UUID referencing <userData>/recordings/<id>.webm
+  startedAt: number; // Wall-clock ms when recording started
+  endedAt: number; // Wall-clock ms when recording ended
+  durationMs: number; // Finalized clip duration in milliseconds
+  bytes: number; // Finalized clip file size in bytes
+  mimeType: string; // e.g. 'video/webm;codecs=vp9,opus'
+  hasAudio: boolean; // Whether an audio track was merged into the clip
+  hasThumbnail?: boolean; // Whether <id>.jpg exists on disk (never inline base64)
+  width?: number; // Recorded video frame width in pixels
+  height?: number; // Recorded video frame height in pixels
+}
+
+export type RemoteDesktopSessionEventKind =
+  | 'connected'
+  | 'reconnected'
+  | 'disconnected'
+  | 'resized'
+  | 'clipboard_upload'
+  | 'clipboard_download'
+  | 'shared_folder_mounted'
+  | 'shared_folder_unmounted'
+  | 'screenshot'
+  | 'recording_started'
+  | 'recording_stopped'
+  | 'error';
+
+export interface RemoteDesktopSessionEvent {
+  id: string;
+  timestamp: number;
+  kind: RemoteDesktopSessionEventKind;
+  summary: string;
+  detail?: string;
+}
+
+export interface RemoteDesktopSessionMetadata {
+  resolution?: { width: number; height: number };
+  securityLabel?: string; // e.g. 'TLS / NLA', 'TLS', 'RC4-128', 'RFB'
+  tunneled?: boolean;
+  monitorCount?: number;
+  disconnectReason?: string;
+  thumbnailId?: string; // UUID referencing <userData>/recordings/<id>.jpg for unrecorded sessions
+}
+
 // Connection Log - records connection history
 export interface ConnectionLog {
   id: string;
@@ -61,11 +105,14 @@ export interface ConnectionLog {
   terminalData?: string; // Captured terminal output data for replay
   themeId?: string; // Terminal theme ID for this log view
   fontSize?: number; // Terminal font size for this log view
-  recordingId?: string; // UUID referencing <userData>/recordings/<id>.webm (never inline bytes)
+  recordingId?: string; // UUID referencing <userData>/recordings/<id>.webm (legacy / latest clip mirror)
   recordingMimeType?: string; // e.g. 'video/webm;codecs=vp9,opus'
   recordingDurationMs?: number; // Finalized recording duration in milliseconds
   recordingBytes?: number; // Finalized recording file size in bytes
   recordingHasAudio?: boolean; // Whether an audio track was merged into the recording
+  recordings?: RemoteDesktopRecordingClip[]; // Multi-clip recordings for a single RDP/VNC session
+  remoteDesktopMeta?: RemoteDesktopSessionMetadata; // Structured RDP/VNC connection summary
+  remoteDesktopEvents?: RemoteDesktopSessionEvent[]; // Bounded chronological session activity timeline
 }
 
 // Session Logs Settings - for auto-saving terminal logs to local filesystem

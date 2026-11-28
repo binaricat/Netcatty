@@ -14,10 +14,15 @@ import { upsertKnownHost } from '../domain/knownHosts';
 import { isPluginHostProtocol, sanitizePluginConnection } from '../domain/pluginConnection';
 import {
   isRemoteDesktopProtocol,
+  resolveRemoteDesktopConnectionSpec,
   sanitizeRdpConfig,
   sanitizeVncConfig,
   type RemoteDesktopProtocol,
 } from '../domain/remoteDesktop';
+import { selectConnectionLogForTerminalDataCapture } from '../domain/connectionLog';
+import { getConnectionLogsSnapshot } from '../application/state/connectionLogsStore';
+import { getSystemUserHostInfo } from '../application/state/remoteDesktopLogActions';
+import { captureClosingTerminalSessions } from '../application/state/terminalSessionCloseCapture';
 import type { ResolveDefaultLocalShellContext } from '../domain/localShellHost';
 import {
   resolveEffectiveTerminalHost,
@@ -362,6 +367,8 @@ function TerminalPopupPageInner({
     snippets,
     snippetPackages,
     groupConfigs,
+    addConnectionLog,
+    updateConnectionLog,
     updateKnownHosts,
     deleteSelectedSnippets,
   } = useVaultState({ syncConnectionLogTerminalData: false });
@@ -397,6 +404,8 @@ function TerminalPopupPageInner({
           }
           await markAttachClosePrepared(attachSessionId, attachAuthorization);
         } catch { /* The main-process close handshake owns the final fallback. */ }
+      } else {
+        captureClosingTerminalSessions([sessionId]);
       }
       await close();
     })();
@@ -406,7 +415,7 @@ function TerminalPopupPageInner({
     };
     void closePromise.then(clearClosePromise, clearClosePromise);
     return closePromise;
-  }, [attachAuthorization, attachSessionId, close, isAttachMode, markAttachClosePrepared]);
+  }, [attachAuthorization, attachSessionId, close, isAttachMode, markAttachClosePrepared, sessionId]);
   const effectiveKnownHosts = useMemo(
     () => getEffectiveKnownHosts(knownHosts) ?? [],
     [knownHosts],
@@ -486,6 +495,63 @@ function TerminalPopupPageInner({
     if (readyToStart) setSessionStarted(true);
   }, [readyToStart]);
   const ready = sessionStarted || readyToStart;
+  const popupRemoteDesktopLogCreatedRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!ready || !host || !remoteDesktopProtocol) return;
+    if (popupRemoteDesktopLogCreatedRef.current === sessionId) return;
+    popupRemoteDesktopLogCreatedRef.current = sessionId;
+    const existingLog = selectConnectionLogForTerminalDataCapture(
+      [...getConnectionLogsSnapshot().connectionLogs],
+      { sessionId },
+    );
+    if (existingLog) return;
+    const spec = resolveRemoteDesktopConnectionSpec(host, remoteDesktopProtocol, identities);
+    // Create the ConnectionLog synchronously before RemoteDesktopPane connects
+    // so early connected/error events are never dropped, then enrich local user/host.
+    addConnectionLog({
+      sessionId,
+      hostId: host.id,
+      hostLabel: spec.isCompanion ? `${spec.label} (${remoteDesktopProtocol.toUpperCase()})` : spec.label,
+      hostname: spec.hostHostname,
+      username: spec.username,
+      protocol: remoteDesktopProtocol,
+      startTime: Date.now(),
+      localUsername: 'user',
+      localHostname: 'localhost',
+      saved: false,
+    });
+    let cancelled = false;
+    void getSystemUserHostInfo().then((info) => {
+      if (cancelled) return;
+      const log = selectConnectionLogForTerminalDataCapture(
+        [...getConnectionLogsSnapshot().connectionLogs],
+        { sessionId },
+      );
+      if (log && (info.username !== 'user' || info.hostname !== 'localhost')) {
+        void updateConnectionLog(log.id, {
+          localUsername: info.username,
+          localHostname: info.hostname,
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [addConnectionLog, host, identities, ready, remoteDesktopProtocol, sessionId, updateConnectionLog]);
+
+  const handlePopupRemoteDesktopCloseCapture = useCallback(
+    async (closingSessionId: string) => {
+      const { connectionLogs } = getConnectionLogsSnapshot();
+      const matchingLog = selectConnectionLogForTerminalDataCapture([...connectionLogs], {
+        sessionId: closingSessionId,
+      });
+      if (matchingLog) {
+        await updateConnectionLog(matchingLog.id, { endTime: Date.now() });
+      }
+    },
+    [updateConnectionLog],
+  );
+
   const startupRevealDelayMs = useMemo(() => {
     // Attach mode shows the live session immediately (no startup command).
     if (isAttachMode) return 0;
@@ -562,6 +628,7 @@ function TerminalPopupPageInner({
               knownHosts={effectiveKnownHosts}
               isVisible
               isFocused
+              onTerminalDataCapture={handlePopupRemoteDesktopCloseCapture}
               onCloseSession={() => {
                 void handleClose();
               }}
