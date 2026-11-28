@@ -162,6 +162,11 @@ test("GroupDetailsPanel detects RDP and VNC configs without falsely enabling SSH
   );
   // Legacy group with only proxy/chain still shows SSH enabled.
   assert.equal(hasGroupSshFields({ proxyProfileId: "corp-proxy" }), true);
+  // Telnet-only group with startupCommand does not falsely enable SSH.
+  assert.equal(
+    hasGroupSshFields({ telnetEnabled: true, startupCommand: "enable" }),
+    false,
+  );
 });
 
 test("GroupDetailsPanel selects and clears RDP and VNC identities cleanly", () => {

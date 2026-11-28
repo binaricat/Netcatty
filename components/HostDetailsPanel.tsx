@@ -82,9 +82,7 @@ import {
 } from "../domain/pluginConnection";
 import {
   applyHostDefaultConnectProtocol,
-  DEFAULT_RDP_CONFIG,
   DEFAULT_RDP_PORT,
-  DEFAULT_VNC_CONFIG,
   DEFAULT_VNC_PORT,
   getHostEnabledProtocols,
   hasValidRdpFixedResolution,
@@ -250,11 +248,11 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     },
   );
 
-  const hasRdpConfig = Boolean(form.rdpConfig);
+  const hasRdpProtocol = form.protocol === "rdp" || form.rdpConfig?.enabled === true;
   const [resolutionDraft, setResolutionDraft] = useState<RdpResolutionDraft>({});
   useEffect(() => {
     setResolutionDraft({});
-  }, [form.id, hasRdpConfig]);
+  }, [form.id, hasRdpProtocol]);
   const onResolutionDraftChange = (dimension: "width" | "height", value: string) => {
     setResolutionDraft((prev) => ({ ...prev, [dimension]: value }));
   };
@@ -670,10 +668,12 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         );
         const isFreshHost = !initialData;
         if (nextProtocol === "rdp") {
+          const carriedIdentityId = prev.rdpConfig?.identityId || prev.identityId;
           return {
             ...prev,
             protocol: "rdp",
             port: prev.rdpConfig?.port ?? nextPort,
+            ...(carriedIdentityId ? { identityId: carriedIdentityId } : {}),
             os: isFreshHost && prev.os === "linux" ? "windows" : prev.os,
             username: isFreshHost && prev.username === "root" ? "" : (prev.username ?? ""),
             authMethod: "password",
@@ -685,16 +685,19 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
               ...(prev.rdpConfig ?? {}),
               enabled: undefined,
               defaultConnect: undefined,
+              identityId: undefined,
               tunnelViaHostSsh: undefined,
               tunnelTargetHost: undefined,
             },
           };
         }
         if (nextProtocol === "vnc") {
+          const carriedIdentityId = prev.vncConfig?.identityId || prev.identityId;
           return {
             ...prev,
             protocol: "vnc",
             port: prev.vncConfig?.port ?? nextPort,
+            ...(carriedIdentityId ? { identityId: carriedIdentityId } : {}),
             username: isFreshHost && prev.username === "root" ? "" : (prev.username ?? ""),
             authMethod: "password",
             moshEnabled: false,
@@ -705,6 +708,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
               ...(prev.vncConfig ?? {}),
               enabled: undefined,
               defaultConnect: undefined,
+              identityId: undefined,
               tunnelViaHostSsh: undefined,
               tunnelTargetHost: undefined,
             },
@@ -769,22 +773,44 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       setActiveProtocolTab(proto);
       setForm((prev) => {
         const hasSsh = !prev.protocol || prev.protocol === "ssh" || prev.protocol === "mosh" || prev.protocol === "et";
+        const hasGroupRdpCreds = Boolean(
+          effectiveGroupDefaults?.rdpConfig?.identityId
+          || effectiveGroupDefaults?.rdpConfig?.username
+          || effectiveGroupDefaults?.rdpConfig?.useHostCredentials !== undefined,
+        );
+        const hasGroupVncCreds = Boolean(
+          effectiveGroupDefaults?.vncConfig?.identityId
+          || effectiveGroupDefaults?.vncConfig?.username
+          || effectiveGroupDefaults?.vncConfig?.useHostCredentials !== undefined,
+        );
         if (hasSsh) {
           if (proto === "vnc") {
+            const hasExplicitVncCreds = Boolean(
+              prev.vncConfig?.identityId !== undefined
+              || prev.vncConfig?.username
+              || prev.vncConfig?.useHostCredentials !== undefined,
+            );
             return {
               ...prev,
               vncConfig: {
                 ...(prev.vncConfig ?? {}),
                 enabled: true,
+                ...(!hasExplicitVncCreds && !hasGroupVncCreds ? { useHostCredentials: true } : {}),
               },
             };
           }
           if (proto === "rdp") {
+            const hasExplicitRdpCreds = Boolean(
+              prev.rdpConfig?.identityId !== undefined
+              || prev.rdpConfig?.username
+              || prev.rdpConfig?.useHostCredentials !== undefined,
+            );
             return {
               ...prev,
               rdpConfig: {
                 ...(prev.rdpConfig ?? {}),
                 enabled: true,
+                ...(!hasExplicitRdpCreds && !hasGroupRdpCreds ? { useHostCredentials: true } : {}),
               },
             };
           }
@@ -799,38 +825,54 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         // while keeping the existing protocol enabled (and default for RDP/VNC).
         if (proto === "ssh") {
           if (prev.protocol === "rdp") {
+            const existingPort = prev.port ?? prev.rdpConfig?.port;
+            const hasExplicitRdpCreds = Boolean(
+              prev.identityId
+              || prev.rdpConfig?.identityId !== undefined
+              || prev.rdpConfig?.username
+              || prev.rdpConfig?.useHostCredentials !== undefined,
+            );
             return {
               ...prev,
               protocol: "ssh",
               port: effectiveGroupDefaults?.port ? undefined : 22,
               username: prev.username || (effectiveGroupDefaults?.username ? "" : "root"),
               rdpConfig: {
-                ...DEFAULT_RDP_CONFIG,
                 ...(prev.rdpConfig ?? {}),
                 enabled: true,
                 defaultConnect: true,
-                port: prev.port ?? prev.rdpConfig?.port ?? DEFAULT_RDP_PORT,
-                tunnelViaHostSsh: true,
-                useHostCredentials: prev.identityId ? false : true,
-                ...(prev.identityId ? { identityId: prev.identityId } : {}),
+                ...(existingPort !== undefined ? { port: existingPort } : {}),
+                ...(prev.identityId
+                  ? { useHostCredentials: false, identityId: prev.identityId }
+                  : !hasExplicitRdpCreds && !hasGroupRdpCreds
+                    ? { useHostCredentials: true }
+                    : {}),
               },
             };
           }
           if (prev.protocol === "vnc") {
+            const existingPort = prev.port ?? prev.vncConfig?.port;
+            const hasExplicitVncCreds = Boolean(
+              prev.identityId
+              || prev.vncConfig?.identityId !== undefined
+              || prev.vncConfig?.username
+              || prev.vncConfig?.useHostCredentials !== undefined,
+            );
             return {
               ...prev,
               protocol: "ssh",
               port: effectiveGroupDefaults?.port ? undefined : 22,
               username: prev.username || (effectiveGroupDefaults?.username ? "" : "root"),
               vncConfig: {
-                ...DEFAULT_VNC_CONFIG,
                 ...(prev.vncConfig ?? {}),
                 enabled: true,
                 defaultConnect: true,
-                port: prev.port ?? prev.vncConfig?.port ?? DEFAULT_VNC_PORT,
-                tunnelViaHostSsh: true,
-                useHostCredentials: prev.identityId ? false : true,
-                ...(prev.identityId ? { identityId: prev.identityId } : {}),
+                ...(existingPort !== undefined ? { port: existingPort } : {}),
+                ...(prev.identityId
+                  ? { useHostCredentials: false, identityId: prev.identityId }
+                  : !hasExplicitVncCreds && !hasGroupVncCreds
+                    ? { useHostCredentials: true }
+                    : {}),
               },
             };
           }
@@ -848,7 +890,16 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         return prev;
       });
     },
-    [effectiveGroupDefaults?.port, effectiveGroupDefaults?.username],
+    [
+      effectiveGroupDefaults?.port,
+      effectiveGroupDefaults?.rdpConfig?.identityId,
+      effectiveGroupDefaults?.rdpConfig?.useHostCredentials,
+      effectiveGroupDefaults?.rdpConfig?.username,
+      effectiveGroupDefaults?.username,
+      effectiveGroupDefaults?.vncConfig?.identityId,
+      effectiveGroupDefaults?.vncConfig?.useHostCredentials,
+      effectiveGroupDefaults?.vncConfig?.username,
+    ],
   );
 
   const handleSetDefaultProtocol = useCallback((proto: EditableHostProtocol) => {
@@ -1352,9 +1403,17 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         password: undefined,
         identityFileId: undefined,
         identityFilePaths: undefined,
-        ...(prev.protocol === "rdp" && identity.domain
-          ? { rdpConfig: { ...(prev.rdpConfig ?? {}), domain: identity.domain } }
-          : {}),
+        ...(prev.protocol === "rdp"
+          ? {
+            rdpConfig: {
+              ...(prev.rdpConfig ?? {}),
+              identityId: undefined,
+              ...(identity.domain ? { domain: identity.domain } : {}),
+            },
+          }
+          : prev.protocol === "vnc" && prev.vncConfig?.identityId !== undefined
+            ? { vncConfig: { ...prev.vncConfig, identityId: undefined } }
+            : {}),
       }));
       setPendingReferenceKeyPath(null);
       setSelectedCredentialType(null);
@@ -1365,7 +1424,22 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   );
 
   const clearIdentity = useCallback(() => {
-    setForm((prev) => detachEffectiveHostIdentity(prev, effectiveAuth.username));
+    setForm((prev) => {
+      const detached = detachEffectiveHostIdentity(prev, effectiveAuth.username);
+      if (prev.protocol === "rdp" && prev.rdpConfig?.identityId !== undefined) {
+        return {
+          ...detached,
+          rdpConfig: { ...prev.rdpConfig, identityId: undefined },
+        };
+      }
+      if (prev.protocol === "vnc" && prev.vncConfig?.identityId !== undefined) {
+        return {
+          ...detached,
+          vncConfig: { ...prev.vncConfig, identityId: undefined },
+        };
+      }
+      return detached;
+    });
     setIdentitySuggestionsOpen(false);
   }, [effectiveAuth.username]);
 

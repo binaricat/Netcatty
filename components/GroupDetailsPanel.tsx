@@ -100,8 +100,6 @@ const hasExclusiveGroupSshFields = (c: Partial<GroupConfig>): boolean =>
   c.x11Forwarding !== undefined ||
   c.authMethod !== undefined ||
   c.identityId !== undefined ||
-  !!c.startupCommand ||
-  c.startupCommandRunMode !== undefined ||
   c.legacyAlgorithms !== undefined ||
   c.skipEcdsaHostKey !== undefined ||
   c.algorithms !== undefined ||
@@ -115,12 +113,18 @@ const hasExclusiveGroupSshFields = (c: Partial<GroupConfig>): boolean =>
 
 export const hasGroupSshFields = (c: Partial<GroupConfig>): boolean => {
   if (hasExclusiveGroupSshFields(c)) return true;
-  // Shared routing fields (proxy / jump chain) imply SSH only for legacy groups
-  // that do not configure RDP, VNC, or Telnet.
+  // Shared fields (proxy / jump chain / startup command) imply SSH only for
+  // legacy groups that do not configure RDP, VNC, or Telnet.
   const hasOtherProtocol =
     hasGroupRdpFields(c) || hasGroupVncFields(c) || hasGroupTelnetFields(c);
   if (hasOtherProtocol) return false;
-  return Boolean(c.proxyProfileId || c.proxyConfig || c.hostChain);
+  return Boolean(
+    c.proxyProfileId ||
+      c.proxyConfig ||
+      c.hostChain ||
+      c.startupCommand ||
+      c.startupCommandRunMode !== undefined,
+  );
 };
 
 export const selectGroupSshIdentity = (
@@ -748,6 +752,12 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
       return;
     }
 
+    const newPath = parentGroup ? `${parentGroup}/${trimmedName}` : trimmedName;
+    if (newPath !== groupPath && groups.includes(newPath)) {
+      setNameError(t("vault.groups.errors.duplicatePath"));
+      return;
+    }
+
     if (rdpEnabled) {
       const effectiveRdpForValidation: RdpConfig = {
         ...(inheritedConnectionDefaults.rdpConfig ?? {}),
@@ -778,8 +788,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
     const normalizedProxyConfig = proxySave?.normalizedProxyConfig;
     setNameError(null);
 
-    const newPath = parentGroup ? `${parentGroup}/${trimmedName}` : trimmedName;
-
     let finalRdpConfig: RdpConfig | undefined;
     if (rdpEnabled) {
       const sanitizedRdp = sanitizeRdpConfig({
@@ -792,7 +800,13 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
         ...(form.rdpConfig?.identityId === "" ? { identityId: "" } : {}),
       };
       const rdpDraft = remoteDesktopCredentialDrafts.rdp;
-      if (onCreateIdentity && rdpDraft && rdpDraft.password.length > 0 && !finalRdpConfig.useHostCredentials) {
+      if (
+        onCreateIdentity &&
+        rdpDraft &&
+        rdpDraft.password.length > 0 &&
+        !finalRdpConfig.useHostCredentials &&
+        !finalRdpConfig.identityId
+      ) {
         const identity: Identity = {
           id: crypto.randomUUID(),
           label: `${trimmedName} RDP`,
@@ -824,7 +838,13 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
         ...(form.vncConfig?.identityId === "" ? { identityId: "" } : {}),
       };
       const vncDraft = remoteDesktopCredentialDrafts.vnc;
-      if (onCreateIdentity && vncDraft && vncDraft.password.length > 0 && !finalVncConfig.useHostCredentials) {
+      if (
+        onCreateIdentity &&
+        vncDraft &&
+        vncDraft.password.length > 0 &&
+        !finalVncConfig.useHostCredentials &&
+        !finalVncConfig.identityId
+      ) {
         const identity: Identity = {
           id: crypto.randomUUID(),
           label: `${trimmedName} VNC`,

@@ -6,24 +6,6 @@ import {
 } from './globalDefaultProxy';
 import { sanitizeRdpConfig, sanitizeVncConfig } from './remoteDesktop';
 
-const sanitizeGroupRdpConfig = (config: RdpConfig | undefined): RdpConfig | undefined => {
-  if (!config) return undefined;
-  const sanitized = sanitizeRdpConfig(config);
-  if (config.identityId === '') {
-    return { ...(sanitized ?? {}), identityId: '' };
-  }
-  return sanitized;
-};
-
-const sanitizeGroupVncConfig = (config: VncConfig | undefined): VncConfig | undefined => {
-  if (!config) return undefined;
-  const sanitized = sanitizeVncConfig(config);
-  if (config.identityId === '') {
-    return { ...(sanitized ?? {}), identityId: '' };
-  }
-  return sanitized;
-};
-
 export const hasManualGroupRdpCredentials = (config: Partial<RdpConfig> | undefined): boolean =>
   Boolean(config && (config.username !== undefined || config.useHostCredentials === true));
 
@@ -79,12 +61,12 @@ export function sanitizeGroupConfig(config: GroupConfig): GroupConfig {
     ? { ...migrated, authMethod: 'password' as const }
     : { ...migrated };
   if (Object.prototype.hasOwnProperty.call(next, 'rdpConfig')) {
-    const rdpConfig = sanitizeGroupRdpConfig(next.rdpConfig);
+    const rdpConfig = sanitizeRdpConfig(next.rdpConfig);
     if (rdpConfig) next.rdpConfig = rdpConfig;
     else delete next.rdpConfig;
   }
   if (Object.prototype.hasOwnProperty.call(next, 'vncConfig')) {
-    const vncConfig = sanitizeGroupVncConfig(next.vncConfig);
+    const vncConfig = sanitizeVncConfig(next.vncConfig);
     if (vncConfig) next.vncConfig = vncConfig;
     else delete next.vncConfig;
   }
@@ -350,6 +332,12 @@ const applyRemoteDesktopGroupConfig = <T extends RdpConfig | VncConfig>(
     || hostConfig?.identityId !== undefined
     || Boolean(hostConfig?.username?.trim())
   );
+  const standaloneHasExplicitIdentityOrUsername = isStandalone && (
+    host.identityId !== undefined
+    || Boolean(host.username?.trim())
+    || hostConfig?.identityId !== undefined
+    || Boolean(hostConfig?.username?.trim())
+  );
 
   const companionHasUseHostCreds = !isStandalone && hostConfig?.useHostCredentials === true;
   const companionHasExplicitIdentity = !isStandalone && hostConfig?.identityId !== undefined;
@@ -375,7 +363,7 @@ const applyRemoteDesktopGroupConfig = <T extends RdpConfig | VncConfig>(
     }
     if (key === 'username') {
       if (value === '') continue;
-      if (isStandalone && standaloneHasExplicitCreds) continue;
+      if (isStandalone && standaloneHasExplicitIdentityOrUsername) continue;
       if (!isStandalone && (companionHasUseHostCreds || companionHasExplicitIdentity || companionHasManualUsername)) {
         continue;
       }

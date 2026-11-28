@@ -211,6 +211,18 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
     }
   }, [form.id, form.port, isVncPrimary, groupDefaults?.vncConfig?.port]);
 
+  const updateStandaloneDesktopPort = (nextPort: number | undefined) => {
+    setForm((prev: Host) => ({
+      ...prev,
+      port: nextPort,
+      ...(isRdpPrimary && prev.rdpConfig
+        ? { rdpConfig: { ...prev.rdpConfig, port: nextPort } }
+        : isVncPrimary && prev.vncConfig
+          ? { vncConfig: { ...prev.vncConfig, port: nextPort } }
+          : {}),
+    }));
+  };
+
   const handleTabClick = (next: "ssh" | "rdp" | "vnc" | "telnet") => {
     if (onSelectProtocolTab) {
       onSelectProtocolTab(next);
@@ -429,23 +441,23 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                         const raw = e.target.value;
                         setVncPortText(raw);
                         if (!raw.trim()) {
-                          update("port", undefined);
+                          updateStandaloneDesktopPort(undefined);
                           return;
                         }
                         const parsed = parseVncPortOrDisplay(raw);
                         if (parsed !== null) {
-                          update("port", parsed);
+                          updateStandaloneDesktopPort(parsed);
                         }
                       }}
                       onBlur={() => {
                         if (!vncPortText.trim() && groupDefaults?.vncConfig?.port !== undefined) {
-                          update("port", undefined);
+                          updateStandaloneDesktopPort(undefined);
                           return;
                         }
                         const parsed = parseVncPortOrDisplay(vncPortText);
                         const resolved = parsed ?? (groupDefaults?.vncConfig?.port !== undefined ? undefined : DEFAULT_VNC_PORT);
                         setVncPortText(resolved !== undefined ? String(resolved) : "");
-                        update("port", resolved);
+                        updateStandaloneDesktopPort(resolved);
                       }}
                       placeholder={
                         groupDefaults?.vncConfig?.port
@@ -465,7 +477,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                     type="number"
                     value={form.port ?? ""}
                     onChange={(e) =>
-                      update("port", e.target.value ? Number(e.target.value) : undefined)
+                      updateStandaloneDesktopPort(e.target.value ? Number(e.target.value) : undefined)
                     }
                     placeholder={String(groupDefaults?.rdpConfig?.port ?? DEFAULT_RDP_PORT)}
                     className="h-8 w-44 text-center font-mono text-sm"

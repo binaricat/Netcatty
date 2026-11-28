@@ -162,7 +162,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
           ? form.vncConfig.useHostCredentials
           : hostHasManualVncCreds
             ? false
-            : (groupVnc?.useHostCredentials ?? (groupVnc?.username ? false : true))
+            : groupVnc?.useHostCredentials === true
       );
     const selectedVncIdentity = effectiveVncIdentityId
       ? identities.find((i) => i.id === effectiveVncIdentityId)
@@ -289,7 +289,11 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
                 <IdentitySuggestInput
                   value={credentialDraft?.username ?? form.vncConfig?.username ?? ""}
                   onChange={(next) => {
-                    updateVncConfig({ username: next || undefined, useHostCredentials: false });
+                    updateVncConfig({
+                      username: next || undefined,
+                      useHostCredentials: false,
+                      ...(groupVnc?.identityId ? { identityId: "" } : {}),
+                    });
                     onCredentialDraftChange?.({
                       username: next,
                       password: credentialDraft?.password ?? "",
@@ -402,7 +406,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
         ? form.rdpConfig.useHostCredentials
         : hostHasManualRdpCreds
           ? false
-          : (groupRdp?.useHostCredentials ?? (groupRdp?.username ? false : true))
+          : groupRdp?.useHostCredentials === true
     );
   const selectedRdpIdentity = effectiveRdpIdentityId
     ? identities.find((i) => i.id === effectiveRdpIdentityId)
@@ -507,7 +511,11 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
               <IdentitySuggestInput
                 value={credentialDraft?.username ?? form.rdpConfig?.username ?? ""}
                 onChange={(next) => {
-                  updateRdpConfig({ username: next || undefined, useHostCredentials: false });
+                  updateRdpConfig({
+                    username: next || undefined,
+                    useHostCredentials: false,
+                    ...(groupRdp?.identityId ? { identityId: "" } : {}),
+                  });
                   onCredentialDraftChange?.({
                     username: next,
                     password: credentialDraft?.password ?? "",

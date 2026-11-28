@@ -1210,4 +1210,32 @@ test("applyGroupDefaults inherits rdpConfig and vncConfig only into SSH hosts th
   assert.equal(companionHostCreds.rdpConfig?.useHostCredentials, true);
   assert.equal(companionHostCreds.rdpConfig?.identityId, undefined);
   assert.equal(companionHostCreds.rdpConfig?.domain, "CORP");
+
+  // Companion RDP host with explicit empty-string identityId opt-out keeps cleared identity across sanitize + inherit.
+  const clearedCompanion = applyGroupDefaults(
+    host({
+      protocol: "ssh",
+      rdpConfig: { enabled: true, useHostCredentials: false, identityId: "" },
+    }),
+    groupDefaults,
+    { globalProxyProfileId: "" },
+  );
+  assert.equal(clearedCompanion.rdpConfig?.identityId, "");
+  assert.equal(clearedCompanion.rdpConfig?.useHostCredentials, false);
+});
+
+test("applyGroupDefaults lets standalone RDP host with inline password inherit a manual group username", () => {
+  const result = applyGroupDefaults(
+    host({
+      protocol: "rdp",
+      username: "",
+      password: "host-specific-password",
+    }),
+    {
+      rdpConfig: { enabled: true, username: "Administrator" },
+    },
+    { globalProxyProfileId: "" },
+  );
+
+  assert.equal(result.rdpConfig?.username, "Administrator");
 });

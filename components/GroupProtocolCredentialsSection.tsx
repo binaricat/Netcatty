@@ -208,8 +208,15 @@ export const GroupProtocolCredentialsSection: React.FC<GroupProtocolCredentialsS
   );
 
   const selectSshAuthMethod = (nextMethod: "auto" | "password" | "key" | "certificate") => {
+    const detachingIdentity = Boolean(effectiveSshIdentityId);
+    if (detachingIdentity) {
+      update("identityId", inheritedDefaults.identityId ? "" : undefined);
+    }
     if (nextMethod === "auto" || nextMethod === "password") {
-      update("authMethod", nextMethod === "auto" ? undefined : "password");
+      const needsExplicitAuto =
+        nextMethod === "auto" &&
+        Boolean(form.password?.length || inheritedDefaults.authMethod || inheritedDefaults.identityId);
+      update("authMethod", nextMethod === "auto" ? (needsExplicitAuto ? "auto" : undefined) : "password");
       update("identityFileId", undefined);
       update("identityFilePaths", undefined);
       setSelectedCredentialType(null);
@@ -421,6 +428,7 @@ export const GroupProtocolCredentialsSection: React.FC<GroupProtocolCredentialsS
                     onChange={(next) => {
                       updateRdpConfig({
                         username: next || undefined,
+                        ...(inheritedRdp?.identityId ? { identityId: "" } : {}),
                         ...(inheritedRdp?.useHostCredentials ? { useHostCredentials: false } : {}),
                       });
                       onRemoteDesktopCredentialDraftChange("rdp", (prev) => ({
@@ -619,6 +627,7 @@ export const GroupProtocolCredentialsSection: React.FC<GroupProtocolCredentialsS
                     onChange={(next) => {
                       updateVncConfig({
                         username: next || undefined,
+                        ...(inheritedVnc?.identityId ? { identityId: "" } : {}),
                         ...(inheritedVnc?.useHostCredentials ? { useHostCredentials: false } : {}),
                       });
                       onRemoteDesktopCredentialDraftChange("vnc", (prev) => ({
@@ -861,7 +870,12 @@ export const GroupProtocolCredentialsSection: React.FC<GroupProtocolCredentialsS
               <>
                 <IdentitySuggestInput
                   value={form.username || ""}
-                  onChange={(next) => update("username", next || undefined)}
+                  onChange={(next) => {
+                    update("username", next || undefined);
+                    if (inheritedDefaults.identityId && form.identityId === undefined) {
+                      update("identityId", "");
+                    }
+                  }}
                   placeholder={inheritedDefaults.username || t("hostDetails.username.placeholder")}
                   identities={identities}
                   availableKeys={availableKeys}

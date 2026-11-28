@@ -253,3 +253,58 @@ test("Host Details keeps standalone RDP fields sparse so group RDP defaults are 
     assert.equal(effective.rdpConfig?.audioEnabled, false);
   }, rdpHost);
 });
+
+test("Host Details preserves useHostCredentials fallback when adding companion RDP without group credential defaults", async () => {
+  await withPanel({}, async ({ root, save }) => {
+    const rdpTab = root.findAll(
+      (node) => node.type === "button" && node.props["data-primary-protocol"] === "rdp",
+    )[0];
+    assert.ok(rdpTab);
+    await act(async () => { rdpTab.props.onClick(); });
+    const addRdpBtn = root.findAllByType(Button).find((btn) => {
+      const collect = (n: unknown): string =>
+        typeof n === "string"
+          ? n
+          : Array.isArray(n)
+            ? n.map(collect).join("")
+            : n && typeof n === "object" && "children" in n
+              ? collect((n as { children: unknown }).children)
+              : "";
+      return collect(btn.children).includes("Add RDP");
+    });
+    assert.ok(addRdpBtn);
+    await act(async () => { addRdpBtn.props.onClick(); });
+    const saved = await save();
+    assert.equal(saved.rdpConfig?.enabled, true);
+    assert.equal(saved.rdpConfig?.useHostCredentials, true);
+  });
+});
+
+test("Host Details preserves cleared inherited companion RDP identity across save", async () => {
+  const group: Partial<GroupConfig> = {
+    rdpConfig: {
+      enabled: true,
+      identityId: "group-rdp-id",
+    },
+  };
+  const companionHost: Host = {
+    ...host,
+    rdpConfig: { enabled: true },
+  };
+  await withPanel(group, async ({ root, save }) => {
+    const rdpTab = root.findAll(
+      (node) => node.type === "button" && node.props["data-primary-protocol"] === "rdp",
+    )[0];
+    await act(async () => { rdpTab.props.onClick(); });
+    const clearBtn = root.findAllByType(Button).find(
+      (btn) => btn.props.size === "icon" && btn.props.className?.includes("h-8 w-8 shrink-0"),
+    );
+    assert.ok(clearBtn, "expected Clear button on inherited companion RDP identity");
+    await act(async () => { clearBtn.props.onClick({ defaultPrevented: false }); });
+    const saved = await save();
+    assert.equal(saved.rdpConfig?.identityId, "");
+    assert.equal(saved.rdpConfig?.useHostCredentials, false);
+    const effective = applyGroupDefaults(saved, group);
+    assert.equal(effective.rdpConfig?.identityId, "");
+  }, companionHost);
+});
