@@ -72,6 +72,11 @@ export function OverviewTab({
     return { min, avg, max };
   }, [points]);
 
+  const diskLayout = useMemo(
+    () => buildMonitorDiskListLayout(stats, showSystemDisks, thresholds.diskWarning),
+    [stats, showSystemDisks, thresholds.diskWarning],
+  );
+
   if (isProbe) {
     const probe = state?.probe;
     return (
@@ -175,11 +180,6 @@ export function OverviewTab({
     stats?.fdUsed != null && stats?.fdMax != null && stats.fdMax > 0
       ? Math.min(100, (stats.fdUsed / stats.fdMax) * 100)
       : null;
-
-  const diskLayout = useMemo(
-    () => buildMonitorDiskListLayout(stats, showSystemDisks, thresholds.diskWarning),
-    [stats, showSystemDisks, thresholds.diskWarning],
-  );
 
   const hasCpuBreakdown = points.some((p) => p.cpuUser != null || p.cpuSystem != null);
 
