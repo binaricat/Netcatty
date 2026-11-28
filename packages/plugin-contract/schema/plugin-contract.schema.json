@@ -460,7 +460,7 @@
         "label": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
         "type": { "enum": ["local", "remote", "dynamic"] },
         "localPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "bindAddress": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "bindAddress": { "enum": ["127.0.0.1", "::1", "localhost"] },
         "remoteHost": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
         "remotePort": { "type": "integer", "minimum": 1, "maximum": 65535 }
       },

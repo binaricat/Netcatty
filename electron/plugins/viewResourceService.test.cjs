@@ -7,7 +7,7 @@ const os = require('node:os');
 const { PluginViewResources } = require('./viewResourceService.cjs');
 test('view images reject traversal, symlink escapes, external SVGs and oversize data before decoding', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'netcatty-view-image-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.after(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 }));
   const root = path.join(directory, 'package'); await fs.mkdir(root);
   const resources = new PluginViewResources({ electron: {}, packageStore: { preparePackageRoot: async () => root } });
   let decoded = 0; resources.rasterize = async () => { decoded++; throw new Error('Unexpected decoding'); };
@@ -24,7 +24,7 @@ test('view images reject traversal, symlink escapes, external SVGs and oversize 
 
 test('view images cache decoded results by plugin version/hash and never cache transient failures', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'netcatty-view-image-cache-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.after(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 }));
   const root = path.join(directory, 'package'); await fs.mkdir(root);
   // Minimal valid 1x1 PNG header/bytes
   const pngHeader = Buffer.from([
@@ -52,7 +52,7 @@ test('view images cache decoded results by plugin version/hash and never cache t
 
 test('view images persist validated PNGs to disk cache and recover cleanly from corrupt cache files', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'netcatty-view-image-disk-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.after(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 }));
   const root = path.join(directory, 'package');
   const cacheDir = path.join(directory, 'image-cache');
   await fs.mkdir(root);

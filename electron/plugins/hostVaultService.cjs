@@ -102,11 +102,14 @@ class PluginHostVaultService {
     if (this.database?.db) {
       try {
         const row = this.database.db.prepare("SELECT value_json FROM plugin_host_preferences WHERE key = ?").get(key);
-        if (row?.value_json) {
-          const parsed = JSON.parse(row.value_json);
-          if (Array.isArray(parsed)) return parsed;
+        if (!row?.value_json) {
+          this.memoryDurableBindings.delete(key);
+          return [];
         }
-      } catch { /* fall through */ }
+        const parsed = JSON.parse(row.value_json);
+        if (Array.isArray(parsed)) return parsed;
+        return [];
+      } catch { /* fall through only when mock db lacks table */ }
     }
     return this.memoryDurableBindings.get(key) ?? [];
   }

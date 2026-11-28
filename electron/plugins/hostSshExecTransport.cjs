@@ -110,25 +110,38 @@ class PluginHostSshExecTransport {
     if (existing) {
       void this.#closeEntry(existing);
     }
+
+    const raceCallerSignal = (promise) => {
+      if (!signal) return promise;
+      if (signal.aborted) return Promise.reject(fail("cancelled", "SSH connection was cancelled"));
+      return new Promise((resolve, reject) => {
+        const onAbort = () => reject(fail("cancelled", "SSH connection was cancelled"));
+        signal.addEventListener("abort", onAbort, { once: true });
+        promise.then(
+          (val) => { signal.removeEventListener("abort", onAbort); resolve(val); },
+          (err) => { signal.removeEventListener("abort", onAbort); reject(err); },
+        );
+      });
+    };
+
     const inflight = this.pendingDials.get(key);
     if (inflight) {
-      return inflight;
+      return raceCallerSignal(inflight.promise);
     }
 
+    const dialController = new AbortController();
     const dialPromise = (async () => {
-      if (this.closed || this.isLocked()) {
+      if (this.closed || this.isLocked() || dialController.signal.aborted) {
         throw fail("unavailable", "Host SSH execution is unavailable");
       }
-      signal?.throwIfAborted?.();
-      const connectionOptions = await prepareConnection(hostId, signal);
+      const connectionOptions = await prepareConnection(hostId, dialController.signal);
       if (!connectionOptions || typeof connectionOptions !== "object") {
         throw fail("unavailable", "Could not prepare SSH connection for host");
       }
       if (connectionOptions.singleChannelSsh) {
         throw fail("unsupported", "This SSH server does not support multiplexed command execution");
       }
-      signal?.throwIfAborted?.();
-      if (this.closed || this.isLocked()) {
+      if (this.closed || this.isLocked() || dialController.signal.aborted) {
         throw fail("unavailable", "Host SSH execution is unavailable");
       }
 
@@ -199,7 +212,7 @@ class PluginHostSshExecTransport {
       liveConn.once?.("end", onConnDead);
       liveConn.once?.("error", onConnDead);
 
-      if (this.closed || this.isLocked()) {
+      if (this.closed || this.isLocked() || dialController.signal.aborted) {
         await this.#closeEntry(entry);
         throw fail("unavailable", "Host SSH execution is unavailable");
       }
@@ -209,14 +222,15 @@ class PluginHostSshExecTransport {
       return entry;
     })();
 
-    this.pendingDials.set(key, dialPromise);
-    try {
-      return await dialPromise;
-    } finally {
-      if (this.pendingDials.get(key) === dialPromise) {
+    const dialRecord = { controller: dialController, promise: dialPromise, runtimeId, pluginId, hostId };
+    this.pendingDials.set(key, dialRecord);
+    const cleanupPending = () => {
+      if (this.pendingDials.get(key) === dialRecord) {
         this.pendingDials.delete(key);
       }
-    }
+    };
+    dialPromise.then(cleanupPending, cleanupPending);
+    return raceCallerSignal(dialPromise);
   }
 
   /**
@@ -243,6 +257,7 @@ class PluginHostSshExecTransport {
     signal?.addEventListener("abort", onCallerAbort, { once: true });
 
     let entry = null;
+    let acquired = false;
     try {
       await assertActive?.();
       controller.signal.throwIfAborted();
@@ -256,6 +271,7 @@ class PluginHostSshExecTransport {
       await assertActive?.();
       controller.signal.throwIfAborted();
       entry.activeCount += 1;
+      acquired = true;
       if (entry.idleTimer) {
         clearTimeout(entry.idleTimer);
         entry.idleTimer = null;
@@ -279,7 +295,7 @@ class PluginHostSshExecTransport {
     } catch (error) {
       signal?.removeEventListener("abort", onCallerAbort);
       this.activeExecs.delete(lease);
-      if (entry) {
+      if (entry && acquired) {
         entry.activeCount = Math.max(0, entry.activeCount - 1);
         if (entry.activeCount === 0 && !entry.closed) {
           this.#touchIdleTimer(entry);
@@ -320,6 +336,7 @@ class PluginHostSshExecTransport {
 
     const startedAt = this.clock();
     let entry = null;
+    let acquired = false;
     try {
       await assertActive?.();
       controller.signal.throwIfAborted();
@@ -336,6 +353,7 @@ class PluginHostSshExecTransport {
       controller.signal.throwIfAborted();
 
       entry.activeCount += 1;
+      acquired = true;
       if (entry.idleTimer) {
         clearTimeout(entry.idleTimer);
         entry.idleTimer = null;
@@ -360,6 +378,9 @@ class PluginHostSshExecTransport {
           void this.#closeEntry(entry);
         }
         if (err instanceof PluginRpcError) throw err;
+        if (err?.code === "SSH_EXEC_OUTPUT_LIMIT") {
+          throw fail("resourceExhausted", "SSH command output exceeded the configured byte limit");
+        }
         if (controller.signal.aborted) {
           throw fail("cancelled", "SSH command was cancelled");
         }
@@ -373,11 +394,14 @@ class PluginHostSshExecTransport {
       const finishedAt = this.clock();
       const durationMs = Math.max(0, Math.round(finishedAt - startedAt));
       const responseLatencyMs = Math.max(0, Math.round(finishedAt - execStartAt));
+      const resolvedExitCode = typeof execResult?.exitCode === "number"
+        ? execResult.exitCode
+        : (typeof execResult?.code === "number" ? execResult.code : null);
 
       return {
         stdout: typeof execResult?.stdout === "string" ? execResult.stdout : "",
         stderr: typeof execResult?.stderr === "string" ? execResult.stderr : "",
-        exitCode: typeof execResult?.exitCode === "number" ? execResult.exitCode : null,
+        exitCode: resolvedExitCode,
         truncated: execResult?.truncated === true,
         durationMs,
         latencyMs: typeof latencyMs === "number" && Number.isFinite(latencyMs) ? Math.max(0, Math.round(latencyMs)) : null,
@@ -386,7 +410,7 @@ class PluginHostSshExecTransport {
     } finally {
       signal?.removeEventListener("abort", onCallerAbort);
       this.activeExecs.delete(lease);
-      if (entry) {
+      if (entry && acquired) {
         entry.activeCount = Math.max(0, entry.activeCount - 1);
         if (entry.activeCount === 0 && !entry.closed) {
           this.#touchIdleTimer(entry);
@@ -396,6 +420,11 @@ class PluginHostSshExecTransport {
   }
 
   releaseHost(pluginId, hostId) {
+    for (const dial of [...this.pendingDials.values()]) {
+      if (dial.pluginId === pluginId && dial.hostId === hostId) {
+        dial.controller.abort(fail("permissionDenied", "Host binding was revoked"));
+      }
+    }
     for (const lease of [...this.activeExecs]) {
       if (lease.pluginId === pluginId && lease.hostId === hostId) {
         lease.controller.abort(fail("permissionDenied", "Host binding was revoked"));
@@ -409,6 +438,11 @@ class PluginHostSshExecTransport {
   }
 
   releaseRuntime(runtimeId) {
+    for (const dial of [...this.pendingDials.values()]) {
+      if (dial.runtimeId === runtimeId) {
+        dial.controller.abort(fail("cancelled", "Plugin runtime stopped"));
+      }
+    }
     for (const lease of [...this.activeExecs]) {
       if (lease.runtimeId === runtimeId) {
         lease.controller.abort(fail("cancelled", "Plugin runtime stopped"));
@@ -422,6 +456,11 @@ class PluginHostSshExecTransport {
   }
 
   releasePlugin(pluginId) {
+    for (const dial of [...this.pendingDials.values()]) {
+      if (dial.pluginId === pluginId) {
+        dial.controller.abort(fail("permissionDenied", "Plugin SSH execution permission revoked or disabled"));
+      }
+    }
     for (const lease of [...this.activeExecs]) {
       if (lease.pluginId === pluginId) {
         lease.controller.abort(fail("permissionDenied", "Plugin SSH execution permission revoked or disabled"));
@@ -435,6 +474,9 @@ class PluginHostSshExecTransport {
   }
 
   closeAll(reason = "Host SSH execution unavailable") {
+    for (const dial of [...this.pendingDials.values()]) {
+      dial.controller.abort(fail("unavailable", reason));
+    }
     for (const lease of [...this.activeExecs]) {
       lease.controller.abort(fail("unavailable", reason));
     }

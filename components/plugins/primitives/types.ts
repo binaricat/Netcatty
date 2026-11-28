@@ -183,3 +183,82 @@ export interface PluginMetricChartWidgetProps {
   emptyText?: string;
   ariaLabel?: string;
 }
+
+export type PluginBiChartType =
+  | 'bar'
+  | 'horizontal-bar'
+  | 'stacked-bar'
+  | 'line'
+  | 'area'
+  | 'pie'
+  | 'donut'
+  | 'scatter'
+  | 'funnel'
+  | 'combo';
+
+export type PluginBiChartColor =
+  | 'primary'
+  | 'sky'
+  | 'emerald'
+  | 'amber'
+  | 'violet'
+  | 'rose'
+  | 'cyan'
+  | 'indigo'
+  | 'teal'
+  | 'orange'
+  | 'slate'
+  | 'muted';
+
+export type PluginBiChartPalette = 'default' | 'categorical' | 'cool' | 'warm' | 'monochrome';
+
+export type PluginBiChartValueFormat = 'number' | 'compact' | 'currency' | 'percent' | 'bytes' | 'ms';
+
+export interface PluginBiChartScatterPoint {
+  x: number;
+  y: number;
+  label?: string;
+  size?: number;
+}
+
+export interface PluginBiChartSeries {
+  id: string;
+  name: string;
+  data?: Array<number | null>;
+  points?: PluginBiChartScatterPoint[];
+  renderAs?: 'bar' | 'line' | 'area';
+  yAxis?: 'left' | 'right';
+  color?: PluginBiChartColor;
+  format?: PluginBiChartValueFormat;
+  currency?: string;
+}
+
+export interface PluginBiChartActiveFilter {
+  seriesIndex?: number;
+  datumIndex?: number;
+  category?: string;
+}
+
+export interface PluginBiChartWidgetProps {
+  type?: PluginBiChartType;
+  title?: string;
+  subtitle?: string;
+  categories?: string[];
+  series?: PluginBiChartSeries[];
+  palette?: PluginBiChartPalette;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  yAxisRightLabel?: string;
+  valueFormat?: PluginBiChartValueFormat;
+  currency?: string;
+  height?: number;
+  showGrid?: boolean;
+  showLegend?: boolean;
+  showDataLabels?: boolean;
+  smooth?: boolean;
+  donutInnerRatio?: number;
+  exportable?: boolean;
+  activeFilter?: PluginBiChartActiveFilter | null;
+  emptyText?: string;
+  ariaLabel?: string;
+}

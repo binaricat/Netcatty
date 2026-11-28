@@ -64,4 +64,10 @@ test("void children are rejected in snapshots and mutation insertions", () => {
   }
   assert.throws(() => validatePluginRemoteTree({ children: [element("a", "textarea", {}, [element("b", "div")])] }), /Textarea/);
   assert.equal(validatePluginRemoteTree({ children: [element("a", "textarea", {}, [text("b", "Hello"), text("c", " world")])] }), true);
+  assert.equal(
+    validatePluginRemoteTree({
+      children: [element("bi", "div", { "data-plugin-widget": "bi-chart", "data-plugin-widget-props": JSON.stringify({ type: "bar", categories: ["A"], series: [{ id: "s", name: "S", data: [10] }] }) })],
+    }),
+    true,
+  );
 });

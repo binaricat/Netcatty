@@ -1,10 +1,12 @@
 import React, { useMemo } from 'react';
 import { LazyLoadBoundary } from '../../ui/lazy-load-boundary';
+import { PluginBiChart } from './PluginBiChart';
 import { PluginCodeEditor } from './PluginCodeEditor';
 import { PluginDataGrid } from './PluginDataGrid';
 import { PluginErCanvas } from './PluginErCanvas';
 import { PluginMetricChart } from './PluginMetricChart';
 import type {
+  PluginBiChartWidgetProps,
   PluginCodeEditorWidgetProps,
   PluginDataGridWidgetProps,
   PluginErCanvasWidgetProps,
@@ -12,7 +14,7 @@ import type {
   PluginWidgetEventCallback,
 } from './types';
 
-export type SlottedWidgetKind = 'code-editor' | 'data-grid' | 'er-canvas' | 'metric-chart';
+export type SlottedWidgetKind = 'code-editor' | 'data-grid' | 'er-canvas' | 'metric-chart' | 'bi-chart';
 
 export function parseWidgetPropsJson<T extends object>(raw: string | undefined): T {
   if (!raw) return {} as T;
@@ -54,6 +56,9 @@ export function PluginSlottedWidget({
       )}
       {kind === 'metric-chart' && (
         <PluginMetricChart {...(parsedProps as PluginMetricChartWidgetProps)} />
+      )}
+      {kind === 'bi-chart' && (
+        <PluginBiChart {...(parsedProps as PluginBiChartWidgetProps)} onWidgetEvent={onWidgetEvent} />
       )}
     </LazyLoadBoundary>
   );

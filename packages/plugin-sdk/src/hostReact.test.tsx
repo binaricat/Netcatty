@@ -555,6 +555,69 @@ test('hostReact widgets and extended surface events round-trip cleanly through h
   }
 });
 
+test('PluginBiChart serializes props and forwards datumClick, exportSvg, exportPng, and shortcut events', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost', pretendToBeVisual: true });
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLOptionElement', 'HTMLFormElement', 'Node', 'MutationObserver', 'Event', 'MouseEvent', 'CustomEvent']) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: key === 'window' ? dom.window : dom.window[key as keyof typeof dom.window] });
+  }
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, writable: true, value: true });
+  const { default: React, act } = await import('react');
+  const { remoteId } = await import('@remote-dom/core/elements');
+  const { registerHostReactView, PluginBiChart } = await import('./hostReact.js');
+
+  let receive: (value: JsonValue) => void = () => {};
+  const views = {
+    onDidReceiveMessage(_id: string, listener: (value: JsonValue) => void) { receive = listener; return { dispose() {} }; },
+    postMessage() {},
+    getState: async () => undefined,
+    setState: async () => {},
+    setBadge: async () => {},
+  };
+
+  const received: Record<string, unknown> = {};
+  const registration = registerHostReactView(views, 'com.example.bi', () => (
+    React.createElement(PluginBiChart, {
+      type: 'combo',
+      title: 'Revenue vs Orders',
+      categories: ['Jan', 'Feb'],
+      series: [{ id: 'rev', name: 'Revenue', data: [100, 200], renderAs: 'bar' }],
+      onDatumClick: (detail) => { received.datumClick = detail; },
+      onExportSvg: (detail) => { received.exportSvg = detail; },
+      onExportPng: (detail) => { received.exportPng = detail; },
+      onShortcut: (detail) => { received.shortcut = detail; },
+    })
+  ));
+
+  try {
+    await act(async () => { receive({ kind: 'host-ui.open', instanceId: 'bi-1' }); await new Promise((r) => setTimeout(r, 20)); });
+    const biEl = document.querySelector<HTMLElement>('[data-plugin-widget="bi-chart"]')!;
+    assert.ok(biEl, 'PluginBiChart must emit data-plugin-widget="bi-chart"');
+    const parsed = JSON.parse(biEl.getAttribute('data-plugin-widget-props') || '{}');
+    assert.equal(parsed.type, 'combo');
+    assert.equal(parsed.title, 'Revenue vs Orders');
+
+    await act(async () => {
+      receive({ kind: 'host-ui.event', instanceId: 'bi-1', event: { type: 'widget', nodeId: remoteId(biEl), widgetEvent: 'datumClick', detail: { seriesIndex: 0, seriesName: 'Revenue', datumIndex: 1, category: 'Feb', value: 200 } } });
+      receive({ kind: 'host-ui.event', instanceId: 'bi-1', event: { type: 'widget', nodeId: remoteId(biEl), widgetEvent: 'exportSvg', detail: { svg: '<svg/>', suggestedName: 'revenue.svg' } } });
+      receive({ kind: 'host-ui.event', instanceId: 'bi-1', event: { type: 'widget', nodeId: remoteId(biEl), widgetEvent: 'exportPng', detail: { suggestedName: 'revenue.png', downloadedByHost: true } } });
+      receive({ kind: 'host-ui.event', instanceId: 'bi-1', event: { type: 'widget', nodeId: remoteId(biEl), widgetEvent: 'shortcut', detail: { shortcut: 'mod+k' } } });
+    });
+
+    assert.deepEqual(received.datumClick, { seriesIndex: 0, seriesName: 'Revenue', datumIndex: 1, category: 'Feb', value: 200 });
+    assert.deepEqual(received.exportSvg, { svg: '<svg/>', suggestedName: 'revenue.svg' });
+    assert.deepEqual(received.exportPng, { suggestedName: 'revenue.png', downloadedByHost: true });
+    assert.deepEqual(received.shortcut, { shortcut: 'mod+k' });
+    await act(async () => { receive({ kind: 'host-ui.close', instanceId: 'bi-1' }); });
+  } finally {
+    await act(async () => { registration.dispose(); });
+    for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key); }
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+    dom.window.close();
+  }
+});
+
 test('registerHostReactView still completes initial loading for components that render null', async () => {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost', pretendToBeVisual: true });
   const saved = new Map<string, PropertyDescriptor | undefined>();

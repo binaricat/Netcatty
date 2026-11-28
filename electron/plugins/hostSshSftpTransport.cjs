@@ -27,52 +27,64 @@ function assertRemotePath(value) {
   return value;
 }
 
+const MAX_RECURSIVE_DELETE_NODES = 1_000;
+
 function assertSafeDeletePath(value) {
   const p = assertRemotePath(value).trim();
   const normalized = posixPath.normalize(p);
-  if (normalized === "/" || normalized === "." || normalized === ".." || normalized === "~" || normalized === "") {
+  if (normalized === "/" || normalized === "." || normalized === ".." || normalized === "" || /^~\/?$/u.test(normalized)) {
     throw fail("invalidArgument", "Refusing to delete root or current directory");
   }
   return p;
 }
 
-function raceWithSignal(promise, signal, timeoutMs) {
+function raceWithCallerSignal(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(fail("cancelled", "SFTP operation was cancelled"));
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(fail("cancelled", "SFTP operation was cancelled"));
-      return;
-    }
-    let done = false;
-    const onAbort = () => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      reject(fail("cancelled", "SFTP operation was cancelled"));
-    };
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      signal?.removeEventListener("abort", onAbort);
-      reject(fail("deadlineExceeded", "SFTP operation timed out"));
-    }, timeoutMs);
-    timer.unref?.();
-    signal?.addEventListener("abort", onAbort, { once: true });
+    const onAbort = () => reject(fail("cancelled", "SFTP operation was cancelled"));
+    signal.addEventListener("abort", onAbort, { once: true });
     promise.then(
-      (val) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-        resolve(val);
-      },
-      (err) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-        reject(err);
-      },
+      (val) => { signal.removeEventListener("abort", onAbort); resolve(val); },
+      (err) => { signal.removeEventListener("abort", onAbort); reject(err); },
     );
+  });
+}
+
+function runWithOperationSignal(signal, timeoutMs, fn) {
+  const opController = new AbortController();
+  let timedOut = false;
+  if (signal?.aborted) {
+    return Promise.reject(fail("cancelled", "SFTP operation was cancelled"));
+  }
+  const onAbort = () => opController.abort(signal?.reason ?? fail("cancelled", "SFTP operation was cancelled"));
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    opController.abort(fail("deadlineExceeded", "SFTP operation timed out"));
+  }, timeoutMs);
+  timer.unref?.();
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (ok, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      opController.signal.removeEventListener("abort", onOpAbort);
+      if (ok) resolve(value);
+      else reject(value);
+    };
+    const onOpAbort = () => {
+      done(false, timedOut
+        ? fail("deadlineExceeded", "SFTP operation timed out")
+        : fail("cancelled", "SFTP operation was cancelled"));
+    };
+    opController.signal.addEventListener("abort", onOpAbort, { once: true });
+    Promise.resolve()
+      .then(() => fn(opController.signal))
+      .then((val) => done(true, val), (err) => done(false, err));
   });
 }
 
@@ -87,44 +99,59 @@ class PluginHostSshSftpTransport {
     this.sftpByConn = new WeakMap();
   }
 
-  #openSftp(conn, signal) {
-    const cached = this.sftpByConn.get(conn);
-    if (cached) return cached;
-    const opening = raceWithSignal(
-      new Promise((resolve, reject) => {
+  #openSftp(conn, callerSignal) {
+    let opening = this.sftpByConn.get(conn);
+    if (!opening) {
+      opening = new Promise((resolve, reject) => {
         if (typeof conn?.sftp !== "function") {
           reject(fail("unsupported", "SSH server does not support SFTP"));
           return;
         }
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(fail("deadlineExceeded", "Opening SFTP subsystem timed out"));
+        }, SFTP_LIMITS.timeoutMs);
+        timer.unref?.();
+
         conn.sftp((err, sftp) => {
+          clearTimeout(timer);
+          if (settled) {
+            // Late open after timeout: close immediately so SFTPWrapper does not leak.
+            if (sftp) {
+              sftp.on?.("error", () => {});
+              try { sftp.end?.(); } catch { /* ignore */ }
+            }
+            return;
+          }
+          settled = true;
           if (err || !sftp) {
             reject(fail("unavailable", err?.message || "Failed to open SFTP subsystem"));
             return;
           }
-          sftp.once?.("close", () => {
+          const evict = () => {
             if (this.sftpByConn.get(conn) === opening) this.sftpByConn.delete(conn);
-          });
-          sftp.once?.("end", () => {
-            if (this.sftpByConn.get(conn) === opening) this.sftpByConn.delete(conn);
-          });
+          };
+          sftp.on?.("error", evict);
+          sftp.once?.("close", evict);
+          sftp.once?.("end", evict);
           resolve(sftp);
         });
-      }),
-      signal,
-      SFTP_LIMITS.timeoutMs,
-    ).catch((err) => {
-      if (this.sftpByConn.get(conn) === opening) this.sftpByConn.delete(conn);
-      throw err;
-    });
-    this.sftpByConn.set(conn, opening);
-    return opening;
+      }).catch((err) => {
+        if (this.sftpByConn.get(conn) === opening) this.sftpByConn.delete(conn);
+        throw err;
+      });
+      this.sftpByConn.set(conn, opening);
+    }
+    return raceWithCallerSignal(opening, callerSignal);
   }
 
   async #withSftp(ctx, operation) {
     const lease = await this.sshExecTransport.acquireConnection(ctx);
     try {
       const sftp = await this.#openSftp(lease.conn, lease.signal);
-      return await raceWithSignal(operation(sftp, lease.signal), lease.signal, SFTP_LIMITS.timeoutMs);
+      return await runWithOperationSignal(lease.signal, SFTP_LIMITS.timeoutMs, (opSignal) => operation(sftp, opSignal));
     } catch (err) {
       if (err instanceof PluginRpcError) throw err;
       if (lease.signal.aborted) throw fail("cancelled", "SFTP operation was cancelled");
@@ -251,16 +278,24 @@ class PluginHostSshSftpTransport {
     }
     return this.#withSftp(ctx, (sftp, signal) => new Promise((resolve, reject) => {
       const stream = sftp.createWriteStream(p);
+      let finished = false;
       const onAbort = () => {
         try { stream.destroy(new Error("cancelled")); } catch { /* ignore */ }
       };
       signal.addEventListener("abort", onAbort, { once: true });
+      stream.once("finish", () => {
+        finished = true;
+      });
       stream.once("error", (err) => {
         signal.removeEventListener("abort", onAbort);
         reject(fail("unavailable", err?.message || "Failed to write remote file"));
       });
       stream.once("close", () => {
         signal.removeEventListener("abort", onAbort);
+        if (!finished && !stream.writableFinished) {
+          reject(fail("unavailable", "Remote SFTP write closed before completion"));
+          return;
+        }
         resolve({ bytesWritten: bytes.length });
       });
       stream.end(bytes);
@@ -282,7 +317,12 @@ class PluginHostSshSftpTransport {
 
   delete(ctx, { path: remotePath, recursive = false }) {
     const p = assertSafeDeletePath(remotePath);
-    return this.#withSftp(ctx, async (sftp) => {
+    return this.#withSftp(ctx, async (sftp, opSignal) => {
+      const assertNotAborted = () => {
+        if (opSignal.aborted) {
+          throw fail("cancelled", "SFTP operation was cancelled");
+        }
+      };
       const statPath = (target) => new Promise((resolve, reject) => {
         sftp.lstat(target, (err, attrs) => (err ? reject(err) : resolve(attrs)));
       });
@@ -295,9 +335,15 @@ class PluginHostSshSftpTransport {
       const readdirPath = (target) => new Promise((resolve, reject) => {
         sftp.readdir(target, (err, list) => (err ? reject(err) : resolve(list ?? [])));
       });
+      let visitedNodes = 0;
       const removeNode = async (target, depth) => {
+        assertNotAborted();
         if (depth > 32) throw fail("resourceExhausted", "Recursive SFTP delete exceeded maximum depth");
+        if (++visitedNodes > MAX_RECURSIVE_DELETE_NODES) {
+          throw fail("resourceExhausted", "Recursive SFTP delete exceeded maximum entry limit");
+        }
         const attrs = await statPath(target);
+        assertNotAborted();
         if (modeToEntryType(attrs?.mode) !== "directory") {
           await unlinkPath(target);
           return;
@@ -305,11 +351,13 @@ class PluginHostSshSftpTransport {
         if (recursive) {
           const children = await readdirPath(target);
           for (const child of children) {
+            assertNotAborted();
             const name = child?.filename;
             if (!name || name === "." || name === "..") continue;
             await removeNode(posixPath.join(target, name), depth + 1);
           }
         }
+        assertNotAborted();
         await rmdirPath(target);
       };
       try {

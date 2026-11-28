@@ -29,7 +29,7 @@ const SURFACE_EVENTS = [
   'scroll',
 ] as const;
 const SURFACE_EVENT_SET = new Set<string>(SURFACE_EVENTS);
-const SLOTTED_WIDGET_KINDS = new Set<string>(['code-editor', 'data-grid', 'er-canvas', 'metric-chart']);
+const SLOTTED_WIDGET_KINDS = new Set<string>(['code-editor', 'data-grid', 'er-canvas', 'metric-chart', 'bi-chart']);
 
 const ATTRIBUTE_NAMES: Record<string, string> = { class: 'className', for: 'htmlFor', readonly: 'readOnly', tabindex: 'tabIndex', maxlength: 'maxLength', minlength: 'minLength', colspan: 'colSpan', rowspan: 'rowSpan', autocomplete: 'autoComplete' };
 const BOOLEAN_ATTRIBUTES = new Set(['checked', 'disabled', 'readonly', 'required', 'multiple', 'selected', 'open']);

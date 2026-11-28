@@ -115,9 +115,10 @@ export async function handlePluginVaultDataRequest(
       const defaultProtocol = resolveEffectiveTerminalProtocol(host);
       const rdpPort = host.rdpConfig?.port ?? (defaultProtocol === 'rdp' ? (host.port || 3389) : undefined);
       const vncPort = host.vncConfig?.port ?? (defaultProtocol === 'vnc' ? (host.port || 5900) : undefined);
+      const isRemoteDesktopOnly = defaultProtocol === 'rdp' || defaultProtocol === 'vnc';
       return {
         hostname: host.hostname,
-        sshPort: host.port || 22,
+        ...(!isRemoteDesktopOnly ? { sshPort: host.port || 22 } : {}),
         ...(rdpPort ? { rdpPort } : {}),
         ...(vncPort ? { vncPort } : {}),
         defaultProtocol,
@@ -226,7 +227,8 @@ export async function handlePluginVaultDataRequest(
       const rule = rules.find((item) => item.id === ruleId);
       if (!rule) return { ok: false, error: 'Port forwarding rule not found' };
       await stopAndCleanupRule(ruleId);
-      const nextRules = rules.map((item) => (item.id === ruleId ? { ...item, status: 'inactive' as const, error: undefined } : item));
+      const latestRules = readPortForwardRules();
+      const nextRules = latestRules.map((item) => (item.id === ruleId ? { ...item, status: 'inactive' as const, error: undefined } : item));
       writePortForwardRules(nextRules);
       const updated = nextRules.find((item) => item.id === ruleId) ?? rule;
       return { ok: true, rule: summarizePortForwardRule(updated, vault.hosts) };
@@ -239,7 +241,8 @@ export async function handlePluginVaultDataRequest(
         return { ok: false, error: 'Port forwarding rule not found' };
       }
       await stopAndCleanupRule(ruleId).catch(() => {});
-      writePortForwardRules(rules.filter((item) => item.id !== ruleId));
+      const latestRules = readPortForwardRules();
+      writePortForwardRules(latestRules.filter((item) => item.id !== ruleId));
       return { ok: true };
     }
 
@@ -371,11 +374,20 @@ export async function handlePluginVaultDataRequest(
       const sessionRuntime = getAppSessionRuntime();
       const known = new Set<string>(['vault', 'sftp']);
       for (const workspace of sessionRuntime?.workspaces ?? []) known.add(workspace.id);
-      for (const session of sessionRuntime?.sessions ?? []) known.add(session.id);
+      for (const session of sessionRuntime?.sessions ?? []) {
+        if (!session.workspaceId) known.add(session.id);
+      }
       for (const logView of sessionRuntime?.logViews ?? []) known.add(logView.id);
-      if (!known.has(tabId)) return { focused: false };
-      if (sessionRuntime?.setActiveTabId) sessionRuntime.setActiveTabId(tabId);
-      else activeTabStore.setActiveTabId(tabId);
+      let resolvedTabId = known.has(tabId) ? tabId : null;
+      if (!resolvedTabId) {
+        const memberSession = (sessionRuntime?.sessions ?? []).find((s) => s.id === tabId && s.workspaceId);
+        if (memberSession?.workspaceId && known.has(memberSession.workspaceId)) {
+          resolvedTabId = memberSession.workspaceId;
+        }
+      }
+      if (!resolvedTabId) return { focused: false };
+      if (sessionRuntime?.setActiveTabId) sessionRuntime.setActiveTabId(resolvedTabId);
+      else activeTabStore.setActiveTabId(resolvedTabId);
       return { focused: true };
     }
 

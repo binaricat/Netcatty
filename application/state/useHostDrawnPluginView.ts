@@ -29,7 +29,10 @@ export function useHostDrawnPluginView({ viewId, version, slot, active, context,
   const unavailableRef = useRef(unavailable); unavailableRef.current = unavailable;
   const sessionRef = useRef<{ key: string; image(path: string): Promise<string>; send(event: HostDrawnViewEvent): void } | null>(null);
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      setHidden(false);
+      return;
+    }
     const bridge = netcattyBridge.get();
     if (!bridge) { unavailableRef.current(); return; }
     const resolvedScopeId = resolvePluginViewWindowScope({ pathname: window.location.pathname, search: window.location.search, hash: `${window.location.hash}|plugin-slot:${slot}` });
@@ -46,12 +49,13 @@ export function useHostDrawnPluginView({ viewId, version, slot, active, context,
     const session = sessionRef.current;
     return active && session?.key === key ? session.image(path) : Promise.reject(new Error('Plugin view unavailable'));
   }, [active, key]);
-  const resolvedSnapshot = state.key === key
+  const hasCurrentState = active && state.key === key && cachedSession !== null && state.image === cachedSession.image;
+  const resolvedSnapshot = hasCurrentState
     ? state.snapshot
     : cachedSession
       ? cachedSession.getSnapshot()
       : initial();
-  const loadImage = active && state.key === key && state.image
+  const loadImage = hasCurrentState && state.image
     ? state.image
     : (cachedSession?.image ?? fallbackLoadImage);
   const sendEvent = useCallback((event: HostDrawnViewEvent) => {

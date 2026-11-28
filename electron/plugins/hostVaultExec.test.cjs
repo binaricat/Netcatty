@@ -360,3 +360,59 @@ test("vault.requestConnect accepts durable hostBindingToken with sftp mode and v
 
   h.service.shutdown();
 });
+
+test("vault.execHostCommand maps boundedSshExec { code } to exitCode, maps SSH_EXEC_OUTPUT_LIMIT to resourceExhausted, and isolates concurrent dial cancellation", async () => {
+  const h = createVaultTestHarness();
+  const ctx = h.makeContext();
+  const selectOut = await h.service.respond(
+    {
+      phase: "request",
+      params: { kind: "vault.selectHosts", title: "Pick", durable: true },
+      context: { ...ctx, vaultBinding: await h.service.sourceBinding.resolve(ctx) },
+    },
+    {
+      action: "submit",
+      resources: [
+        { resourceId: "host-real", revision: "rev-r", label: "Real", hostname: "10.0.0.99", username: "ubuntu", group: "", tags: [], protocol: "ssh" },
+      ],
+    },
+  );
+  const token = selectOut.result.hosts[0].hostBindingToken;
+
+  let releaseDial;
+  let dialStarted = false;
+  h.respondNextVaultData(async () => {
+    dialStarted = true;
+    await new Promise((resolve) => { releaseDial = resolve; });
+    return { connectionOptions: { hostId: "host-real", hostname: "10.0.0.99", username: "ubuntu" } };
+  });
+
+  // Return boundedSshExec's real `{ stdout, stderr, code }` shape
+  h.setExecHandler(async () => ({ stdout: "ok", stderr: "", code: 42 }));
+
+  // Caller A aborts while dial is in flight; Caller B must still succeed!
+  const abortA = new AbortController();
+  const ctxA = h.makeContext({ signal: abortA.signal });
+  const ctxB = h.makeContext();
+  const pA = h.service.execHostCommand({ hostBindingToken: token, command: "cmd-a" }, ctxA);
+  const pB = h.service.execHostCommand({ hostBindingToken: token, command: "cmd-b" }, ctxB);
+  while (!dialStarted) await new Promise((r) => setTimeout(r, 5));
+  abortA.abort();
+  await assert.rejects(pA, (err) => err.code === RPC_ERRORS.cancelled);
+  releaseDial();
+  const resB = await pB;
+  assert.equal(resB.exitCode, 42, "must read boundedSshExec's `code` property");
+
+  // SSH_EXEC_OUTPUT_LIMIT maps to resourceExhausted
+  h.setExecHandler(async () => {
+    const err = new Error("Output limit exceeded");
+    err.code = "SSH_EXEC_OUTPUT_LIMIT";
+    throw err;
+  });
+  await assert.rejects(
+    h.service.execHostCommand({ hostBindingToken: token, command: "big" }, ctxB),
+    (err) => err.code === RPC_ERRORS.resourceExhausted,
+  );
+
+  h.service.shutdown();
+});
