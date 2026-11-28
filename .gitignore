@@ -75,8 +75,6 @@
 !packages/**
 !patches/
 !patches/**
-!plugins/
-!plugins/**
 !public/
 !public/**
 !resources/
