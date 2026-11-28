@@ -267,22 +267,21 @@ export function validateAndNormalizeRemotePath(
   if (typeof rawPath !== 'string') {
     return { ok: false, error: 'Remote path must be a string' };
   }
-  const trimmed = rawPath.trim();
-  if (!trimmed) {
+  if (rawPath.length === 0) {
     return { ok: false, error: 'Remote path is empty' };
   }
-  if (trimmed.length > EXTERNAL_EDITOR_MAX_REMOTE_PATH_LENGTH) {
+  if (rawPath.length > EXTERNAL_EDITOR_MAX_REMOTE_PATH_LENGTH) {
     return { ok: false, error: 'Remote path exceeds maximum length' };
   }
   // Reject NUL, CR, LF, and all ASCII control characters (0x00-0x1F, 0x7F).
-  for (let i = 0; i < trimmed.length; i += 1) {
-    const code = trimmed.charCodeAt(i);
+  for (let i = 0; i < rawPath.length; i += 1) {
+    const code = rawPath.charCodeAt(i);
     if (code <= 0x1f || code === 0x7f) {
       return { ok: false, error: 'Remote path contains disallowed control characters' };
     }
   }
 
-  let candidate = trimmed;
+  let candidate = rawPath;
 
   // Resolve relative paths against the session's known CWD when provided.
   const isPosixAbsolute = candidate.startsWith('/');
@@ -290,7 +289,7 @@ export function validateAndNormalizeRemotePath(
   const isWindowsDrive = /^[A-Za-z]:[\\/]/.test(candidate);
 
   if (!isPosixAbsolute && !isHomeRelative && !isWindowsDrive) {
-    const base = typeof fallbackCwd === 'string' ? fallbackCwd.trim() : '';
+    const base = typeof fallbackCwd === 'string' ? fallbackCwd : '';
     if (!base || (!base.startsWith('/') && !base.startsWith('~'))) {
       return { ok: false, error: 'Cannot resolve relative remote path without an absolute working directory' };
     }

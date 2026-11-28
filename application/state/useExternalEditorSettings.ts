@@ -5,7 +5,7 @@
  * Uses useSyncExternalStore + window `storage` events so the Settings window and
  * main Terminal/SFTP windows stay immediately in sync.
  */
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   buildDirectSshTarget,
   buildSshBridgeHostname,
@@ -350,5 +350,131 @@ export function useExternalEditorSettings() {
     setConnectionMode,
     setHostTrustPolicy,
     removeHostTrustPolicy,
+  };
+}
+
+/**
+ * Application-state hook owning external editor detection, `~/.ssh/config` bridge
+ * installation/removal, and application picker lifecycle so UI settings sections
+ * stay presentation-only.
+ */
+export function useExternalEditorEnvironment() {
+  const [detectedEditors, setDetectedEditors] = useState<Record<string, ExternalEditorDetectEntry>>({});
+  const [detecting, setDetecting] = useState(false);
+  const [selectingApp, setSelectingApp] = useState(false);
+  const [bridgeStatus, setBridgeStatus] = useState<ExternalEditorBridgeConfigStatus | null>(null);
+  const [bridgeBusy, setBridgeBusy] = useState(false);
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const refreshStatus = useCallback(async () => {
+    setDetecting(true);
+    try {
+      const [detected, cfg] = await Promise.all([
+        detectInstalledExternalEditors(),
+        getExternalEditorBridgeConfigStatus(),
+      ]);
+      if (!mountedRef.current) return;
+      setDetectedEditors(detected);
+      setBridgeStatus(cfg);
+      setBridgeError(null);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setBridgeError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (mountedRef.current) {
+        setDetecting(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshStatus();
+  }, [refreshStatus]);
+
+  const browseExecutable = useCallback(async (editorId: ExternalEditorPresetId): Promise<string | null> => {
+    setSelectingApp(true);
+    try {
+      const picked = await selectExternalEditorApplication();
+      if (picked?.path) {
+        updateExternalEditorSettings((prev) => ({
+          ...prev,
+          editors: {
+            ...prev.editors,
+            [editorId]: {
+              ...prev.editors[editorId],
+              executablePath: picked.path,
+            },
+          },
+        }));
+        return picked.path;
+      }
+      return null;
+    } catch (err) {
+      console.error('[ExternalEditor] Failed to select executable:', err);
+      return null;
+    } finally {
+      if (mountedRef.current) {
+        setSelectingApp(false);
+      }
+    }
+  }, []);
+
+  const installBridgeConfig = useCallback(async () => {
+    setBridgeBusy(true);
+    setBridgeError(null);
+    try {
+      const status = await installExternalEditorBridgeConfig();
+      if (mountedRef.current && status) {
+        setBridgeStatus(status);
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setBridgeError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setBridgeBusy(false);
+      }
+    }
+  }, []);
+
+  const removeBridgeConfig = useCallback(async () => {
+    setBridgeBusy(true);
+    setBridgeError(null);
+    try {
+      const status = await removeExternalEditorBridgeConfig();
+      if (mountedRef.current && status) {
+        setBridgeStatus(status);
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setBridgeError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setBridgeBusy(false);
+      }
+    }
+  }, []);
+
+  return {
+    detectedEditors,
+    detecting,
+    selectingApp,
+    bridgeStatus,
+    bridgeBusy,
+    bridgeError,
+    refreshStatus,
+    browseExecutable,
+    installBridgeConfig,
+    removeBridgeConfig,
   };
 }

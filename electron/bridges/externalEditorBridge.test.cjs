@@ -196,6 +196,24 @@ test("openRemoteInExternalEditor registers bridge target and spawns with shell: 
     assert.deepEqual(spawns[0].args, ["ssh://web-deadbeef.netcatty/srv/app/main.ts"]);
     assert.equal(spawns[0].opts.shell, false);
 
+    // Trailing whitespace in POSIX filenames must be preserved verbatim and percent-encoded.
+    const spacedResult = await bridge.openRemoteInExternalEditor({
+      editorId: "zed",
+      executablePath: "/usr/bin/zed",
+      connectionMode: "bridge",
+      bridgeHost: "web-deadbeef.netcatty",
+      sessionId: "sess-42",
+      hostId: "h-42",
+      hostname: "10.0.0.9",
+      port: 22,
+      username: "deploy",
+      remotePath: "/srv/app/report.txt ",
+      kind: "file",
+    });
+    assert.equal(spacedResult.remotePath, "/srv/app/report.txt ");
+    assert.equal(spacedResult.displayUri, "ssh://web-deadbeef.netcatty/srv/app/report.txt%20");
+    assert.deepEqual(spawns[1].args, ["ssh://web-deadbeef.netcatty/srv/app/report.txt%20"]);
+
     const cfgStatus = getSshBridgeConfigStatus({
       homedir: tmpDir,
       stateDir: path.join(tmpDir, "state"),

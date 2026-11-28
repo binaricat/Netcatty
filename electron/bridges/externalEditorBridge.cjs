@@ -578,19 +578,18 @@ function detectInstalledEditors(options = {}) {
 
 function validateRemotePath(rawPath) {
   if (typeof rawPath !== "string") throw new Error("Remote path must be a string");
-  const trimmed = rawPath.trim();
-  if (!trimmed) throw new Error("Remote path is empty");
-  if (trimmed.length > MAX_REMOTE_PATH_LENGTH) throw new Error("Remote path is too long");
-  for (let i = 0; i < trimmed.length; i += 1) {
-    const code = trimmed.charCodeAt(i);
+  if (rawPath.length === 0) throw new Error("Remote path is empty");
+  if (rawPath.length > MAX_REMOTE_PATH_LENGTH) throw new Error("Remote path is too long");
+  for (let i = 0; i < rawPath.length; i += 1) {
+    const code = rawPath.charCodeAt(i);
     if (code <= 0x1f || code === 0x7f) {
       throw new Error("Remote path contains invalid control characters");
     }
   }
-  if (!trimmed.startsWith("/") && trimmed !== "~" && !trimmed.startsWith("~/")) {
+  if (!rawPath.startsWith("/") && rawPath !== "~" && !rawPath.startsWith("~/")) {
     throw new Error("Remote path must be absolute");
   }
-  return trimmed;
+  return rawPath;
 }
 
 function encodeRemoteSshPath(normalizedPath) {

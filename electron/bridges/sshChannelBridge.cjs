@@ -284,13 +284,22 @@ function bridgeChannelStreams(clientStream, remoteStream, options = {}) {
   let closed = false;
   let exitForwarded = false;
   let pendingExit = null;
+  let stdoutEnded = false;
+  let stderrEnded = !(remoteStream.stderr && clientStream.stderr);
+  let remoteClosed = false;
+  let clientEnding = false;
+  let waitingStderrDrainForEnd = false;
+  let waitingClientFinishForClose = false;
   const relayCleanups = [];
 
+  const hasUnreadStreamData = (stream) =>
+    Boolean(stream && (stream.isPaused?.() || (stream.readableLength || 0) > 0));
+
   const relayWithBackpressure = (source, dest, { onWriteError, initiallyBackpressured = false } = {}) => {
-    let waitingDrain = Boolean(initiallyBackpressured);
+    const state = { waitingDrain: Boolean(initiallyBackpressured) };
     const onDrain = () => {
-      if (!waitingDrain) return;
-      waitingDrain = false;
+      if (!state.waitingDrain) return;
+      state.waitingDrain = false;
       if (!closed) {
         try {
           source.resume?.();
@@ -304,8 +313,8 @@ function bridgeChannelStreams(clientStream, remoteStream, options = {}) {
       if (closed) return;
       try {
         const ok = dest.write(chunk);
-        if (ok === false && !waitingDrain && typeof source.pause === "function") {
-          waitingDrain = true;
+        if (ok === false && !state.waitingDrain && typeof source.pause === "function") {
+          state.waitingDrain = true;
           source.pause();
         }
       } catch {
@@ -313,7 +322,7 @@ function bridgeChannelStreams(clientStream, remoteStream, options = {}) {
       }
     };
 
-    if (waitingDrain && typeof source.pause === "function") {
+    if (state.waitingDrain && typeof source.pause === "function") {
       try {
         source.pause();
       } catch {
@@ -336,6 +345,8 @@ function bridgeChannelStreams(clientStream, remoteStream, options = {}) {
         // ignore
       }
     });
+
+    return state;
   };
 
   const cleanupRelays = () => {
@@ -392,14 +403,78 @@ function bridgeChannelStreams(clientStream, remoteStream, options = {}) {
     onWriteError: finishClose,
   });
 
+  let stderrRelayState = null;
   if (remoteStream.stderr && clientStream.stderr) {
-    relayWithBackpressure(remoteStream.stderr, clientStream.stderr);
+    stderrRelayState = relayWithBackpressure(remoteStream.stderr, clientStream.stderr);
   }
 
   relayWithBackpressure(clientStream, remoteStream, {
     onWriteError: finishClose,
     initiallyBackpressured: Boolean(options.clientInitiallyBackpressured),
   });
+
+  const maybeFinalizeClientChannel = () => {
+    if (closed) return;
+    if (!stdoutEnded || !stderrEnded) return;
+
+    // Wait for backpressured stderr writes to drain before sending channel EOF,
+    // since SSH_MSG_CHANNEL_EOF applies to both stdout and stderr on the channel.
+    const stderrNeedsDrain = Boolean(
+      stderrRelayState?.waitingDrain || clientStream.stderr?.writableNeedDrain,
+    );
+    if (stderrNeedsDrain && clientStream.stderr) {
+      if (!waitingStderrDrainForEnd) {
+        waitingStderrDrainForEnd = true;
+        const onStderrDrain = () => {
+          waitingStderrDrainForEnd = false;
+          maybeFinalizeClientChannel();
+        };
+        clientStream.stderr.once("drain", onStderrDrain);
+        relayCleanups.push(() => {
+          try {
+            clientStream.stderr.removeListener?.("drain", onStderrDrain);
+          } catch {
+            // ignore
+          }
+        });
+      }
+      return;
+    }
+
+    if (!clientEnding) {
+      clientEnding = true;
+      flushExit();
+      try {
+        clientStream.end();
+      } catch {
+        // ignore
+      }
+    }
+
+    if (remoteClosed) {
+      const clientStillFlushing = !clientStream.writableFinished
+        && (Boolean(clientStream.writableNeedDrain) || (clientStream.writableLength || 0) > 0);
+      if (clientStillFlushing) {
+        if (!waitingClientFinishForClose) {
+          waitingClientFinishForClose = true;
+          const onClientFinish = () => {
+            waitingClientFinishForClose = false;
+            finishClose();
+          };
+          clientStream.once("finish", onClientFinish);
+          relayCleanups.push(() => {
+            try {
+              clientStream.removeListener?.("finish", onClientFinish);
+            } catch {
+              // ignore
+            }
+          });
+        }
+        return;
+      }
+      finishClose();
+    }
+  };
 
   clientStream.on("end", () => {
     try {
@@ -410,13 +485,16 @@ function bridgeChannelStreams(clientStream, remoteStream, options = {}) {
   });
 
   remoteStream.on("end", () => {
-    flushExit();
-    try {
-      clientStream.end();
-    } catch {
-      // ignore
-    }
+    stdoutEnded = true;
+    maybeFinalizeClientChannel();
   });
+
+  if (remoteStream.stderr && clientStream.stderr) {
+    remoteStream.stderr.on("end", () => {
+      stderrEnded = true;
+      maybeFinalizeClientChannel();
+    });
+  }
 
   remoteStream.on("exit", (code, signalName, didCoreDump, description) => {
     pendingExit = { code, signalName, didCoreDump, description };
@@ -426,7 +504,14 @@ function bridgeChannelStreams(clientStream, remoteStream, options = {}) {
     if (!pendingExit && (typeof code === "number" || signalName)) {
       pendingExit = { code, signalName, didCoreDump, description };
     }
-    finishClose();
+    remoteClosed = true;
+    if (!stdoutEnded && !hasUnreadStreamData(remoteStream)) {
+      stdoutEnded = true;
+    }
+    if (!stderrEnded && !hasUnreadStreamData(remoteStream.stderr)) {
+      stderrEnded = true;
+    }
+    maybeFinalizeClientChannel();
   });
 
   clientStream.on("close", () => {
@@ -456,6 +541,19 @@ function attachClientChannelMultiplexer(client, remoteConn) {
   // Reverse port forwarding registrations owned by this client connection.
   const activeReverseForwards = new Map();
 
+  const onRemoteTransportClosed = () => {
+    try {
+      client.end?.();
+    } catch {
+      // ignore
+    }
+  };
+
+  if (typeof remoteConn?.once === "function") {
+    remoteConn.once("close", onRemoteTransportClosed);
+    remoteConn.once("end", onRemoteTransportClosed);
+  }
+
   client.on("authentication", (ctx) => {
     // The underlying local socket ALREADY presented our 256-bit per-instance
     // discovery token over an owner-only local socket / Windows named pipe.
@@ -463,6 +561,11 @@ function attachClientChannelMultiplexer(client, remoteConn) {
   });
 
   client.on("ready", () => {
+    if (!isConnHealthy(remoteConn)) {
+      onRemoteTransportClosed();
+      return;
+    }
+
     client.on("session", (acceptSession) => {
       const session = acceptSession();
       let ptyInfo = null;
@@ -534,6 +637,7 @@ function attachClientChannelMultiplexer(client, remoteConn) {
         let clientPausedEarly = false;
         let clientEndedEarly = false;
         let clientClosedEarly = false;
+        let settled = false;
 
         const onEarlyData = (chunk) => {
           earlyChunks.push(chunk);
@@ -550,7 +654,10 @@ function attachClientChannelMultiplexer(client, remoteConn) {
         clientStream.once("end", onEarlyEnd);
         clientStream.once("close", onEarlyClose);
 
-        openRemote((err, remoteStream) => {
+        const onRemoteOpened = (err, remoteStream) => {
+          if (settled) return;
+          settled = true;
+
           clientStream.removeListener("data", onEarlyData);
           clientStream.removeListener("end", onEarlyEnd);
           clientStream.removeListener("close", onEarlyClose);
@@ -606,7 +713,13 @@ function attachClientChannelMultiplexer(client, remoteConn) {
               // ignore
             }
           }
-        });
+        };
+
+        try {
+          openRemote(onRemoteOpened);
+        } catch (syncErr) {
+          onRemoteOpened(syncErr, null);
+        }
       };
 
       session.on("exec", (accept, _reject, info) => {
@@ -636,27 +749,31 @@ function attachClientChannelMultiplexer(client, remoteConn) {
         reject();
         return;
       }
-      remoteConn.forwardOut(
-        info.srcIP,
-        info.srcPort,
-        info.destIP,
-        info.destPort,
-        (err, remoteStream) => {
-          if (err || !remoteStream) {
-            reject();
-            return;
-          }
-          const clientStream = accept();
-          clientStream.pipe(remoteStream);
-          remoteStream.pipe(clientStream);
-          const cleanup = () => {
-            try { clientStream.destroy(); } catch {}
-            try { remoteStream.destroy(); } catch {}
-          };
-          clientStream.on("error", cleanup);
-          remoteStream.on("error", cleanup);
-        },
-      );
+      try {
+        remoteConn.forwardOut(
+          info.srcIP,
+          info.srcPort,
+          info.destIP,
+          info.destPort,
+          (err, remoteStream) => {
+            if (err || !remoteStream) {
+              reject();
+              return;
+            }
+            const clientStream = accept();
+            clientStream.pipe(remoteStream);
+            remoteStream.pipe(clientStream);
+            const cleanup = () => {
+              try { clientStream.destroy(); } catch {}
+              try { remoteStream.destroy(); } catch {}
+            };
+            clientStream.on("error", cleanup);
+            remoteStream.on("error", cleanup);
+          },
+        );
+      } catch {
+        reject();
+      }
     });
 
     // Reverse port forwarding (`ssh -R`)
@@ -664,16 +781,20 @@ function attachClientChannelMultiplexer(client, remoteConn) {
       if (name === "tcpip-forward" && typeof remoteConn.forwardIn === "function") {
         const bindAddr = info.bindAddr || "127.0.0.1";
         const bindPort = info.bindPort || 0;
-        remoteConn.forwardIn(bindAddr, bindPort, (err, actualPort) => {
-          if (err) {
-            reject?.();
-            return;
-          }
-          const assignedPort = actualPort || bindPort;
-          const key = `${bindAddr}:${assignedPort}`;
-          activeReverseForwards.set(key, { bindAddr, bindPort: assignedPort });
-          accept?.(assignedPort);
-        });
+        try {
+          remoteConn.forwardIn(bindAddr, bindPort, (err, actualPort) => {
+            if (err) {
+              reject?.();
+              return;
+            }
+            const assignedPort = actualPort || bindPort;
+            const key = `${bindAddr}:${assignedPort}`;
+            activeReverseForwards.set(key, { bindAddr, bindPort: assignedPort });
+            accept?.(assignedPort);
+          });
+        } catch {
+          reject?.();
+        }
         return;
       }
       if (name === "cancel-tcpip-forward" && typeof remoteConn.unforwardIn === "function") {
@@ -681,10 +802,14 @@ function attachClientChannelMultiplexer(client, remoteConn) {
         const bindPort = info.bindPort || 0;
         const key = `${bindAddr}:${bindPort}`;
         activeReverseForwards.delete(key);
-        remoteConn.unforwardIn(bindAddr, bindPort, (err) => {
-          if (err) reject?.();
-          else accept?.();
-        });
+        try {
+          remoteConn.unforwardIn(bindAddr, bindPort, (err) => {
+            if (err) reject?.();
+            else accept?.();
+          });
+        } catch {
+          reject?.();
+        }
         return;
       }
       reject?.();
@@ -693,21 +818,25 @@ function attachClientChannelMultiplexer(client, remoteConn) {
     const onRemoteTcpConnection = (details, acceptRemote, rejectRemote) => {
       const key = `${details.destIP}:${details.destPort}`;
       if (!activeReverseForwards.has(key)) return;
-      client.forwardOut(
-        details.destIP,
-        details.destPort,
-        details.srcIP,
-        details.srcPort,
-        (err, clientStream) => {
-          if (err || !clientStream) {
-            rejectRemote();
-            return;
-          }
-          const remoteStream = acceptRemote();
-          remoteStream.pipe(clientStream);
-          clientStream.pipe(remoteStream);
-        },
-      );
+      try {
+        client.forwardOut(
+          details.destIP,
+          details.destPort,
+          details.srcIP,
+          details.srcPort,
+          (err, clientStream) => {
+            if (err || !clientStream) {
+              rejectRemote();
+              return;
+            }
+            const remoteStream = acceptRemote();
+            remoteStream.pipe(clientStream);
+            clientStream.pipe(remoteStream);
+          },
+        );
+      } catch {
+        rejectRemote();
+      }
     };
 
     if (typeof remoteConn.on === "function") {
@@ -717,6 +846,8 @@ function attachClientChannelMultiplexer(client, remoteConn) {
     client.once("close", () => {
       if (typeof remoteConn.removeListener === "function") {
         remoteConn.removeListener("tcp connection", onRemoteTcpConnection);
+        remoteConn.removeListener("close", onRemoteTransportClosed);
+        remoteConn.removeListener("end", onRemoteTransportClosed);
       }
       for (const { bindAddr, bindPort } of activeReverseForwards.values()) {
         try {
@@ -727,6 +858,13 @@ function attachClientChannelMultiplexer(client, remoteConn) {
       }
       activeReverseForwards.clear();
     });
+  });
+
+  client.once("close", () => {
+    if (typeof remoteConn?.removeListener === "function") {
+      remoteConn.removeListener("close", onRemoteTransportClosed);
+      remoteConn.removeListener("end", onRemoteTransportClosed);
+    }
   });
 
   client.on("error", () => {
@@ -1136,6 +1274,7 @@ module.exports = {
   isValidBridgeHostname,
   resolveRemoteTransportForTarget,
   bridgeChannelStreams,
+  attachClientChannelMultiplexer,
   init: defaultBridge.init,
   ensureStarted: defaultBridge.ensureStarted,
   registerTarget: defaultBridge.registerTarget,

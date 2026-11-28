@@ -6,14 +6,8 @@ import { CheckCircle2, RefreshCw, RotateCcw, ShieldCheck, Trash2 } from 'lucide-
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../../application/i18n/I18nProvider';
 import {
-  detectInstalledExternalEditors,
-  getExternalEditorBridgeConfigStatus,
-  installExternalEditorBridgeConfig,
-  removeExternalEditorBridgeConfig,
-  selectExternalEditorApplication,
+  useExternalEditorEnvironment,
   useExternalEditorSettings,
-  type ExternalEditorBridgeConfigStatus,
-  type ExternalEditorDetectEntry,
 } from '../../../application/state/useExternalEditorSettings';
 import {
   EXTERNAL_EDITOR_PRESET_IDS,
@@ -48,17 +42,45 @@ export function ExternalEditorSettingsSection() {
     setHostTrustPolicy,
     removeHostTrustPolicy,
   } = useExternalEditorSettings();
-
-  const [detectedEditors, setDetectedEditors] = useState<Record<string, ExternalEditorDetectEntry>>({});
-  const [detecting, setDetecting] = useState(false);
-  const [selectingApp, setSelectingApp] = useState(false);
-  const [bridgeStatus, setBridgeStatus] = useState<ExternalEditorBridgeConfigStatus | null>(null);
-  const [bridgeBusy, setBridgeBusy] = useState(false);
-  const [bridgeError, setBridgeError] = useState<string | null>(null);
+  const {
+    detectedEditors,
+    detecting,
+    selectingApp,
+    bridgeStatus,
+    bridgeBusy,
+    bridgeError,
+    refreshStatus,
+    browseExecutable,
+    installBridgeConfig,
+    removeBridgeConfig,
+  } = useExternalEditorEnvironment();
 
   const selectedEditor = settings.defaultEditor;
   const selectedConfig = settings.editors[selectedEditor];
   const detectedForSelected = detectedEditors[selectedEditor];
+
+  const [executablePathDraft, setExecutablePathDraft] = useState(selectedConfig.executablePath);
+  const [isEditingExecutablePath, setIsEditingExecutablePath] = useState(false);
+
+  useEffect(() => {
+    setIsEditingExecutablePath(false);
+    setExecutablePathDraft(selectedConfig.executablePath);
+  }, [selectedEditor]);
+
+  useEffect(() => {
+    if (!isEditingExecutablePath) {
+      setExecutablePathDraft(selectedConfig.executablePath);
+    }
+  }, [isEditingExecutablePath, selectedConfig.executablePath]);
+
+  const commitExecutablePathDraft = useCallback(
+    (editorId: ExternalEditorPresetId, rawValue: string) => {
+      const normalized = rawValue.trim();
+      setEditorExecutablePath(editorId, normalized);
+      setExecutablePathDraft(normalized);
+    },
+    [setEditorExecutablePath],
+  );
 
   const storedCustomArgsText = useMemo(
     () => (settings.editors.custom.customArgs || ['{sshUri}']).join(' '),
@@ -80,66 +102,12 @@ export function ExternalEditorSettingsSection() {
     setCustomArgsDraft(nextTokens.join(' '));
   }, [setCustomEditorArgs]);
 
-  const refreshStatus = useCallback(async () => {
-    setDetecting(true);
-    try {
-      const [detected, cfg] = await Promise.all([
-        detectInstalledExternalEditors(),
-        getExternalEditorBridgeConfigStatus(),
-      ]);
-      setDetectedEditors(detected);
-      setBridgeStatus(cfg);
-      setBridgeError(null);
-    } catch (err) {
-      setBridgeError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setDetecting(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshStatus();
-  }, [refreshStatus]);
-
   const handleBrowseExecutable = useCallback(async () => {
-    setSelectingApp(true);
-    try {
-      const picked = await selectExternalEditorApplication();
-      if (picked?.path) {
-        setEditorExecutablePath(selectedEditor, picked.path);
-      }
-    } catch (err) {
-      console.error('[ExternalEditor] Failed to select executable:', err);
-    } finally {
-      setSelectingApp(false);
+    const pickedPath = await browseExecutable(selectedEditor);
+    if (pickedPath) {
+      setExecutablePathDraft(pickedPath);
     }
-  }, [selectedEditor, setEditorExecutablePath]);
-
-  const handleInstallBridgeConfig = useCallback(async () => {
-    setBridgeBusy(true);
-    setBridgeError(null);
-    try {
-      const status = await installExternalEditorBridgeConfig();
-      if (status) setBridgeStatus(status);
-    } catch (err) {
-      setBridgeError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBridgeBusy(false);
-    }
-  }, []);
-
-  const handleRemoveBridgeConfig = useCallback(async () => {
-    setBridgeBusy(true);
-    setBridgeError(null);
-    try {
-      const status = await removeExternalEditorBridgeConfig();
-      if (status) setBridgeStatus(status);
-    } catch (err) {
-      setBridgeError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBridgeBusy(false);
-    }
-  }, []);
+  }, [browseExecutable, selectedEditor]);
 
   const trustedHostEntries = useMemo(
     () => Object.entries(settings.trustedHosts).sort(([a], [b]) => a.localeCompare(b)),
@@ -207,8 +175,19 @@ export function ExternalEditorSettingsSection() {
 
           <div className="flex items-center gap-2">
             <Input
-              value={selectedConfig.executablePath}
-              onChange={(e) => setEditorExecutablePath(selectedEditor, e.target.value)}
+              value={executablePathDraft}
+              onFocus={() => setIsEditingExecutablePath(true)}
+              onChange={(e) => setExecutablePathDraft(e.target.value)}
+              onBlur={(e) => {
+                setIsEditingExecutablePath(false);
+                commitExecutablePathDraft(selectedEditor, e.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  commitExecutablePathDraft(selectedEditor, e.currentTarget.value);
+                  e.currentTarget.blur();
+                }
+              }}
               placeholder={
                 detectedForSelected?.detectedPath
                   || t('settings.externalEditor.executablePath.placeholder')
@@ -224,14 +203,18 @@ export function ExternalEditorSettingsSection() {
             >
               {t('settings.externalEditor.browse')}
             </Button>
-            {selectedConfig.executablePath && (
+            {(selectedConfig.executablePath || executablePathDraft) && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 shrink-0"
-                    onClick={() => setEditorExecutablePath(selectedEditor, '')}
+                    onClick={() => {
+                      setIsEditingExecutablePath(false);
+                      setExecutablePathDraft('');
+                      setEditorExecutablePath(selectedEditor, '');
+                    }}
                     aria-label={t('settings.externalEditor.resetPath')}
                   >
                     <RotateCcw size={14} />
@@ -325,7 +308,7 @@ export function ExternalEditorSettingsSection() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => void handleInstallBridgeConfig()}
+                      onClick={() => void installBridgeConfig()}
                       disabled={bridgeBusy}
                     >
                       {bridgeStatus.upToDate
@@ -336,7 +319,7 @@ export function ExternalEditorSettingsSection() {
                       variant="ghost"
                       size="sm"
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      onClick={() => void handleRemoveBridgeConfig()}
+                      onClick={() => void removeBridgeConfig()}
                       disabled={bridgeBusy}
                     >
                       {t('settings.externalEditor.sshBridge.remove')}
@@ -346,7 +329,7 @@ export function ExternalEditorSettingsSection() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => void handleInstallBridgeConfig()}
+                    onClick={() => void installBridgeConfig()}
                     disabled={bridgeBusy}
                   >
                     {t('settings.externalEditor.sshBridge.install')}

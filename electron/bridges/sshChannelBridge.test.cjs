@@ -17,6 +17,7 @@ const {
   createSshChannelBridge,
   resolveRemoteTransportForTarget,
   bridgeChannelStreams,
+  attachClientChannelMultiplexer,
 } = require("./sshChannelBridge.cjs");
 const {
   createTransport,
@@ -581,4 +582,132 @@ test("bridgeChannelStreams applies backpressure across stdout, stderr, and stdin
   assert.equal(client.getStderrReceived().length, 16 * 16 * 1024);
   assert.equal(remote.getReceived().length, 16 * 16 * 1024);
   assert.equal(client.getExitCode(), 0);
+});
+
+test("bridgeChannelStreams waits for backpressured stderr to finish before forwarding EOF/close", async () => {
+  let stderrBlocked = true;
+  let stderrPendingCb = null;
+  const stderrChunks = [];
+  let clientEndedBeforeStderrComplete = false;
+  let clientClosed = false;
+  let exitCode = null;
+  const totalStderrBytes = 240 * 1024;
+
+  const client = new Duplex({
+    highWaterMark: 1024,
+    read() {},
+    write(_chunk, _enc, cb) {
+      cb();
+    },
+  });
+  client.stderr = new Duplex({
+    highWaterMark: 1024,
+    read() {},
+    write(chunk, _enc, cb) {
+      stderrChunks.push(Buffer.from(chunk));
+      if (stderrBlocked) {
+        stderrPendingCb = cb;
+      } else {
+        cb();
+      }
+    },
+  });
+  client.exit = (code) => {
+    exitCode = code;
+  };
+  client.close = () => {
+    clientClosed = true;
+  };
+  client.on("finish", () => {
+    const receivedSoFar = Buffer.concat(stderrChunks).length;
+    if (receivedSoFar < totalStderrBytes) {
+      clientEndedBeforeStderrComplete = true;
+    }
+  });
+
+  const remote = new Duplex({ highWaterMark: 1024, read() {}, write(_c, _e, cb) { cb(); } });
+  remote.stderr = new Duplex({ highWaterMark: 1024, read() {}, write(_c, _e, cb) { cb(); } });
+
+  bridgeChannelStreams(client, remote);
+
+  // Push 240 KiB to stderr (backpressured), then immediately end stdout + exit + close remote.
+  for (let i = 0; i < 15; i += 1) {
+    remote.stderr.push(Buffer.alloc(16 * 1024, 0x45));
+  }
+  remote.stderr.push(null);
+  remote.push(null); // stdout finishes immediately
+  remote.emit("exit", 0);
+  remote.emit("close", 0);
+
+  await new Promise((r) => setImmediate(r));
+  // Client must NOT be ended or closed while stderr is still paused with buffered data.
+  assert.equal(client.writableEnded, false);
+  assert.equal(clientClosed, false);
+  assert.equal(remote.stderr.isPaused(), true);
+
+  // Unblock stderr and wait for client channel to finish.
+  const finished = new Promise((resolve) => client.once("finish", resolve));
+  stderrBlocked = false;
+  if (stderrPendingCb) {
+    const cb = stderrPendingCb;
+    stderrPendingCb = null;
+    cb();
+  }
+  await finished;
+
+  assert.equal(clientEndedBeforeStderrComplete, false);
+  assert.equal(Buffer.concat(stderrChunks).length, totalStderrBytes);
+  assert.equal(exitCode, 0);
+});
+
+test("attachClientChannelMultiplexer catches synchronous remote open throws and closes client on upstream drop", () => {
+  const client = new EventEmitter();
+  let clientEnded = false;
+  client.end = () => {
+    clientEnded = true;
+  };
+
+  const remoteConn = new EventEmitter();
+  remoteConn._sock = { destroyed: false };
+  remoteConn.exec = () => {
+    throw new Error("Not connected");
+  };
+
+  attachClientChannelMultiplexer(client, remoteConn);
+  client.emit("ready");
+
+  const session = new EventEmitter();
+  client.emit("session", () => session);
+
+  const stderrOut = [];
+  let exitCode = null;
+  let streamEnded = false;
+  let streamClosed = false;
+  const clientStream = new EventEmitter();
+  clientStream.stderr = {
+    write: (msg) => stderrOut.push(String(msg)),
+  };
+  clientStream.exit = (code) => {
+    exitCode = code;
+  };
+  clientStream.end = () => {
+    streamEnded = true;
+  };
+  clientStream.close = () => {
+    streamClosed = true;
+  };
+
+  // Synchronous throw from remoteConn.exec must be caught cleanly, not crash the worker.
+  assert.doesNotThrow(() => {
+    session.emit("exec", () => clientStream, () => {}, { command: "echo hi" });
+  });
+  assert.equal(exitCode, 1);
+  assert.equal(streamEnded, true);
+  assert.equal(streamClosed, true);
+  assert.match(stderrOut.join(""), /Not connected/);
+
+  // Upstream transport closing must close the external bridge client.
+  assert.equal(clientEnded, false);
+  remoteConn.emit("close");
+  assert.equal(clientEnded, true);
 });

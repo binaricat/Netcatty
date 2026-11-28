@@ -115,6 +115,20 @@ test('validateAndNormalizeRemotePath resolves relative paths and rejects control
     ok: true,
     path: '/C:/Users/dev/app',
   });
+  // Valid POSIX filenames with leading or trailing whitespace must be preserved verbatim.
+  assert.deepEqual(validateAndNormalizeRemotePath('/home/dev/report.txt '), {
+    ok: true,
+    path: '/home/dev/report.txt ',
+  });
+  assert.deepEqual(validateAndNormalizeRemotePath('/home/dev/ leading.txt'), {
+    ok: true,
+    path: '/home/dev/ leading.txt',
+  });
+  assert.deepEqual(validateAndNormalizeRemotePath('report.txt ', '/home/dev/dir '), {
+    ok: true,
+    path: '/home/dev/dir /report.txt ',
+  });
+  assert.equal(encodeRemoteSshPath('/home/dev/report.txt '), '/home/dev/report.txt%20');
 
   // Security rejections
   assert.equal(validateAndNormalizeRemotePath('/tmp/bad\npath').ok, false);
