@@ -19,10 +19,11 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
 ): TerminalDirectoryIO {
   const check = (signal?: AbortSignal) => { if (!isCurrent() || signal?.aborted) throw new DirectoryPickerError('unavailable'); };
   const flavor = endpoint.pathFlavor ?? 'posix';
-  const nativeWindows = endpoint.local && flavor === 'win32';
+  const wsl = endpoint.local && endpoint.windowsShell === 'wsl';
+  const integratedLocal = endpoint.local && (flavor === 'win32' || wsl);
   const windowsShell = endpoint.windowsShell ?? 'powershell';
   const integrationError = {
-    powershell: 'integrationUnavailable', cmd: 'cmdIntegrationUnavailable', 'git-bash': 'gitBashIntegrationUnavailable',
+    powershell: 'integrationUnavailable', cmd: 'cmdIntegrationUnavailable', 'git-bash': 'gitBashIntegrationUnavailable', wsl: 'wslIntegrationUnavailable',
   } as const;
   let lastNativeRevision = 0;
   let submittedNativeRevision = -1;
@@ -34,7 +35,7 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
     });
     check();
     const state = result?.directoryState;
-    if (!state || state.shellKind !== windowsShell || state.pathFlavor !== 'win32') {
+    if (!state || state.shellKind !== windowsShell || state.pathFlavor !== flavor) {
       throw new DirectoryPickerError(integrationError[windowsShell]);
     }
     if (state.provider !== 'FileSystem') throw new DirectoryPickerError('nonFilesystem');
@@ -42,6 +43,12 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
       || state.revision < lastNativeRevision || state.revision <= submittedNativeRevision) throw new DirectoryPickerError('unknown');
     lastNativeRevision = state.revision;
     return { cwd: result.cwd, home: valid(state.home) ? state.home : null };
+  }
+  async function readWslPath(operation: 'list' | 'realpath', path: string, signal?: AbortSignal) {
+    const result = await bridge.readWslSessionDirectory?.(sessionId, operation, path);
+    check(signal);
+    if (!result?.success) throw new DirectoryPickerError(result?.error ?? 'unavailable');
+    return result;
   }
   async function checkRemote(signal?: AbortSignal) {
     check(signal);
@@ -64,12 +71,12 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
   return {
     async home() {
       check();
-      if (nativeWindows) return (await readNative()).home;
+      if (integratedLocal) return (await readNative()).home;
       return endpoint.local ? await bridge.getHomeDir?.().catch(() => null) ?? null : null;
     },
     async cwd() {
       check();
-      if (nativeWindows) return (await readNative()).cwd;
+      if (integratedLocal) return (await readNative()).cwd;
       if (!endpoint.local) await checkRemote();
       const result = await bridge.getSessionPwd?.(sessionId, {
         allowHomeFallback: false, allowLoginShellFallback: false, timeoutMs: 2000,
@@ -81,18 +88,22 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
     async list(path, signal) {
       check(signal);
       if (!valid(path)) throw new DirectoryPickerError('unsupportedPath');
+      if (wsl) {
+        const { files, home } = await readWslPath('list', path, signal);
+        return { entries: directoryEntries(path, files ?? [], flavor), home: valid(home) ? home : null };
+      }
       if (endpoint.local) {
-        const native = nativeWindows ? await readNative() : null;
+        const native = integratedLocal ? await readNative() : null;
         const files = await bridge.listLocalDir(path).catch((error: unknown) => {
           // Electron IPC preserves the Node error message but drops its code.
-          if (nativeWindows && error instanceof Error && (/^(?:EACCES|EPERM)$/.test(String((error as NodeJS.ErrnoException).code))
+          if (integratedLocal && error instanceof Error && (/^(?:EACCES|EPERM)$/.test(String((error as NodeJS.ErrnoException).code))
             || /^(?:Error invoking remote method 'netcatty:local:list': )?(?:Error: )?(?:EACCES|EPERM):/.test(error.message))) {
             throw new DirectoryPickerError('accessDenied');
           }
           throw error;
         });
         check(signal);
-        const home = nativeWindows ? native!.home : await bridge.getHomeDir?.().catch(() => null) ?? null;
+        const home = integratedLocal ? native!.home : await bridge.getHomeDir?.().catch(() => null) ?? null;
         check(signal);
         return { entries: directoryEntries(path, files, flavor), home };
       }
@@ -105,7 +116,12 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
     async realpath(path, signal) {
       check(signal);
       if (!valid(path)) throw new DirectoryPickerError('unsupportedPath');
-      if (nativeWindows) await readNative();
+      if (wsl) {
+        const result = await readWslPath('realpath', path, signal);
+        if (!valid(result.path)) throw new DirectoryPickerError('unsupportedPath');
+        return result.path;
+      }
+      if (integratedLocal) await readNative();
       const result = endpoint.local ? await bridge.realpathLocal?.(path) ?? path
         : withSftp(async id => await bridge.realpathSftp?.(id, path, endpoint.encoding) ?? path, signal);
       const resolved = await result;
@@ -114,13 +130,13 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
       return resolved;
     },
     async validateChange(expectedCwd) {
-      if (!nativeWindows) return;
+      if (!integratedLocal) return;
       const native = await readNative();
       if (expectedCwd && !sameDirectoryPath(native.cwd, expectedCwd, flavor)) throw new DirectoryPickerError('unavailable');
     },
     write(data) {
       check();
-      if (nativeWindows) submittedNativeRevision = lastNativeRevision;
+      if (integratedLocal) submittedNativeRevision = lastNativeRevision;
       bridge.writeToSession(sessionId, data, { automated: true });
     },
   };

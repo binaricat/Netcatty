@@ -99,6 +99,7 @@ const tempDirBridge = require("./tempDirBridge.cjs");
 const { preparePowerShellDirectoryIntegration } = require('./powerShellDirectoryIntegration.cjs');
 const { prepareCmdDirectoryIntegration } = require('./cmdDirectoryIntegration.cjs');
 const { prepareGitBashDirectoryIntegration } = require('./gitBashDirectoryIntegration.cjs');
+const { prepareWslDirectoryIntegration } = require('./wslDirectoryIntegration.cjs');
 const { createTelnetAutoLogin, isAutoLoginWakeInput } = require("./telnetAutoLogin.cjs");
 const telnetProtocol = require("./telnetProtocol.cjs");
 const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
@@ -1164,6 +1165,8 @@ async function startLocalSession(event, payload) {
   
   const directoryIntegration = preparePowerShellDirectoryIntegration(shell, shellArgs)
     ?? prepareCmdDirectoryIntegration(shell, shellArgs, env)
+    ?? (isWslExecutable(shell) ? prepareWslDirectoryIntegration(shell, shellArgs, env,
+      discoverShells().find(item => item.id.startsWith('wsl-') && item.args?.[1] === shellArgs[1])) : null)
     ?? (process.platform === 'win32' && path.win32.basename(shell).toLowerCase() === 'bash.exe'
       ? prepareGitBashDirectoryIntegration(shell, shellArgs, env, discoverShells().find(item => item.id === 'git-bash')?.command) : null);
   let proc;
@@ -1182,7 +1185,7 @@ async function startLocalSession(event, payload) {
     directoryIntegration?.cleanup?.();
     throw error;
   }
-  directoryIntegration?.reader.setProcessId(proc.pid);
+  directoryIntegration?.reader.setProcessId?.(proc.pid);
   if (directoryIntegration) {
     // All writers (interactive input, snippets and AI exec) share this PTY.
     // Invalidate at the transport boundary, including direct proc/pty writes.
@@ -2660,6 +2663,15 @@ function registerWorkerSend(ipcMain, terminalWorkerManager, channel) {
   });
 }
 
+async function readWslSessionDirectory(event, { sessionId, operation, path } = {}) {
+  const session = sessions.get(sessionId);
+  const ownsSession = () => session && !session.closed && sessions.get(sessionId) === session
+    && session.webContentsId === event.sender.id;
+  if (!ownsSession() || !session.directoryIntegration?.readPath) return { success: false, error: 'unavailable' };
+  const result = await session.directoryIntegration.readPath(operation, path);
+  return ownsSession() ? result : { success: false, error: 'unavailable' };
+}
+
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
   // Attach/observe popups rebind display routing in the main process even when
@@ -2815,6 +2827,7 @@ function registerHandlers(ipcMain, options = {}) {
     });
     [
       "netcatty:local:start",
+      "netcatty:local:wslDirectory",
       "netcatty:telnet:start",
       "netcatty:mosh:start",
       "netcatty:et:start",
@@ -2893,6 +2906,7 @@ function registerHandlers(ipcMain, options = {}) {
     ? sessionLogStreamManager.withSessionLogRestart
     : (handler) => handler;
   ipcMain.handle("netcatty:local:start", wrapSessionStart(startLocalSession));
+  ipcMain.handle("netcatty:local:wslDirectory", readWslSessionDirectory);
   ipcMain.handle("netcatty:telnet:start", wrapSessionStart(startTelnetSession));
   ipcMain.handle("netcatty:mosh:start", wrapSessionStart(startMoshSession));
   ipcMain.handle("netcatty:et:start", wrapSessionStart(startEtSession));

@@ -16,14 +16,17 @@ export function createTerminalDirectoryController(options: {
   target?: DirectoryTarget;
   capabilities?: DirectoryCapabilities;
   buildChangeCommand?: (path: string) => string | null;
+  trustOsc7?: boolean;
 }) {
   const target = Object.freeze({ ...options.target ?? { authority: `session:${options.sessionId}`, pathFlavor: 'posix' as const } });
   const capabilities = Object.freeze({ ...options.capabilities ?? COMPLETE_DIRECTORY_CAPABILITIES });
+  const trustsOsc7 = target.pathFlavor === 'posix' && options.trustOsc7 !== false;
   const valid = (path: string | null | undefined): path is string => isDirectoryPath(path, target.pathFlavor);
   const same = (a: string, b: string) => sameDirectoryPath(a, b, target.pathFlavor);
   let disposed = false;
   let changing = false;
   let confirmed = false;
+  let verifiedCwd: string | null = null;
   let refreshing: Promise<string> | null = null;
   let refreshAgain = false;
   let cwdError: DirectoryPickerError | null = null;
@@ -57,7 +60,7 @@ export function createTerminalDirectoryController(options: {
     if (!capabilities.readCwd) throw new DirectoryPickerError('unavailable');
     const activeShellCwd = () => {
       const cwd = terminalCwdStore.getCwd(options.sessionId);
-      return target.pathFlavor === 'posix' && valid(cwd) && terminalCwdStore.getSource(options.sessionId) === 'osc7'
+      return trustsOsc7 && valid(cwd) && terminalCwdStore.getSource(options.sessionId) === 'osc7'
         && (submittedRevision === undefined || terminalCwdStore.getSessionRevision(options.sessionId) !== submittedRevision)
         ? cwd : null;
     };
@@ -79,8 +82,9 @@ export function createTerminalDirectoryController(options: {
         cwd = await bounded(options.io.cwd());
         if (!valid(cwd)) throw new DirectoryPickerError('unknown');
       } catch (error) {
-        if (current() && target.pathFlavor === 'win32') {
+        if (current() && !trustsOsc7) {
           confirmed = false;
+          verifiedCwd = null;
           cwdError = error instanceof DirectoryPickerError ? error : new DirectoryPickerError('unknown');
           options.publish('');
         }
@@ -89,10 +93,13 @@ export function createTerminalDirectoryController(options: {
       check();
       const reported = activeShellCwd();
       const live = terminalCwdStore.getCwd(options.sessionId);
+      const verifiedCwdChanged = verifiedCwd !== cwd;
       confirmed = true;
+      verifiedCwd = cwd;
       cwdError = null;
       if (reported) return reported;
-      if (live !== cwd || terminalCwdStore.getSource(options.sessionId) === 'stale') options.publish(cwd);
+      if (live !== cwd || terminalCwdStore.getSource(options.sessionId) === 'stale'
+        || (options.trustOsc7 === false && verifiedCwdChanged)) options.publish(cwd);
       return cwd;
     })();
     refreshing = pending;
@@ -119,7 +126,7 @@ export function createTerminalDirectoryController(options: {
       check(signal);
       if (!valid(canonical)) throw new DirectoryPickerError('unsupportedPath');
       ready(); // The shell can become busy while resolving a remote symlink.
-      if (expectedCwd && terminalCwdStore.getCwd(options.sessionId) !== expectedCwd) throw new DirectoryPickerError('unavailable');
+      if (expectedCwd && (options.trustOsc7 === false ? verifiedCwd : terminalCwdStore.getCwd(options.sessionId)) !== expectedCwd) throw new DirectoryPickerError('unavailable');
       if (expectedRevision !== undefined && terminalCwdStore.getSessionRevision(options.sessionId) !== expectedRevision) throw new DirectoryPickerError('unavailable');
       const submittedRevision = terminalCwdStore.getSessionRevision(options.sessionId);
       options.io.write(command + '\r');
@@ -127,7 +134,7 @@ export function createTerminalDirectoryController(options: {
       const deadline = Date.now() + (options.confirmationMs ?? 8000);
       const hasFreshOsc7 = () => {
         const cwd = terminalCwdStore.getCwd(options.sessionId);
-        return target.pathFlavor === 'posix' && valid(cwd) && terminalCwdStore.getSessionRevision(options.sessionId) !== submittedRevision
+        return trustsOsc7 && valid(cwd) && terminalCwdStore.getSessionRevision(options.sessionId) !== submittedRevision
           && terminalCwdStore.getSource(options.sessionId) === 'osc7'
           && (same(cwd, path) || same(cwd, canonical));
       };
@@ -171,6 +178,8 @@ export function createTerminalDirectoryController(options: {
   return {
     target,
     capabilities,
+    trustsOsc7,
+    getVerifiedCwd: () => verifiedCwd,
     getCwdError: () => cwdError?.code ?? null,
     refresh: () => refresh(),
     hasConfirmedCwd: () => confirmed,

@@ -157,3 +157,26 @@ test('closing a picker during channel open closes the handle without listing', a
   await assert.rejects(task, { code: 'unavailable' });
   assert.equal(listed, false); assert.equal(closed, true);
 });
+
+test('WSL directory IO uses the owning session and never falls back to a Windows filesystem', async () => {
+  const cwd = '/home/me';
+  const calls: unknown[] = [];
+  const io = createTerminalDirectoryIO({
+    getSessionPwd: async (id: string) => {
+      assert.equal(id, 'wsl-pty');
+      return { success: true, cwd, directoryState: { cwd, home: cwd, provider: 'FileSystem',
+        revision: 1, shellKind: 'wsl', pathFlavor: 'posix' } };
+    },
+    readWslSessionDirectory: async (...args: [string, string, string]) => {
+      calls.push(args);
+      if (args[1] === 'list') return { success: true, home: cwd, files: [{ type: 'directory', name: "child's folder" }] };
+      return { success: true, path: '/mnt/c/destination' };
+    },
+    listLocalDir: () => assert.fail('Linux paths must stay within the selected distro'),
+    realpathLocal: () => assert.fail('Linux paths must stay within the selected distro'),
+  } as unknown as NetcattyBridge, 'wsl-pty', { local: true, hostname: '', username: '', windowsShell: 'wsl' });
+  assert.equal(await io.cwd(), cwd);
+  assert.deepEqual((await io.list(cwd)).entries.map(item => item.path), ["/home/me/child's folder"]);
+  assert.equal(await io.realpath('/home/me/link'), '/mnt/c/destination');
+  assert.deepEqual(calls, [['wsl-pty', 'list', cwd], ['wsl-pty', 'realpath', '/home/me/link']]);
+});

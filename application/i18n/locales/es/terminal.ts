@@ -15,6 +15,7 @@ export const esTerminalMessages: Messages = {
   'terminal.directory.integrationUnavailable': 'La integración de directorios de PowerShell no está lista. Los argumentos de inicio o la política de ejecución pueden impedirla.',
   'terminal.directory.cmdIntegrationUnavailable': 'Esperando el directorio de la sesión original del símbolo del sistema.',
   'terminal.directory.gitBashIntegrationUnavailable': 'Esperando un directorio accesible de la sesión original de Git Bash.',
+  'terminal.directory.wslIntegrationUnavailable': 'Esperando una sesión de Bash inactiva en la distribución WSL seleccionada.',
   'terminal.directory.nonFilesystem': 'La ubicación actual de PowerShell no es un directorio del sistema de archivos.',
   'terminal.directory.accessDenied': 'Permiso denegado al listar este directorio.',
   'terminal.directory.busy': 'Espera a que el prompt esté vacío.',

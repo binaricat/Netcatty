@@ -44,7 +44,8 @@ export function useTerminalDirectorySession(options: {
           pathFlavor,
           windowsShell: integration,
         }, isCurrent),
-        target: { authority: `${local ? 'local' : 'ssh'}:${backendId}`, pathFlavor },
+        target: { authority: `${integration === 'wsl' ? 'wsl' : local ? 'local' : 'ssh'}:${backendId}`, pathFlavor },
+        trustOsc7: integration !== 'wsl',
         capabilities: COMPLETE_DIRECTORY_CAPABILITIES,
         buildChangeCommand: path => directoryChangeCommand(path, integration ?? 'posix', pathFlavor),
         isCurrent,
@@ -60,7 +61,11 @@ export function useTerminalDirectorySession(options: {
         if (windowsShell) register('win32', windowsShell);
         else if (shellType === 'posix' && host.localShell) {
           const shells = await bridge.discoverShells?.();
-          if (isDiscoveredGitBash(host.localShell, shells?.find(item => item.id === 'git-bash')?.command)) {
+          const command = host.localShell.toLowerCase();
+          if (shells?.some(shell => shell.id.startsWith('wsl-')
+            && (command === shell.id.toLowerCase() || command === shell.command.toLowerCase()))) {
+            register('posix', 'wsl');
+          } else if (isDiscoveredGitBash(host.localShell, shells?.find(item => item.id === 'git-bash')?.command)) {
             register('win32', 'git-bash');
           }
         }
