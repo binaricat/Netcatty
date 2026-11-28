@@ -4,10 +4,8 @@ const nodeProcess = require('node:process');
 const processEnv = nodeProcess.env;
 const includeWindowsHelloHelper = processEnv.NETCATTY_SKIP_WINDOWS_HELLO_HELPER !== '1';
 
-// IronRDP WASM and the AudioWorklet script are bundled into dist/ by Vite.
-// Platform-specific `files` arrays (mac/win/linux) create their own FileMatcher
-// in electron-builder, so exclusions must appear both at top-level and in each
-// platform `files` array to prevent duplicate copies from landing in app.asar.
+// IronRDP WASM and the AudioWorklet script are bundled into dist/ by Vite, so
+// exclude source/package copies from app.asar.
 const REMOTE_DESKTOP_DUPLICATE_EXCLUSIONS = [
     '!node_modules/@netcatty/ironrdp-wasm/**/*',
     '!node_modules/ironrdp-wasm/**/*',
@@ -86,6 +84,8 @@ module.exports = {
         // Build-time vector sources copied from public/ into dist/.
         '!dist/icon.svg',
         '!dist/tray-iconTemplate.svg',
+        // macOS-only icon variants are opted back in via mac.files.
+        '!dist/icons/variants/macos/**/*',
         // Main-process terminal flow control reads shared thresholds from here
         // (terminalFlowAck.cjs). Must ship beside electron/ in app.asar.
         'infrastructure/config/terminalFlowConstants.cjs',
@@ -294,9 +294,12 @@ module.exports = {
         // iconutil-generated bundle instead so Finder and app switchers do not
         // render those representations as colored noise.
         icon: 'build/icon.icns',
+        // Include a positive pattern so electron-builder's platform FileMatcher
+        // never sees an ignore-only list and prepends "**/*" (which would bypass
+        // top-level `files` exclusions and pack the entire repository).
         files: [
+            'dist/icons/variants/macos/**/*',
             '!node_modules/@vscode/windows-process-tree/**/*',
-            ...REMOTE_DESKTOP_DUPLICATE_EXCLUSIONS,
         ],
         target: [
             {
@@ -343,10 +346,6 @@ module.exports = {
     },
     win: {
         icon: 'public/icon-win.png',
-        files: [
-            '!dist/icons/variants/macos/**/*',
-            ...REMOTE_DESKTOP_DUPLICATE_EXCLUSIONS,
-        ],
         // Do not hard-code arch here. pack:win-x64 / pack:win pass --x64/--arm64,
         // and electron-builder unions config arch with the CLI set. Hard-coding
         // ['x64', 'arm64'] made the official x64 CI job also emit win-arm64 and
@@ -386,10 +385,11 @@ module.exports = {
         // installs only hicolor/1024x1024 and launchers miss the icon (#274,
         // #1340). Do NOT set linux.icon to a single 1024px PNG either.
         icon: 'icons',
+        // Include a positive pattern (`package.json`, already packed) so this
+        // platform FileMatcher never becomes ignore-only and prepends "**/*".
         files: [
-            '!dist/icons/variants/macos/**/*',
+            'package.json',
             '!node_modules/@vscode/windows-process-tree/**/*',
-            ...REMOTE_DESKTOP_DUPLICATE_EXCLUSIONS,
         ],
         target: ['AppImage', 'deb', 'rpm', 'pacman'],
         category: 'Development',
