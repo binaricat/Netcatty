@@ -333,3 +333,89 @@ test("GroupDetailsPanel unifies 4-protocol tabs, adds RDP/VNC defaults, and save
     dom.cleanup();
   }
 });
+
+test("GroupDetailsPanel preserves inherited parent RDP/VNC username and domain when creating a password-only identity", async () => {
+  const dom = installDomEnvironment();
+  const previousRaf = globalThis.requestAnimationFrame;
+  const previousCancelRaf = globalThis.cancelAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => setTimeout(() => callback(0), 0) as unknown as number;
+  globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+
+  let renderer: ReactTestRenderer | undefined;
+  let savedConfig: GroupConfig | undefined;
+  const createdIdentities: Identity[] = [];
+
+  try {
+    await act(async () => {
+      renderer = create(
+        <I18nProvider locale="en">
+          <TooltipProvider>
+            <GroupDetailsPanel
+              groupPath="Corp/EU"
+              config={{ path: "Corp/EU", rdpConfig: { enabled: true }, vncConfig: { enabled: true } }}
+              availableKeys={[]}
+              identities={[]}
+              onCreateIdentity={(identity) => createdIdentities.push(identity)}
+              allHosts={[]}
+              groups={["Corp", "Corp/EU"]}
+              groupConfigs={[
+                {
+                  path: "Corp",
+                  rdpConfig: { enabled: true, username: "corp-admin", domain: "CORP" },
+                  vncConfig: { enabled: true, username: "corp-vnc" },
+                },
+              ]}
+              terminalThemeId="default"
+              terminalFontSize={14}
+              layout="inline"
+              onSave={(value) => {
+                savedConfig = value;
+              }}
+              onCancel={() => {}}
+            />
+          </TooltipProvider>
+        </I18nProvider>,
+      );
+    });
+
+    const rdpPasswordInput = renderer!.root.findAllByType(Input).find(
+      (input) => input.props.type === "password",
+    );
+    assert.ok(rdpPasswordInput);
+    await act(async () => {
+      rdpPasswordInput.props.onChange({ target: { value: "eu-rdp-secret" } });
+    });
+
+    const vncTab = renderer!.root.findAll(
+      (node) => node.type === "button" && node.props["data-group-protocol"] === "vnc",
+    )[0];
+    await act(async () => {
+      vncTab.props.onClick();
+    });
+    const vncPasswordInput = renderer!.root.findAllByType(Input).find(
+      (input) => input.props.type === "password",
+    );
+    assert.ok(vncPasswordInput);
+    await act(async () => {
+      vncPasswordInput.props.onChange({ target: { value: "eu-vnc-secret" } });
+    });
+
+    const footerSaveBtn = renderer!.root.findByType(AsidePanelFooter).findByType(Button);
+    await act(async () => {
+      footerSaveBtn.props.onClick();
+    });
+
+    assert.ok(savedConfig);
+    assert.equal(createdIdentities.length, 2);
+    assert.equal(createdIdentities[0].username, "corp-admin");
+    assert.equal(createdIdentities[0].domain, "CORP");
+    assert.equal(createdIdentities[0].password, "eu-rdp-secret");
+    assert.equal(createdIdentities[1].username, "corp-vnc");
+    assert.equal(createdIdentities[1].password, "eu-vnc-secret");
+  } finally {
+    if (renderer) await act(async () => { renderer!.unmount(); });
+    globalThis.requestAnimationFrame = previousRaf;
+    globalThis.cancelAnimationFrame = previousCancelRaf;
+    dom.cleanup();
+  }
+});

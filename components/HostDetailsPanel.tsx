@@ -1116,13 +1116,22 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         nextRdpConfig &&
         onCreateIdentity &&
         rdpDraft &&
-        rdpDraft.password.length > 0
+        rdpDraft.password.length > 0 &&
+        !nextRdpConfig.useHostCredentials &&
+        !nextRdpConfig.identityId
       ) {
+        const effectiveRdpDomain =
+          nextRdpConfig.domain || effectiveGroupDefaults?.rdpConfig?.domain;
         const identity: Identity = {
           id: crypto.randomUUID(),
           label: `${finalLabel} RDP`,
-          username: rdpDraft.username.trim(),
-          ...(nextRdpConfig.domain ? { domain: nextRdpConfig.domain } : {}),
+          username: (
+            rdpDraft.username ||
+            nextRdpConfig.username ||
+            effectiveGroupDefaults?.rdpConfig?.username ||
+            ""
+          ).trim(),
+          ...(effectiveRdpDomain ? { domain: effectiveRdpDomain } : {}),
           authMethod: "password",
           password: rdpDraft.password,
           created: Date.now(),
@@ -1140,12 +1149,19 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         nextVncConfig &&
         onCreateIdentity &&
         vncDraft &&
-        vncDraft.password.length > 0
+        vncDraft.password.length > 0 &&
+        !nextVncConfig.useHostCredentials &&
+        !nextVncConfig.identityId
       ) {
         const identity: Identity = {
           id: crypto.randomUUID(),
           label: `${finalLabel} VNC`,
-          username: vncDraft.username.trim(),
+          username: (
+            vncDraft.username ||
+            nextVncConfig.username ||
+            effectiveGroupDefaults?.vncConfig?.username ||
+            ""
+          ).trim(),
           authMethod: "password",
           password: vncDraft.password,
           created: Date.now(),
