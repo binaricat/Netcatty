@@ -279,7 +279,7 @@ test('PluginTerminalSidebarLauncher renders live view badges and clears them on 
   install('cancelAnimationFrame', (id: number) => clearTimeout(id));
   install('IS_REACT_ACT_ENVIRONMENT', true);
 
-  const { default: React, act } = await import('react');
+  const { act } = await import('react');
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('../application/i18n/I18nProvider');
   const { TooltipProvider } = await import('./ui/tooltip');
