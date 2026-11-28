@@ -46,6 +46,7 @@ test('magnified side panels use an inner rounded 1px border in the side panel ac
   const strokeSource = source.slice(strokeStart, source.indexOf('/>', strokeStart));
 
   assert.match(chromeSource, /overflow-hidden rounded-md bg-background shadow-2xl/);
+  assert.match(chromeSource, /\[clip-path:inset\(0_round_0\.375rem\)\]/);
   assert.doesNotMatch(chromeSource, /\b(?:outline|outlineOffset|border|borderColor|borderWidth|borderStyle)\b/);
   assert.match(strokeSource, /className="pointer-events-none absolute inset-0 z-50"/);
   assert.match(strokeSource, /boxSizing: 'border-box'/);

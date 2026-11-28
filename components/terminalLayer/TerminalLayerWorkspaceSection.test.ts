@@ -15,7 +15,7 @@ test("terminal pane chrome uses an inner rounded 1px border while retaining over
   const hostSource = paneSource.slice(0, paneSource.indexOf("<LazyLoadBoundary"));
   const strokeSource = paneSource.slice(paneSource.indexOf("{magnifiedSurfaceBounds && ("));
 
-  assert.match(hostSource, /^\s*magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl",$/m);
+  assert.match(hostSource, /^\s*magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl \[clip-path:inset\(0_round_0\.375rem\)\]",$/m);
   assert.match(hostSource, /style=\{style\}/);
   assert.doesNotMatch(hostSource, /\b(?:outline|outlineOffset|border|borderColor|borderWidth|borderStyle)\b/);
   assert.match(strokeSource, /aria-hidden="true"/);

@@ -1826,7 +1826,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",
         isVisible && "z-10",
-        magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl",
+        magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl [clip-path:inset(0_round_0.375rem)]",
       )}
       style={style}
       tabIndex={-1}

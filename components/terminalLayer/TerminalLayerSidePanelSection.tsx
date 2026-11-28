@@ -1583,7 +1583,7 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
           data-section="pane-magnification-backdrop"
         />
         <div
-          className="absolute inset-3 flex flex-col overflow-hidden rounded-md bg-background shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+          className="absolute inset-3 flex flex-col overflow-hidden rounded-md bg-background shadow-2xl [clip-path:inset(0_round_0.375rem)] animate-in fade-in zoom-in-95 duration-150"
           style={{
             backgroundColor: sidePanelTheme.termBg,
             color: sidePanelTheme.termFg,
