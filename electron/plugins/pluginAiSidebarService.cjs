@@ -123,7 +123,17 @@ class PluginAISidebarService {
       }),
       registry.registerRequest("ai.openSidebar", (params, context) => this.openSidebar(params, context), {
         metadata: { capability: "plugin-ai-sidebar", mutating: false, permission: "ai.invoke" },
-        authorization: auth("Open the Catty Agent contextual sidebar"),
+        authorization: (params) => {
+          const autoSend = Boolean(params?.autoSend);
+          return {
+            permission: "ai.invoke",
+            resources: ["*"],
+            reason: autoSend
+              ? "Automatically send a prompt to the Catty Agent sidebar"
+              : "Open the Catty Agent contextual sidebar",
+            ...(autoSend ? {} : { deferDecision: true }),
+          };
+        },
       }),
       registry.registerRequest("ai.closeSidebar", (params, context) => this.closeSidebar(params, context), {
         metadata: { capability: "plugin-ai-sidebar", mutating: false, permission: "ai.invoke" },
@@ -282,6 +292,7 @@ class PluginAISidebarService {
       throw invalidArgument("Plugin has no vault-page or terminal-sidebar view to attach the AI sidebar to");
     }
     const prompt = typeof normalizedParams.prompt === "string" ? normalizedParams.prompt.trim() : "";
+    const autoSend = normalizedParams.autoSend === true && prompt.length > 0;
     if (prompt && CONTROL_CHAR_RE.test(prompt.replace(/[\r\n\t]/g, ""))) {
       throw invalidArgument("Plugin AI sidebar prompt contains invalid control characters");
     }
@@ -290,7 +301,7 @@ class PluginAISidebarService {
       pluginId: context.pluginId,
       viewId,
       ...(prompt ? { prompt } : {}),
-      ...(normalizedParams.autoSend === true && prompt ? { autoSend: true } : {}),
+      ...(autoSend ? { autoSend: true } : {}),
       timestamp: this.clock(),
     }));
     return null;
