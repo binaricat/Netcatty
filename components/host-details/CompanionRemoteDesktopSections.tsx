@@ -27,6 +27,7 @@ import {
 } from "../../domain/remoteDesktop";
 import { cn } from "../../lib/utils";
 import type {
+  GroupConfig,
   Host,
   Identity,
   RdpConfig,
@@ -68,6 +69,7 @@ interface CompanionRemoteDesktopSectionsProps {
 
 interface CompanionRemoteDesktopInlineFieldsProps extends CompanionRemoteDesktopSectionsProps, RdpResolutionDraftProps {
   protocol: "vnc" | "rdp";
+  groupDefaults?: Partial<GroupConfig>;
   credentialDraft?: CompanionCredentialDraft;
   onCredentialDraftChange?: (draft: CompanionCredentialDraft | undefined) => void;
 }
@@ -80,6 +82,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
   protocol,
   form,
   setForm,
+  groupDefaults,
   identities,
   availableKeys = [],
   credentialDraft,
@@ -89,15 +92,25 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
   t,
 }) => {
   const [vncPortInput, setVncPortInput] = useState<string>(() =>
-    String(form.vncConfig?.port ?? DEFAULT_VNC_PORT),
+    form.vncConfig?.port !== undefined
+      ? String(form.vncConfig.port)
+      : groupDefaults?.vncConfig?.port !== undefined
+        ? ""
+        : String(DEFAULT_VNC_PORT),
   );
   const [showManualPassword, setShowManualPassword] = useState(false);
 
   useEffect(() => {
     if (protocol === "vnc") {
-      setVncPortInput(String(form.vncConfig?.port ?? DEFAULT_VNC_PORT));
+      setVncPortInput(
+        form.vncConfig?.port !== undefined
+          ? String(form.vncConfig.port)
+          : groupDefaults?.vncConfig?.port !== undefined
+            ? ""
+            : String(DEFAULT_VNC_PORT),
+      );
     }
-  }, [form.id, protocol, form.vncConfig?.port]);
+  }, [form.id, protocol, form.vncConfig?.port, groupDefaults?.vncConfig?.port]);
 
   const passwordCompatibleIdentities = useMemo(
     () =>
@@ -111,12 +124,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
     setForm((prev) => ({
       ...prev,
       vncConfig: {
-        ...(prev.vncConfig ?? {
-          ...DEFAULT_VNC_CONFIG,
-          enabled: true,
-          tunnelViaHostSsh: true,
-          useHostCredentials: true,
-        }),
+        ...(prev.vncConfig ?? { enabled: true }),
         ...patch,
       },
     }));
@@ -126,25 +134,38 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
     setForm((prev) => ({
       ...prev,
       rdpConfig: {
-        ...(prev.rdpConfig ?? {
-          ...DEFAULT_RDP_CONFIG,
-          enabled: true,
-          tunnelViaHostSsh: true,
-          useHostCredentials: true,
-        }),
+        ...(prev.rdpConfig ?? { enabled: true }),
         ...patch,
       },
     }));
   };
 
   if (protocol === "vnc") {
-    const vncTunneled = form.vncConfig?.tunnelViaHostSsh ?? true;
-    const vncNormalized = normalizeVncConfig(form.vncConfig);
+    const groupVnc = groupDefaults?.vncConfig;
+    const effectiveVnc = { ...(groupVnc ?? {}), ...(form.vncConfig ?? {}) };
+    const vncTunneled = effectiveVnc.tunnelViaHostSsh ?? true;
+    const vncNormalized = normalizeVncConfig(effectiveVnc);
     const vncDisplayLabel = formatVncDisplayNumber(vncNormalized.port);
+    const hostHasManualVncCreds =
+      form.vncConfig?.useHostCredentials === false
+      || Boolean(form.vncConfig?.username?.trim())
+      || form.vncConfig?.identityId !== undefined;
+    const effectiveVncIdentityId = form.vncConfig?.identityId !== undefined
+      ? (form.vncConfig.identityId || undefined)
+      : (form.vncConfig?.useHostCredentials === true || Boolean(form.vncConfig?.username?.trim()))
+        ? undefined
+        : (groupVnc?.identityId || undefined);
     const useHostCreds =
-      !form.vncConfig?.identityId && form.vncConfig?.useHostCredentials !== false;
-    const selectedVncIdentity = form.vncConfig?.identityId
-      ? identities.find((i) => i.id === form.vncConfig?.identityId)
+      !effectiveVncIdentityId
+      && (
+        form.vncConfig?.useHostCredentials !== undefined
+          ? form.vncConfig.useHostCredentials
+          : hostHasManualVncCreds
+            ? false
+            : (groupVnc?.useHostCredentials ?? (groupVnc?.username ? false : true))
+      );
+    const selectedVncIdentity = effectiveVncIdentityId
+      ? identities.find((i) => i.id === effectiveVncIdentityId)
       : undefined;
 
     return (
@@ -159,18 +180,26 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
               onChange={(e) => {
                 const raw = e.target.value;
                 setVncPortInput(raw);
+                if (!raw.trim()) {
+                  updateVncConfig({ port: undefined });
+                  return;
+                }
                 const parsed = parseVncPortOrDisplay(raw);
                 if (parsed !== null) {
                   updateVncConfig({ port: parsed });
                 }
               }}
               onBlur={() => {
+                if (!vncPortInput.trim() && groupVnc?.port !== undefined) {
+                  updateVncConfig({ port: undefined });
+                  return;
+                }
                 const parsed = parseVncPortOrDisplay(vncPortInput);
-                const resolved = parsed ?? DEFAULT_VNC_PORT;
-                setVncPortInput(String(resolved));
+                const resolved = parsed ?? (groupVnc?.port !== undefined ? undefined : DEFAULT_VNC_PORT);
+                setVncPortInput(resolved !== undefined ? String(resolved) : "");
                 updateVncConfig({ port: resolved });
               }}
-              placeholder={t("hostDetails.vnc.displayPlaceholder")}
+              placeholder={groupVnc?.port ? String(groupVnc.port) : t("hostDetails.vnc.displayPlaceholder")}
               className="h-8 flex-1 min-w-0 text-center font-mono text-sm"
             />
             {vncDisplayLabel ? (
@@ -202,7 +231,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
               onChange={(e) =>
                 updateVncConfig({ tunnelTargetHost: e.target.value || undefined })
               }
-              placeholder="127.0.0.1"
+              placeholder={groupVnc?.tunnelTargetHost || "127.0.0.1"}
               className="h-8 w-44 font-mono text-sm"
             />
           </HostDetailsSettingRow>
@@ -217,7 +246,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
             onCheckedChange={(checked) => {
               if (checked) {
                 onCredentialDraftChange?.(undefined);
-                updateVncConfig({ useHostCredentials: true, identityId: undefined });
+                updateVncConfig({ useHostCredentials: true, identityId: undefined, username: undefined });
               } else {
                 updateVncConfig({ useHostCredentials: false });
               }
@@ -227,7 +256,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
 
         {!useHostCreds && (
           <div className="space-y-2">
-            {form.vncConfig?.identityId ? (
+            {effectiveVncIdentityId ? (
               <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-border/60 bg-transparent">
                 <User size={16} className="text-muted-foreground shrink-0" />
                 <div className="min-w-0 flex-1">
@@ -244,7 +273,10 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 shrink-0"
-                      onClick={() => updateVncConfig({ identityId: undefined, useHostCredentials: false })}
+                      onClick={() => updateVncConfig({
+                        identityId: groupVnc?.identityId ? "" : undefined,
+                        useHostCredentials: false,
+                      })}
                     >
                       <X size={14} />
                     </Button>
@@ -263,7 +295,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
                       password: credentialDraft?.password ?? "",
                     });
                   }}
-                  placeholder={t("hostDetails.vnc.usernamePlaceholder")}
+                  placeholder={groupVnc?.username || t("hostDetails.vnc.usernamePlaceholder")}
                   identities={passwordCompatibleIdentities}
                   availableKeys={availableKeys}
                   onSelectIdentity={(identity) => {
@@ -350,12 +382,30 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
     );
   }
 
-  const rdpTunneled = form.rdpConfig?.tunnelViaHostSsh ?? true;
-  const rdpNormalized = normalizeRdpConfig(form.rdpConfig);
+  const groupRdp = groupDefaults?.rdpConfig;
+  const effectiveRdp = { ...(groupRdp ?? {}), ...(form.rdpConfig ?? {}) };
+  const rdpTunneled = effectiveRdp.tunnelViaHostSsh ?? true;
+  const rdpNormalized = normalizeRdpConfig(effectiveRdp);
+  const hostHasManualRdpCreds =
+    form.rdpConfig?.useHostCredentials === false
+    || Boolean(form.rdpConfig?.username?.trim())
+    || form.rdpConfig?.identityId !== undefined;
+  const effectiveRdpIdentityId = form.rdpConfig?.identityId !== undefined
+    ? (form.rdpConfig.identityId || undefined)
+    : (form.rdpConfig?.useHostCredentials === true || Boolean(form.rdpConfig?.username?.trim()))
+      ? undefined
+      : (groupRdp?.identityId || undefined);
   const useHostCreds =
-    !form.rdpConfig?.identityId && form.rdpConfig?.useHostCredentials !== false;
-  const selectedRdpIdentity = form.rdpConfig?.identityId
-    ? identities.find((i) => i.id === form.rdpConfig?.identityId)
+    !effectiveRdpIdentityId
+    && (
+      form.rdpConfig?.useHostCredentials !== undefined
+        ? form.rdpConfig.useHostCredentials
+        : hostHasManualRdpCreds
+          ? false
+          : (groupRdp?.useHostCredentials ?? (groupRdp?.username ? false : true))
+    );
+  const selectedRdpIdentity = effectiveRdpIdentityId
+    ? identities.find((i) => i.id === effectiveRdpIdentityId)
     : undefined;
 
   return (
@@ -368,11 +418,12 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
           type="number"
           min={1}
           max={65535}
-          value={form.rdpConfig?.port ?? DEFAULT_RDP_PORT}
+          value={form.rdpConfig?.port ?? (groupRdp?.port !== undefined ? "" : DEFAULT_RDP_PORT)}
           onChange={(e) => {
             const n = Number.parseInt(e.target.value, 10);
             updateRdpConfig({ port: Number.isFinite(n) ? n : undefined });
           }}
+          placeholder={String(groupRdp?.port ?? DEFAULT_RDP_PORT)}
           className="h-8 w-44 text-center font-mono text-sm"
         />
       </HostDetailsSettingRow>
@@ -398,7 +449,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
             onChange={(e) =>
               updateRdpConfig({ tunnelTargetHost: e.target.value || undefined })
             }
-            placeholder="127.0.0.1"
+            placeholder={groupRdp?.tunnelTargetHost || "127.0.0.1"}
             className="h-8 w-44 font-mono text-sm"
           />
         </HostDetailsSettingRow>
@@ -413,7 +464,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
           onCheckedChange={(checked) => {
             if (checked) {
               onCredentialDraftChange?.(undefined);
-              updateRdpConfig({ useHostCredentials: true, identityId: undefined });
+              updateRdpConfig({ useHostCredentials: true, identityId: undefined, username: undefined });
             } else {
               updateRdpConfig({ useHostCredentials: false });
             }
@@ -423,7 +474,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
 
       {!useHostCreds && (
         <div className="space-y-2">
-          {form.rdpConfig?.identityId ? (
+          {effectiveRdpIdentityId ? (
             <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-border/60 bg-transparent">
               <User size={16} className="text-muted-foreground shrink-0" />
               <div className="min-w-0 flex-1">
@@ -440,7 +491,10 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 shrink-0"
-                    onClick={() => updateRdpConfig({ identityId: undefined, useHostCredentials: false })}
+                    onClick={() => updateRdpConfig({
+                      identityId: groupRdp?.identityId ? "" : undefined,
+                      useHostCredentials: false,
+                    })}
                   >
                     <X size={14} />
                   </Button>
@@ -459,7 +513,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
                     password: credentialDraft?.password ?? "",
                   });
                 }}
-                placeholder={t("hostDetails.rdp.usernamePlaceholder")}
+                placeholder={groupRdp?.username || t("hostDetails.rdp.usernamePlaceholder")}
                 identities={passwordCompatibleIdentities}
                 availableKeys={availableKeys}
                 onSelectIdentity={(identity) => {
@@ -520,7 +574,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
           onChange={(e) =>
             updateRdpConfig({ domain: e.target.value || undefined })
           }
-          placeholder={t("hostDetails.rdp.domainPlaceholder")}
+          placeholder={groupRdp?.domain || t("hostDetails.rdp.domainPlaceholder")}
           className="h-8 w-44 text-sm"
         />
       </HostDetailsSettingRow>
@@ -550,6 +604,7 @@ export const CompanionRemoteDesktopInlineFields: React.FC<CompanionRemoteDesktop
         <RdpResolutionFields
           form={form}
           setForm={setForm}
+          inheritedRdpConfig={groupRdp}
           t={t}
           resolutionDraft={resolutionDraft}
           onResolutionDraftChange={onResolutionDraftChange}

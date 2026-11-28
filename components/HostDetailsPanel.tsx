@@ -199,7 +199,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           id: crypto.randomUUID(),
           label: "",
           hostname: "",
-          port: DEFAULT_RDP_PORT,
+          port: groupDefaults?.rdpConfig?.port ? undefined : DEFAULT_RDP_PORT,
           username: "",
           protocol: "rdp",
           tags: [],
@@ -207,7 +207,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           authMethod: "password",
           authPolicyVersion: 1,
           distroMode: "auto",
-          rdpConfig: { ...DEFAULT_RDP_CONFIG },
+          rdpConfig: {},
           createdAt: Date.now(),
           group: defaultGroup || undefined,
         } as Host;
@@ -217,7 +217,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           id: crypto.randomUUID(),
           label: "",
           hostname: "",
-          port: DEFAULT_VNC_PORT,
+          port: groupDefaults?.vncConfig?.port ? undefined : DEFAULT_VNC_PORT,
           username: "",
           protocol: "vnc",
           tags: [],
@@ -225,7 +225,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           authMethod: "password",
           authPolicyVersion: 1,
           distroMode: "auto",
-          vncConfig: { ...DEFAULT_VNC_CONFIG },
+          vncConfig: {},
           createdAt: Date.now(),
           group: defaultGroup || undefined,
         } as Host;
@@ -456,10 +456,17 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     [effectiveGroupDefaults, form],
   );
 
+  const effectiveIdentityId =
+    form.protocol === "rdp"
+      ? (effectiveAuthHost.identityId || effectiveAuthHost.rdpConfig?.identityId)
+      : form.protocol === "vnc"
+        ? (effectiveAuthHost.identityId || effectiveAuthHost.vncConfig?.identityId)
+        : effectiveAuthHost.identityId;
+
   const selectedIdentity = useMemo(() => {
-    if (!effectiveAuthHost.identityId) return undefined;
-    return identities.find((i) => i.id === effectiveAuthHost.identityId);
-  }, [effectiveAuthHost.identityId, identities]);
+    if (!effectiveIdentityId) return undefined;
+    return identities.find((i) => i.id === effectiveIdentityId);
+  }, [effectiveIdentityId, identities]);
 
   const effectiveAuth = useMemo(() => resolveHostAuth({
     host: effectiveAuthHost,
@@ -658,13 +665,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           nextProtocol,
           Boolean(effectiveGroupDefaults?.telnetPort),
           Boolean(effectiveGroupDefaults?.port),
+          Boolean(effectiveGroupDefaults?.rdpConfig?.port),
+          Boolean(effectiveGroupDefaults?.vncConfig?.port),
         );
         const isFreshHost = !initialData;
         if (nextProtocol === "rdp") {
           return {
             ...prev,
             protocol: "rdp",
-            port: prev.rdpConfig?.port ?? nextPort ?? DEFAULT_RDP_PORT,
+            port: prev.rdpConfig?.port ?? nextPort,
             os: isFreshHost && prev.os === "linux" ? "windows" : prev.os,
             username: isFreshHost && prev.username === "root" ? "" : (prev.username ?? ""),
             authMethod: "password",
@@ -673,7 +682,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
             telnetEnabled: false,
             vncConfig: undefined,
             rdpConfig: {
-              ...DEFAULT_RDP_CONFIG,
               ...(prev.rdpConfig ?? {}),
               enabled: undefined,
               defaultConnect: undefined,
@@ -686,7 +694,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           return {
             ...prev,
             protocol: "vnc",
-            port: prev.vncConfig?.port ?? nextPort ?? DEFAULT_VNC_PORT,
+            port: prev.vncConfig?.port ?? nextPort,
             username: isFreshHost && prev.username === "root" ? "" : (prev.username ?? ""),
             authMethod: "password",
             moshEnabled: false,
@@ -694,7 +702,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
             telnetEnabled: false,
             rdpConfig: undefined,
             vncConfig: {
-              ...DEFAULT_VNC_CONFIG,
               ...(prev.vncConfig ?? {}),
               enabled: undefined,
               defaultConnect: undefined,
@@ -727,7 +734,14 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         };
       });
     },
-    [effectiveGroupDefaults?.port, effectiveGroupDefaults?.telnetPort, effectiveGroupDefaults?.username, initialData],
+    [
+      effectiveGroupDefaults?.port,
+      effectiveGroupDefaults?.rdpConfig?.port,
+      effectiveGroupDefaults?.telnetPort,
+      effectiveGroupDefaults?.username,
+      effectiveGroupDefaults?.vncConfig?.port,
+      initialData,
+    ],
   );
 
   const isUntouchedNewHost = !initialData
@@ -760,12 +774,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
             return {
               ...prev,
               vncConfig: {
-                ...DEFAULT_VNC_CONFIG,
                 ...(prev.vncConfig ?? {}),
                 enabled: true,
-                port: prev.vncConfig?.port ?? DEFAULT_VNC_PORT,
-                tunnelViaHostSsh: prev.vncConfig?.tunnelViaHostSsh ?? true,
-                useHostCredentials: prev.vncConfig?.identityId ? false : (prev.vncConfig?.useHostCredentials ?? true),
               },
             };
           }
@@ -773,12 +783,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
             return {
               ...prev,
               rdpConfig: {
-                ...DEFAULT_RDP_CONFIG,
                 ...(prev.rdpConfig ?? {}),
                 enabled: true,
-                port: prev.rdpConfig?.port ?? DEFAULT_RDP_PORT,
-                tunnelViaHostSsh: prev.rdpConfig?.tunnelViaHostSsh ?? true,
-                useHostCredentials: prev.rdpConfig?.identityId ? false : (prev.rdpConfig?.useHostCredentials ?? true),
               },
             };
           }
@@ -921,7 +927,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     savingHostRef.current = true;
     try {
     if (!pluginProtocolActive && (form.protocol === "rdp" || form.rdpConfig?.enabled)
-      && !hasValidRdpFixedResolution(form.rdpConfig, resolutionDraft)) {
+      && !hasValidRdpFixedResolution(effectiveAuthHost.rdpConfig, resolutionDraft)) {
       setActiveProtocolTab("rdp");
       toast.error(t("hostDetails.rdp.dimensionHint"));
       return;
@@ -976,11 +982,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     }
 
     const { proxyConfig: _draftProxyConfig, ...formWithoutProxyDraft } = form;
+    const hasGroupRdpPortDefault = Boolean(effectiveGroupDefaults?.rdpConfig?.port);
+    const hasGroupVncPortDefault = Boolean(effectiveGroupDefaults?.vncConfig?.port);
     const finalPort = resolvePrimaryProtocolSavePort(
       form.protocol,
       form.port,
-      Boolean(groupDefaults?.port),
-      Boolean(groupDefaults?.telnetPort),
+      Boolean(effectiveGroupDefaults?.port),
+      Boolean(effectiveGroupDefaults?.telnetPort),
+      hasGroupRdpPortDefault,
+      hasGroupVncPortDefault,
     );
     let cleaned: Host = {
       ...formWithoutProxyDraft,
@@ -1014,7 +1024,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       const sanitizedRdp = cleaned.protocol === "rdp"
         ? sanitizeRdpConfig({
             ...(cleaned.rdpConfig ?? {}),
-            port: finalPort ?? DEFAULT_RDP_PORT,
+            port: finalPort ?? (hasGroupRdpPortDefault ? undefined : DEFAULT_RDP_PORT),
             enabled: undefined,
             tunnelViaHostSsh: undefined,
             tunnelTargetHost: undefined,
@@ -1023,7 +1033,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       const sanitizedVnc = cleaned.protocol === "vnc"
         ? sanitizeVncConfig({
             ...(cleaned.vncConfig ?? {}),
-            port: finalPort ?? DEFAULT_VNC_PORT,
+            port: finalPort ?? (hasGroupVncPortDefault ? undefined : DEFAULT_VNC_PORT),
             enabled: undefined,
             tunnelViaHostSsh: undefined,
             tunnelTargetHost: undefined,
@@ -1035,7 +1045,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         username: typeof cleaned.username === "string" ? cleaned.username.trim() : "",
         tags: Array.isArray(cleaned.tags) ? cleaned.tags : [],
         os: cleaned.os || (cleaned.protocol === "rdp" ? "windows" : "linux"),
-        port: finalPort ?? (cleaned.protocol === "rdp" ? DEFAULT_RDP_PORT : DEFAULT_VNC_PORT),
+        port: finalPort,
         authMethod: hasInlinePassword || cleaned.identityId ? "password" : undefined,
         authPolicyVersion: 1,
         identityFileId: undefined,
@@ -1650,7 +1660,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           groupDefaults={effectiveGroupDefaults}
           effectiveAuthMethod={effectiveAuthMethod}
           effectiveUsername={effectiveAuth.username}
-          effectiveIdentityId={effectiveAuthHost.identityId}
+          effectiveIdentityId={effectiveIdentityId}
           selectedIdentity={selectedIdentity}
           clearIdentity={clearIdentity}
           identities={identities}
@@ -1712,6 +1722,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
             onResolutionDraftChange={onResolutionDraftChange}
             form={form}
             setForm={setForm}
+            groupDefaults={effectiveGroupDefaults}
             t={t}
           />
         ) : null}

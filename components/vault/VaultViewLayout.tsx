@@ -1622,6 +1622,9 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   config={groupConfigs.find((c) => c.path === editingGroupPath)}
                   availableKeys={keys}
                   identities={identities}
+                  onCreateIdentity={(identity) =>
+                    onUpdateIdentities([...identities, identity])
+                  }
                   proxyProfiles={proxyProfiles}
                   allHosts={hosts}
                   groups={allGroupPaths}

@@ -1,9 +1,65 @@
-import type { GroupConfig, Host } from './models';
+import type { GroupConfig, Host, RdpConfig, VncConfig } from './models';
 import { migrateDeprecatedFontOverride } from '../infrastructure/config/fonts';
 import {
   getActiveGlobalDefaultProxyProfileId,
   normalizeGlobalDefaultProxyProfileId,
 } from './globalDefaultProxy';
+import { sanitizeRdpConfig, sanitizeVncConfig } from './remoteDesktop';
+
+const sanitizeGroupRdpConfig = (config: RdpConfig | undefined): RdpConfig | undefined => {
+  if (!config) return undefined;
+  const sanitized = sanitizeRdpConfig(config);
+  if (config.identityId === '') {
+    return { ...(sanitized ?? {}), identityId: '' };
+  }
+  return sanitized;
+};
+
+const sanitizeGroupVncConfig = (config: VncConfig | undefined): VncConfig | undefined => {
+  if (!config) return undefined;
+  const sanitized = sanitizeVncConfig(config);
+  if (config.identityId === '') {
+    return { ...(sanitized ?? {}), identityId: '' };
+  }
+  return sanitized;
+};
+
+export const hasManualGroupRdpCredentials = (config: Partial<RdpConfig> | undefined): boolean =>
+  Boolean(config && (config.username !== undefined || config.useHostCredentials === true));
+
+export const hasManualGroupVncCredentials = (config: Partial<VncConfig> | undefined): boolean =>
+  Boolean(config && (config.username !== undefined || config.useHostCredentials === true));
+
+const mergeRemoteDesktopConfigLayer = <T extends RdpConfig | VncConfig>(
+  parent: T | undefined,
+  child: T | undefined,
+): T | undefined => {
+  if (!parent) return child ? { ...child } : undefined;
+  if (!child) return { ...parent };
+  const merged: Record<string, unknown> = { ...parent };
+
+  if (child.useHostCredentials === true) {
+    delete merged.identityId;
+    delete merged.username;
+  } else if (child.identityId !== undefined) {
+    delete merged.username;
+    if (child.identityId !== '') {
+      delete merged.useHostCredentials;
+    }
+  } else if (child.username !== undefined) {
+    delete merged.identityId;
+    if (child.useHostCredentials === undefined) {
+      delete merged.useHostCredentials;
+    }
+  }
+
+  for (const [key, value] of Object.entries(child)) {
+    if (value !== undefined) {
+      merged[key] = value;
+    }
+  }
+  return merged as T;
+};
 
 /**
  * Migrate deprecated primary-font ids out of a GroupConfig's
@@ -19,9 +75,19 @@ export function sanitizeGroupConfig(config: GroupConfig): GroupConfig {
     && !migrated.identityFileId
     && !migrated.identityFilePaths?.length;
 
-  const next = hasLegacyPasswordOnlyCredentials
+  let next: GroupConfig = hasLegacyPasswordOnlyCredentials
     ? { ...migrated, authMethod: 'password' as const }
-    : migrated;
+    : { ...migrated };
+  if (Object.prototype.hasOwnProperty.call(next, 'rdpConfig')) {
+    const rdpConfig = sanitizeGroupRdpConfig(next.rdpConfig);
+    if (rdpConfig) next.rdpConfig = rdpConfig;
+    else delete next.rdpConfig;
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'vncConfig')) {
+    const vncConfig = sanitizeGroupVncConfig(next.vncConfig);
+    if (vncConfig) next.vncConfig = vncConfig;
+    else delete next.vncConfig;
+  }
   if (!Object.prototype.hasOwnProperty.call(next, 'singleChannelSsh')) return next;
   const cleaned = { ...next };
   delete (cleaned as { singleChannelSsh?: unknown }).singleChannelSsh;
@@ -153,6 +219,20 @@ export function resolveGroupDefaults(
           continue;
         }
         if (key !== 'path' && key !== 'notes' && value !== undefined) {
+          if (key === 'rdpConfig') {
+            merged.rdpConfig = mergeRemoteDesktopConfigLayer(
+              merged.rdpConfig as RdpConfig | undefined,
+              value as RdpConfig,
+            );
+            continue;
+          }
+          if (key === 'vncConfig') {
+            merged.vncConfig = mergeRemoteDesktopConfigLayer(
+              merged.vncConfig as VncConfig | undefined,
+              value as VncConfig,
+            );
+            continue;
+          }
           if (key === 'proxyProfileId') {
             delete merged.proxyConfig;
           }
@@ -236,6 +316,89 @@ const REMOTE_DESKTOP_INHERITABLE_KEYS = new Set<keyof GroupConfig>([
   'proxyProfileId',
   'proxyConfig',
 ]);
+
+const STANDALONE_REMOTE_DESKTOP_SKIP_KEYS = new Set<string>([
+  'enabled',
+  'defaultConnect',
+  'tunnelViaHostSsh',
+  'tunnelTargetHost',
+  'useHostCredentials',
+]);
+
+const COMPANION_REMOTE_DESKTOP_SKIP_KEYS = new Set<string>([
+  'enabled',
+  'defaultConnect',
+]);
+
+const applyRemoteDesktopGroupConfig = <T extends RdpConfig | VncConfig>(
+  host: Host,
+  hostConfig: T | undefined,
+  groupConfig: T | undefined,
+  isStandalone: boolean,
+): { config: T | undefined; inheritedPort?: number } => {
+  if (!groupConfig) return { config: hostConfig };
+  const merged: Record<string, unknown> = hostConfig ? { ...hostConfig } : {};
+  const skipKeys = isStandalone
+    ? STANDALONE_REMOTE_DESKTOP_SKIP_KEYS
+    : COMPANION_REMOTE_DESKTOP_SKIP_KEYS;
+
+  const standaloneHasExplicitCreds = isStandalone && (
+    host.identityId !== undefined
+    || Boolean(host.username?.trim())
+    || host.password !== undefined
+    || host.savePassword === false
+    || hostConfig?.identityId !== undefined
+    || Boolean(hostConfig?.username?.trim())
+  );
+
+  const companionHasUseHostCreds = !isStandalone && hostConfig?.useHostCredentials === true;
+  const companionHasExplicitIdentity = !isStandalone && hostConfig?.identityId !== undefined;
+  const companionHasManualUsername = !isStandalone && Boolean(hostConfig?.username?.trim());
+
+  let inheritedPort: number | undefined;
+  for (const [key, value] of Object.entries(groupConfig)) {
+    if (value === undefined || skipKeys.has(key)) continue;
+    if (key === 'port') {
+      if (isStandalone) {
+        if (host.port !== undefined || hostConfig?.port !== undefined) continue;
+        inheritedPort = value as number;
+      } else if (hostConfig?.port !== undefined) {
+        continue;
+      }
+    }
+    if (key === 'identityId') {
+      if (value === '') continue;
+      if (isStandalone && standaloneHasExplicitCreds) continue;
+      if (!isStandalone && (companionHasUseHostCreds || companionHasExplicitIdentity || companionHasManualUsername)) {
+        continue;
+      }
+    }
+    if (key === 'username') {
+      if (value === '') continue;
+      if (isStandalone && standaloneHasExplicitCreds) continue;
+      if (!isStandalone && (companionHasUseHostCreds || companionHasExplicitIdentity || companionHasManualUsername)) {
+        continue;
+      }
+    }
+    if (key === 'useHostCredentials') {
+      if (
+        hostConfig?.useHostCredentials !== undefined
+        || companionHasExplicitIdentity
+        || companionHasManualUsername
+      ) {
+        continue;
+      }
+    }
+    if (merged[key] === undefined) {
+      merged[key] = value;
+    }
+  }
+
+  return {
+    config: Object.keys(merged).length > 0 ? (merged as T) : undefined,
+    inheritedPort,
+  };
+};
 
 /**
  * Apply group defaults to a host. Only fills in fields the host doesn't already have.
@@ -323,6 +486,38 @@ export function applyGroupDefaults(
   // Explicit direct beats a host proxy, the nearest group proxy, and the
   // global default. Clearing the host setting leaves directProxy unset and
   // still inherits.
+  const isPluginHost = typeof host.protocol === 'string' && host.protocol.startsWith('plugin:');
+  if (!isLocalShellHost && !isSerialHost && !isPluginHost) {
+    const isStandaloneRdp = host.protocol === 'rdp';
+    const hasCompanionRdpEnabled = !isStandaloneRdp && host.rdpConfig?.enabled === true;
+    if ((isStandaloneRdp || hasCompanionRdpEnabled) && groupDefaults.rdpConfig) {
+      const { config, inheritedPort } = applyRemoteDesktopGroupConfig(
+        host,
+        effective.rdpConfig,
+        groupDefaults.rdpConfig,
+        isStandaloneRdp,
+      );
+      if (config) effective.rdpConfig = config;
+      if (isStandaloneRdp && inheritedPort !== undefined && effective.port === undefined) {
+        effective.port = inheritedPort;
+      }
+    }
+
+    const isStandaloneVnc = host.protocol === 'vnc';
+    const hasCompanionVncEnabled = !isStandaloneVnc && host.vncConfig?.enabled === true;
+    if ((isStandaloneVnc || hasCompanionVncEnabled) && groupDefaults.vncConfig) {
+      const { config, inheritedPort } = applyRemoteDesktopGroupConfig(
+        host,
+        effective.vncConfig,
+        groupDefaults.vncConfig,
+        isStandaloneVnc,
+      );
+      if (config) effective.vncConfig = config;
+      if (isStandaloneVnc && inheritedPort !== undefined && effective.port === undefined) {
+        effective.port = inheritedPort;
+      }
+    }
+  }
   if (host.directProxy === true) return withoutInheritedProxy(effective);
   if (!effective.proxyConfig && !effective.proxyProfileId) {
     const globalProxyProfileId = resolveGlobalProxyProfileId(options);

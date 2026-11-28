@@ -950,3 +950,264 @@ test("applyGroupDefaults inherits hostChain and proxy for vnc/rdp hosts while sk
     assert.equal(result.etEnabled, undefined);
   }
 });
+
+test("sanitizeGroupConfig strips accidental plaintext passwords from rdpConfig and vncConfig while keeping identityId opt-out", () => {
+  const sanitized = sanitizeGroupConfig({
+    path: "desktops",
+    rdpConfig: {
+      enabled: true,
+      port: 13389,
+      domain: "CORP",
+      identityId: "",
+      password: "never-store-plaintext",
+    } as GroupConfig["rdpConfig"],
+    vncConfig: {
+      enabled: true,
+      port: 5902,
+      identityId: "",
+      password: "never-store-plaintext",
+    } as GroupConfig["vncConfig"],
+  });
+
+  assert.equal(sanitized.rdpConfig?.port, 13389);
+  assert.equal(sanitized.rdpConfig?.domain, "CORP");
+  assert.equal(sanitized.rdpConfig?.identityId, "");
+  assert.equal("password" in (sanitized.rdpConfig ?? {}), false);
+  assert.equal(sanitized.vncConfig?.port, 5902);
+  assert.equal(sanitized.vncConfig?.identityId, "");
+  assert.equal("password" in (sanitized.vncConfig ?? {}), false);
+});
+
+test("resolveGroupDefaults merges rdpConfig and vncConfig across ancestor groups", () => {
+  const resolved = resolveGroupDefaults("corp/eu", [
+    {
+      path: "corp",
+      rdpConfig: {
+        enabled: true,
+        port: 3389,
+        domain: "CORP",
+        identityId: "parent-rdp-id",
+        resolutionMode: "fixed",
+        width: 1920,
+        height: 1080,
+        securityMode: "nla",
+        audioEnabled: true,
+      },
+      vncConfig: {
+        enabled: true,
+        port: 5901,
+        identityId: "parent-vnc-id",
+        scalingMode: "fit",
+        viewOnly: true,
+      },
+    },
+    {
+      path: "corp/eu",
+      rdpConfig: {
+        enabled: true,
+        port: 13389,
+        audioEnabled: false,
+      },
+      vncConfig: {
+        enabled: true,
+        username: "eu-vnc-user",
+        viewOnly: false,
+      },
+    },
+  ]);
+
+  assert.deepEqual(resolved.rdpConfig, {
+    enabled: true,
+    port: 13389,
+    domain: "CORP",
+    identityId: "parent-rdp-id",
+    resolutionMode: "fixed",
+    width: 1920,
+    height: 1080,
+    securityMode: "nla",
+    audioEnabled: false,
+  });
+  assert.deepEqual(resolved.vncConfig, {
+    enabled: true,
+    port: 5901,
+    username: "eu-vnc-user",
+    scalingMode: "fit",
+    viewOnly: false,
+  });
+});
+
+test("applyGroupDefaults inherits rdpConfig and vncConfig into standalone remote desktop hosts", () => {
+  const groupDefaults: Partial<GroupConfig> = {
+    port: 2222,
+    username: "ssh-user",
+    rdpConfig: {
+      enabled: true,
+      port: 13389,
+      domain: "CORP",
+      identityId: "group-rdp-id",
+      tunnelViaHostSsh: true,
+      tunnelTargetHost: "10.0.0.5",
+      useHostCredentials: true,
+      resolutionMode: "fixed",
+      width: 1600,
+      height: 900,
+      colorDepth: 24,
+      audioEnabled: false,
+      securityMode: "nla",
+    },
+    vncConfig: {
+      enabled: true,
+      port: 5902,
+      identityId: "group-vnc-id",
+      tunnelViaHostSsh: true,
+      scalingMode: "actual",
+      quality: 8,
+      compressionLevel: 4,
+      viewOnly: true,
+      showRemoteCursor: false,
+    },
+  };
+
+  const rdpResult = applyGroupDefaults(
+    host({ protocol: "rdp", username: "", port: undefined }),
+    groupDefaults,
+    { globalProxyProfileId: "" },
+  );
+  assert.equal(rdpResult.port, 13389);
+  assert.equal(rdpResult.rdpConfig?.port, 13389);
+  assert.equal(rdpResult.rdpConfig?.domain, "CORP");
+  assert.equal(rdpResult.rdpConfig?.identityId, "group-rdp-id");
+  assert.equal(rdpResult.rdpConfig?.resolutionMode, "fixed");
+  assert.equal(rdpResult.rdpConfig?.width, 1600);
+  assert.equal(rdpResult.rdpConfig?.height, 900);
+  assert.equal(rdpResult.rdpConfig?.colorDepth, 24);
+  assert.equal(rdpResult.rdpConfig?.audioEnabled, false);
+  assert.equal(rdpResult.rdpConfig?.securityMode, "nla");
+  // Companion-only flags must not leak onto standalone RDP hosts.
+  assert.equal(rdpResult.rdpConfig?.enabled, undefined);
+  assert.equal(rdpResult.rdpConfig?.tunnelViaHostSsh, undefined);
+  assert.equal(rdpResult.rdpConfig?.tunnelTargetHost, undefined);
+  assert.equal(rdpResult.rdpConfig?.useHostCredentials, undefined);
+  assert.equal(rdpResult.vncConfig, undefined);
+
+  const vncResult = applyGroupDefaults(
+    host({ protocol: "vnc", username: "", port: undefined }),
+    groupDefaults,
+    { globalProxyProfileId: "" },
+  );
+  assert.equal(vncResult.port, 5902);
+  assert.equal(vncResult.vncConfig?.port, 5902);
+  assert.equal(vncResult.vncConfig?.identityId, "group-vnc-id");
+  assert.equal(vncResult.vncConfig?.scalingMode, "actual");
+  assert.equal(vncResult.vncConfig?.quality, 8);
+  assert.equal(vncResult.vncConfig?.compressionLevel, 4);
+  assert.equal(vncResult.vncConfig?.viewOnly, true);
+  assert.equal(vncResult.vncConfig?.showRemoteCursor, false);
+  assert.equal(vncResult.vncConfig?.enabled, undefined);
+  assert.equal(vncResult.vncConfig?.tunnelViaHostSsh, undefined);
+  assert.equal(vncResult.rdpConfig, undefined);
+});
+
+test("applyGroupDefaults respects standalone remote desktop host overrides and manual credentials", () => {
+  const groupDefaults: Partial<GroupConfig> = {
+    rdpConfig: {
+      enabled: true,
+      port: 13389,
+      domain: "GROUPDOM",
+      identityId: "group-rdp-id",
+      securityMode: "nla",
+    },
+  };
+
+  const result = applyGroupDefaults(
+    host({
+      protocol: "rdp",
+      port: 3390,
+      username: "local-admin",
+      password: "secret",
+      rdpConfig: { domain: "HOSTDOM" },
+    }),
+    groupDefaults,
+    { globalProxyProfileId: "" },
+  );
+
+  assert.equal(result.port, 3390);
+  assert.equal(result.rdpConfig?.port, undefined);
+  assert.equal(result.rdpConfig?.domain, "HOSTDOM");
+  assert.equal(result.rdpConfig?.identityId, undefined);
+  assert.equal(result.rdpConfig?.securityMode, "nla");
+});
+
+test("applyGroupDefaults inherits rdpConfig and vncConfig only into SSH hosts that enabled those protocols", () => {
+  const groupDefaults: Partial<GroupConfig> = {
+    port: 2222,
+    rdpConfig: {
+      enabled: true,
+      port: 13389,
+      domain: "CORP",
+      identityId: "group-rdp-id",
+      tunnelViaHostSsh: false,
+      resolutionMode: "fit",
+    },
+    vncConfig: {
+      enabled: true,
+      port: 5905,
+      useHostCredentials: true,
+      tunnelViaHostSsh: true,
+      tunnelTargetHost: "127.0.0.1",
+      scalingMode: "dynamic",
+    },
+  };
+
+  // Plain SSH host without RDP/VNC enabled must NOT have RDP/VNC enabled by the group.
+  const sshOnly = applyGroupDefaults(
+    host({ protocol: "ssh", port: undefined }),
+    groupDefaults,
+    { globalProxyProfileId: "" },
+  );
+  assert.equal(sshOnly.port, 2222);
+  assert.equal(sshOnly.rdpConfig, undefined);
+  assert.equal(sshOnly.vncConfig, undefined);
+
+  // SSH host with companion RDP & VNC enabled inherits both protocol configs cleanly.
+  const companion = applyGroupDefaults(
+    host({
+      protocol: "ssh",
+      port: undefined,
+      rdpConfig: { enabled: true },
+      vncConfig: { enabled: true, port: 5910 },
+    }),
+    groupDefaults,
+    { globalProxyProfileId: "" },
+  );
+  assert.equal(companion.port, 2222);
+  assert.deepEqual(companion.rdpConfig, {
+    enabled: true,
+    port: 13389,
+    domain: "CORP",
+    identityId: "group-rdp-id",
+    tunnelViaHostSsh: false,
+    resolutionMode: "fit",
+  });
+  assert.deepEqual(companion.vncConfig, {
+    enabled: true,
+    port: 5910,
+    useHostCredentials: true,
+    tunnelViaHostSsh: true,
+    tunnelTargetHost: "127.0.0.1",
+    scalingMode: "dynamic",
+  });
+
+  // Companion RDP host explicitly using host credentials must not inherit group RDP identityId.
+  const companionHostCreds = applyGroupDefaults(
+    host({
+      protocol: "ssh",
+      rdpConfig: { enabled: true, useHostCredentials: true },
+    }),
+    groupDefaults,
+    { globalProxyProfileId: "" },
+  );
+  assert.equal(companionHostCreds.rdpConfig?.useHostCredentials, true);
+  assert.equal(companionHostCreds.rdpConfig?.identityId, undefined);
+  assert.equal(companionHostCreds.rdpConfig?.domain, "CORP");
+});

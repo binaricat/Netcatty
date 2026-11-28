@@ -220,3 +220,36 @@ test("Host Details can restore group jump hosts from the empty-override Direct r
     assert.ok(section().findAllByType(Badge).some((badge) => badge.props.children === "Inherited from group"));
   });
 });
+
+test("Host Details keeps standalone RDP fields sparse so group RDP defaults are inherited on save", async () => {
+  const group: Partial<GroupConfig> = {
+    rdpConfig: {
+      enabled: true,
+      port: 13389,
+      domain: "CORP",
+      securityMode: "nla",
+      audioEnabled: false,
+    },
+  };
+  const rdpHost: Host = {
+    ...host,
+    protocol: "rdp",
+    port: undefined,
+    username: "",
+    password: undefined,
+    authMethod: undefined,
+    rdpConfig: undefined,
+  };
+  await withPanel(group, async ({ root, save }) => {
+    const securitySelect = root.findAllByType(Select).find((item) => item.props.value === "nla");
+    assert.ok(securitySelect, "expected standalone RDP editor to reflect inherited securityMode");
+    const saved = await save();
+    assert.equal(saved.port, undefined);
+    assert.equal(saved.rdpConfig, undefined);
+    const effective = applyGroupDefaults(saved, group);
+    assert.equal(effective.port, 13389);
+    assert.equal(effective.rdpConfig?.domain, "CORP");
+    assert.equal(effective.rdpConfig?.securityMode, "nla");
+    assert.equal(effective.rdpConfig?.audioEnabled, false);
+  }, rdpHost);
+});

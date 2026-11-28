@@ -24,6 +24,7 @@ import {
   normalizeVncConfig,
 } from "../../domain/remoteDesktop";
 import type {
+  GroupConfig,
   Host,
   RdpColorDepth,
   RdpConfig,
@@ -45,12 +46,14 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
 interface RemoteDesktopOptionsSectionProps extends RdpResolutionDraftProps {
   form: Host;
   setForm: React.Dispatch<React.SetStateAction<Host>>;
+  groupDefaults?: Partial<GroupConfig>;
   t: Translate;
 }
 
 export const RemoteDesktopOptionsSection: React.FC<RemoteDesktopOptionsSectionProps> = ({
   form,
   setForm,
+  groupDefaults,
   t,
   resolutionDraft,
   onResolutionDraftChange,
@@ -59,12 +62,18 @@ export const RemoteDesktopOptionsSection: React.FC<RemoteDesktopOptionsSectionPr
     Boolean(
       form.rdpConfig?.loadBalanceInfo ||
         form.rdpConfig?.alternateShell ||
-        form.rdpConfig?.shellWorkingDir,
+        form.rdpConfig?.shellWorkingDir ||
+        groupDefaults?.rdpConfig?.loadBalanceInfo ||
+        groupDefaults?.rdpConfig?.alternateShell ||
+        groupDefaults?.rdpConfig?.shellWorkingDir,
     ),
   );
 
   if (form.protocol === "rdp") {
-    const rdp = normalizeRdpConfig(form.rdpConfig);
+    const rdp = normalizeRdpConfig({
+      ...(groupDefaults?.rdpConfig ?? {}),
+      ...(form.rdpConfig ?? {}),
+    });
     const updateRdp = <K extends keyof RdpConfig>(key: K, value: RdpConfig[K]) => {
       setForm((prev) => ({
         ...prev,
@@ -105,6 +114,7 @@ export const RemoteDesktopOptionsSection: React.FC<RemoteDesktopOptionsSectionPr
           <RdpResolutionFields
             form={form}
             setForm={setForm}
+            inheritedRdpConfig={groupDefaults?.rdpConfig}
             t={t}
             resolutionDraft={resolutionDraft}
             onResolutionDraftChange={onResolutionDraftChange}
@@ -224,7 +234,7 @@ export const RemoteDesktopOptionsSection: React.FC<RemoteDesktopOptionsSectionPr
                 onChange={(e) =>
                   updateRdp("loadBalanceInfo", e.target.value || undefined)
                 }
-                placeholder={t("hostDetails.rdp.loadBalanceInfoPlaceholder")}
+                placeholder={groupDefaults?.rdpConfig?.loadBalanceInfo || t("hostDetails.rdp.loadBalanceInfoPlaceholder")}
                 className="h-10 rounded-lg text-sm font-mono"
               />
             </div>
@@ -237,7 +247,7 @@ export const RemoteDesktopOptionsSection: React.FC<RemoteDesktopOptionsSectionPr
                 onChange={(e) =>
                   updateRdp("alternateShell", e.target.value || undefined)
                 }
-                placeholder={t("hostDetails.rdp.alternateShellPlaceholder")}
+                placeholder={groupDefaults?.rdpConfig?.alternateShell || t("hostDetails.rdp.alternateShellPlaceholder")}
                 className="h-10 rounded-lg text-sm font-mono"
               />
             </div>
@@ -250,7 +260,7 @@ export const RemoteDesktopOptionsSection: React.FC<RemoteDesktopOptionsSectionPr
                 onChange={(e) =>
                   updateRdp("shellWorkingDir", e.target.value || undefined)
                 }
-                placeholder={t("hostDetails.rdp.shellWorkingDirPlaceholder")}
+                placeholder={groupDefaults?.rdpConfig?.shellWorkingDir || t("hostDetails.rdp.shellWorkingDirPlaceholder")}
                 className="h-10 rounded-lg text-sm font-mono"
               />
             </div>
@@ -261,7 +271,10 @@ export const RemoteDesktopOptionsSection: React.FC<RemoteDesktopOptionsSectionPr
   }
 
   if (form.protocol === "vnc") {
-    const vnc = normalizeVncConfig(form.vncConfig);
+    const vnc = normalizeVncConfig({
+      ...(groupDefaults?.vncConfig ?? {}),
+      ...(form.vncConfig ?? {}),
+    });
     const updateVnc = <K extends keyof VncConfig>(key: K, value: VncConfig[K]) => {
       setForm((prev) => ({
         ...prev,
