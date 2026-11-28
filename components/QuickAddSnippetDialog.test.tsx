@@ -152,6 +152,10 @@ test("QuickAddSnippetDialog blocks shortkey recording while app lock overlay is 
   } finally {
     await act(async () => {
       root?.unmount();
+      // Radix schedules focus cleanup after unmount. Let it run while the
+      // JSDOM globals are still installed; restoring them first makes a
+      // deferred dispatch mix JSDOM and Node event classes.
+      await new Promise((resolve) => setTimeout(resolve, 100));
     });
     // Radix FocusScope dispatches its unmount autofocus CustomEvent in a 0ms setTimeout;
     // flush it before restoring globalThis.CustomEvent and closing the JSDOM window.

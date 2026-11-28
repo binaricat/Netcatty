@@ -53,6 +53,7 @@
     "check:codebuddy-sdk-contract": "tsc -p tsconfig.codebuddy-sdk-contract.json",
     "generate:plugin-contract": "node scripts/generate-plugin-contract.mjs",
     "generate:autocomplete-descriptions-zh-TW": "node scripts/generate-autocomplete-descriptions-zh-TW.mjs",
+    "generate:command-descriptions": "node --import tsx scripts/generate-command-descriptions.mjs",
     "check:plugin-contract": "node scripts/generate-plugin-contract.mjs --check",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

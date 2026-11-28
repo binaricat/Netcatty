@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const { execFile } = require("node:child_process");
+const { decodeLsofFileName } = require("./lsofEscape.cjs");
 
 const LSOF_TIMEOUT_MS = 2000;
 const LSOF_MAX_BUFFER_BYTES = 64 * 1024;
@@ -35,7 +36,10 @@ function parseLsofCwdOutput(stdout) {
       continue;
     }
     if (line.startsWith("n") && (!sawType || isDir)) {
-      name = line.slice(1);
+      const decoded = decodeLsofFileName(line.slice(1));
+      // Ambiguous caret escapes and invalid UTF-8 cannot be trusted as a path.
+      if (decoded === null) return null;
+      name = decoded;
     }
   }
   if (!isAbsolutePosixPath(name) || isAnnotatedLsofName(name)) return null;

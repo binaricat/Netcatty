@@ -117,7 +117,13 @@ test('long press opens the existing menu without running the short-click action'
     await act(async () => reconnectItem.click());
     assert.equal(reconnects, 1);
   } finally {
-    await act(async () => root.unmount());
+    await act(async () => {
+      root.unmount();
+      // Radix schedules focus cleanup after unmount. Let it run while the
+      // JSDOM globals are still installed; restoring them first makes a
+      // deferred dispatch mix JSDOM and Node event classes.
+      await new Promise(resolve => setTimeout(resolve, 100));
+    });
     window.close();
     for (const [key, previous] of previousGlobals) {
       if (previous) Object.defineProperty(globalThis, key, previous);

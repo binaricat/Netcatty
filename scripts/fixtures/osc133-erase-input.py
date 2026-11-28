@@ -48,7 +48,13 @@ def readline_ready():
     # PS1 can be printed before readline has installed its terminal handlers.
     # Ctrl-G's audible abort acknowledges that the input loop processed a key.
     os.write(master, b"\x07")
-    return drain(b"\x07")
+    data = drain(b"\x07")
+    # Bash 3.2 (macOS) erases the empty prompt with backspaces before echoing
+    # the Ctrl-G acknowledgement. That is readline redrawing its own prompt,
+    # not pending user input, so keep it out of the fresh-prompt capture.
+    if data.endswith("\x07"):
+        data = data[:-1].rstrip("\b") + "\x07"
+    return data
 
 
 # Each scenario starts with a fresh prompt so an intentionally conservative
@@ -184,6 +190,10 @@ for name, steps in cases:
         os.close(slave)
         slave = None
         prompt = drain(b"\x1b]133;B\x07") + readline_ready()
+        # Bash 3.2 erases the empty prompt with backspaces during startup and
+        # the Ctrl-G readiness probe. That is readline redrawing its own
+        # prompt, not pending user input, so the fresh-prompt capture drops it.
+        prompt = prompt.replace("\b", "")
         states = [dict(step="fresh prompt", raw=prompt, ready=True)]
         for step, keys, expected, ready in steps:
             os.write(master, keys)
@@ -199,12 +209,42 @@ for name, steps in cases:
             scenario["readline_line"] = proof.split("__READLINE_BEGIN__", 1)[1].split("__READLINE_END__", 1)[0]
         scenarios.append(scenario)
     finally:
+        # The vi/readline probe can leave a foreground job blocked on terminal
+        # I/O, where a direct SIGKILL is not reaped promptly on macOS. Close
+        # the master first so the session hangs up, then kill the whole
+        # process group (prepare_pty_child made the shell its leader).
+        try:
+            os.close(master)
+        except OSError:
+            pass
         if shell is not None:
-            shell.kill()
-            shell.wait(timeout=3)
+            try:
+                pgid = os.getpgid(shell.pid)
+            except ProcessLookupError:
+                pgid = None
+            if pgid == shell.pid:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    # The shell may have exited and its pid been reused while
+                    # the suite runs in parallel; fall back to the direct pid.
+                    try:
+                        shell.kill()
+                    except ProcessLookupError:
+                        pass
+            else:
+                try:
+                    shell.kill()
+                except ProcessLookupError:
+                    pass
+            try:
+                shell.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                # The capture is already complete; a stuck teardown must not
+                # discard the JSON the test is waiting for.
+                pass
         if slave is not None:
             os.close(slave)
-        os.close(master)
 
 rc_directory.cleanup()
 print(json.dumps(scenarios))

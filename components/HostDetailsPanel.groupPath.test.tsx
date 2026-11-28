@@ -74,7 +74,7 @@ async function withPanel(
 
 function groupPicker(renderer: ReactTestRenderer, kind: PanelKind) {
   return renderer.root.findAllByType(Combobox).find((picker) =>
-    kind === 'ssh' ? picker.props.createText === 'Create Group' : picker.props.placeholder === 'Select Group',
+    kind === 'ssh' ? picker.props.createText === 'Create group' : picker.props.placeholder === 'Select Group',
   )!;
 }
 

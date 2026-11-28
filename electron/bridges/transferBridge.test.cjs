@@ -2334,6 +2334,15 @@ test("local resume verification reports progress and destroys both readers on ca
       && options.end === verifyBytes - 1
     ) {
       const stream = new PassThrough();
+      // The real createReadStream owns options.fd via autoClose. A bare
+      // PassThrough would leave that FileHandle to GC, which Node treats as
+      // an uncaught error once the cancelled verification stream is dropped.
+      const handle = options.fd;
+      if (handle && typeof handle.close === "function") {
+        stream.once("close", () => { handle.close().catch(() => {}); });
+      } else if (typeof handle === "number") {
+        stream.once("close", () => { try { fs.closeSync(handle); } catch { /* ignore */ } });
+      }
       verificationStreams.push(stream);
       return stream;
     }

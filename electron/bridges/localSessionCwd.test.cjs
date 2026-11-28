@@ -18,6 +18,21 @@ test("parseLsofCwdOutput accepts a directory name and ignores annotations", () =
   assert.equal(parseLsofCwdOutput(""), null);
 });
 
+test("parseLsofCwdOutput decodes lsof byte escapes in non-ASCII paths", () => {
+  assert.equal(
+    parseLsofCwdOutput("p4242\nfcwd\nn/private/tmp/\\xe4\\xb8\\xad\\xe6\\x96\\x87 \\\\x41\n"),
+    "/private/tmp/中文 \\x41",
+  );
+  assert.equal(
+    parseLsofCwdOutput("p4242\nfcwd\nn/Users/me/\\xe9\\xa1\\xb9\\xe7\\x9b\\xae\n"),
+    "/Users/me/项目",
+  );
+  assert.equal(parseLsofCwdOutput("p4242\nfcwd\nn/tmp/a\\tb\n"), "/tmp/a\tb");
+  assert.equal(parseLsofCwdOutput("p4242\nfcwd\nn/tmp/\\101\n"), "/tmp/A");
+  // lsof's caret form cannot distinguish a BEL byte from literal "^G".
+  assert.equal(parseLsofCwdOutput("p4242\nfcwd\nn/tmp/^G\n"), null);
+});
+
 test("readLocalSessionCwd reads /proc cwd for a local shell pid", async () => {
   const result = await readLocalSessionCwd(
     { protocol: "local", proc: { pid: 42 } },

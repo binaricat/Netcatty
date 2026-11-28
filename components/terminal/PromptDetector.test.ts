@@ -947,4 +947,3 @@ test("detectPrompt recognizes standard root-directory shell prompts ending in :/
     assert.equal(result.isAtPrompt, false, nonPrompt);
   }
 });
-
