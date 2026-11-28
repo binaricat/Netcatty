@@ -953,16 +953,28 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 placeholder={t("vault.hosts.search.placeholder")}
                 className="flex-1"
                 inputClassName={cn(
+                  search && "pr-12",
                   isSearchQuickConnect &&
-                    "border-primary/50 ring-1 ring-primary/20",
+                    "pr-16 border-primary/50 ring-1 ring-primary/20",
                 )}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
                 rightAdornment={
-                  isSearchQuickConnect ? (
-                    <Zap size={14} className="text-primary" />
-                  ) : null
+                  search && (
+                    <div className="flex items-center gap-1">
+                      {isSearchQuickConnect && <Zap size={14} className="text-primary" />}
+                      <button
+                        type="button"
+                        aria-label={t("common.clear")}
+                        className="grid size-6 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setSearch("")}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )
                 }
               />
               <Button
