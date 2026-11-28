@@ -1,15 +1,22 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { activeTabStore } from '../../application/state/activeTabStore';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { usePluginVaultPages } from '../../application/state/usePluginVaultPages';
 import { usePluginViewBadges } from '../../application/state/usePluginViewBadges';
+import {
+  usePluginAiSidebarForView,
+  type PendingPluginSidebarPrompt,
+} from '../../application/state/usePluginAiSidebar';
 import { formatPluginViewBadgeAriaText, formatPluginViewBadgeLabel, isPluginViewBadgeVisible } from '../../domain/pluginViewBadge';
 import { PluginContributionIcon } from './PluginContributionIcon';
 import { PluginViewBadge } from './PluginViewBadge';
 import { Button } from '../ui/button';
 import { LazyPluginHostDrawnPage, prewarmPluginView } from './LazyPluginHostDrawnPage';
+import { PluginVaultAISidebar } from './PluginVaultAISidebar';
 
 type VaultPages = ReturnType<typeof usePluginVaultPages>;
 const subscribeHidden = (hide: () => void) => activeTabStore.subscribeSync((id) => { if (id !== 'vault') hide(); });
+let nextPluginPromptId = 1;
 
 export function PluginVaultNavigation({ model, collapsed }: { model: VaultPages; collapsed: boolean }) {
   const badgesByViewId = usePluginViewBadges(model.pages.length > 0);
@@ -50,8 +57,76 @@ export function PluginVaultNavigation({ model, collapsed }: { model: VaultPages;
 export function PluginVaultPage({ model }: { model: VaultPages }) {
   const { t } = useI18n();
   const page = model.selected!;
-  return <section className="flex min-h-0 flex-1 flex-col" aria-label={page.title} data-plugin-vault-page={page.key}>
-    <LazyPluginHostDrawnPage pluginId={page.pluginId} viewId={page.viewId} version={page.version} slot="vault-page" active={model.active} context={model.context}
-      subscribeHidden={subscribeHidden} unavailable={model.fallback} loadingLabel={t('plugins.vault.loading')} />
+  const [aiSidebarOpen, setAiSidebarOpen] = useState(false);
+  const [aiSidebarMounted, setAiSidebarMounted] = useState(false);
+  const [pendingPrompt, setPendingPrompt] = useState<PendingPluginSidebarPrompt | null>(null);
+  const activeRef = useRef(model.active);
+  activeRef.current = model.active;
+
+  const handleSidebarCommand = useCallback((command: NetcattyPluginAiSidebarCommand) => {
+    if (command.action === 'close') {
+      setAiSidebarOpen(false);
+      return;
+    }
+    if (command.action === 'open') {
+      if (!activeRef.current) return;
+      setAiSidebarMounted(true);
+      setAiSidebarOpen(true);
+      if (command.prompt && command.prompt.trim()) {
+        setPendingPrompt({
+          id: nextPluginPromptId++,
+          prompt: command.prompt.trim(),
+          autoSend: command.autoSend,
+        });
+      }
+    }
+  }, []);
+
+  const { turnContext, suggestedPrompts } = usePluginAiSidebarForView({
+    pluginId: page.pluginId,
+    pluginName: page.pluginName,
+    viewId: page.viewId,
+    enabled: true,
+    onCommand: handleSidebarCommand,
+  });
+
+  // Top-bar Sparkles AI button toggles the contextual Catty AI sidebar while this plugin page is active.
+  useEffect(() => {
+    if (!model.active) return;
+    const handleToggleAi = (event: Event) => {
+      event.preventDefault();
+      setAiSidebarMounted(true);
+      setAiSidebarOpen((prev) => !prev);
+    };
+    window.addEventListener('netcatty:toggle-ai-panel', handleToggleAi, { capture: true });
+    return () => window.removeEventListener('netcatty:toggle-ai-panel', handleToggleAi, { capture: true });
+  }, [model.active]);
+
+  const handleCloseAiSidebar = useCallback(() => {
+    setAiSidebarOpen(false);
+  }, []);
+
+  const handlePendingPromptConsumed = useCallback((id: number) => {
+    setPendingPrompt((prev) => (prev?.id === id ? null : prev));
+  }, []);
+
+  return <section className="flex min-h-0 flex-1 flex-row overflow-hidden" aria-label={page.title} data-plugin-vault-page={page.key}>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <LazyPluginHostDrawnPage pluginId={page.pluginId} viewId={page.viewId} version={page.version} slot="vault-page" active={model.active} context={model.context}
+        subscribeHidden={subscribeHidden} unavailable={model.fallback} loadingLabel={t('plugins.vault.loading')} />
+    </div>
+    {aiSidebarMounted && (
+      <PluginVaultAISidebar
+        pluginId={page.pluginId}
+        pluginName={page.pluginName}
+        viewId={page.viewId}
+        open={aiSidebarOpen}
+        onClose={handleCloseAiSidebar}
+        pluginContext={turnContext}
+        suggestedPrompts={suggestedPrompts}
+        pendingPrompt={pendingPrompt}
+        onPendingPromptConsumed={handlePendingPromptConsumed}
+      />
+    )}
   </section>;
 }

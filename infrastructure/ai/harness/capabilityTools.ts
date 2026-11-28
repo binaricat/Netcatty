@@ -1,7 +1,12 @@
-import { tool } from 'ai';
+import { jsonSchema, tool } from 'ai';
 import { z } from 'zod';
 import { SHELL_READINESS_UNKNOWN_CODE } from '../aiChatStreamingSupport';
 import type { ExecutorContext, NetcattyBridge } from '../cattyAgent/executor';
+import type {
+  PluginAISidebarToolSpec,
+  PluginDynamicToolPolicy,
+} from '../pluginAiSidebarTypes';
+import { netcattyBridge } from '../../services/netcattyBridge';
 import type { TerminalContextReadRange } from '../../../domain/terminalContextRead';
 import { normalizeAiToolOutputMaxChars } from '../../../domain/aiToolOutputLimit';
 import type { AIPermissionMode } from '../types';
@@ -116,6 +121,8 @@ export type CattyToolsBundle = {
    * in `prepareStep` into synthetic user image messages.
    */
   pendingScreenImages: PendingRemoteScreenImage[];
+  /** Dynamic approval/risk policies for plugin-contributed contextual tools. */
+  dynamicToolPolicies?: ReadonlyMap<string, PluginDynamicToolPolicy>;
 };
 
 function buildZodObject(shape: Record<string, FieldShape>): z.ZodObject<Record<string, z.ZodTypeAny>> {
@@ -1307,6 +1314,154 @@ export function buildCattyToolContext(input: {
   };
 }
 
+function stampPluginArtifactOrigin(
+  result: unknown,
+  spec: PluginAISidebarToolSpec,
+): unknown {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return result;
+  }
+  const record = result as Record<string, unknown>;
+  const artifact = record._netcattyArtifact;
+  if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) {
+    return result;
+  }
+  const artifactRecord = artifact as Record<string, unknown>;
+  if (artifactRecord.kind !== 'bi-chart' && artifactRecord.kind !== 'sql-result') {
+    return result;
+  }
+  const {
+    _netcattyPluginId: _ignoredPluginId,
+    _netcattyPluginName: _ignoredPluginName,
+    _netcattyViewId: _ignoredViewId,
+    _netcattyToolName: _ignoredToolName,
+    ...cleanArtifact
+  } = artifactRecord;
+  return {
+    ...record,
+    _netcattyArtifact: {
+      ...cleanArtifact,
+      _netcattyPluginId: spec.pluginId,
+      _netcattyPluginName: spec.pluginName,
+      ...(spec.viewId ? { _netcattyViewId: spec.viewId } : {}),
+      _netcattyToolName: spec.name,
+    },
+  };
+}
+
+function summarizePluginToolOutputForModel(
+  output: unknown,
+  spec: PluginAISidebarToolSpec,
+  chatSessionId?: string,
+  toolOutputStore?: ToolOutputStore,
+  maxStringChars?: number,
+): { type: 'text'; value: string } {
+  let modelPayload: unknown = output;
+  if (output && typeof output === 'object' && !Array.isArray(output)) {
+    const record = output as Record<string, unknown>;
+    const artifact = record._netcattyArtifact;
+    if (artifact && typeof artifact === 'object' && !Array.isArray(artifact)) {
+      const artifactRecord = artifact as Record<string, unknown>;
+      const rest: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(record)) {
+        if (k !== '_netcattyArtifact') rest[k] = v;
+      }
+      if (artifactRecord.kind === 'bi-chart') {
+        const chartSpec = artifactRecord.chartSpec && typeof artifactRecord.chartSpec === 'object'
+          ? artifactRecord.chartSpec as Record<string, unknown>
+          : null;
+        rest._netcattyArtifactSummary = {
+          renderedInline: true,
+          kind: 'bi-chart',
+          title: typeof artifactRecord.title === 'string' ? artifactRecord.title : undefined,
+          chartType: typeof chartSpec?.type === 'string' ? chartSpec.type : undefined,
+          hasPinAction: Boolean(artifactRecord.pinAction),
+          note: 'Interactive PluginBiChart was rendered directly inline in the chat UI for the user.',
+        };
+      } else if (artifactRecord.kind === 'sql-result') {
+        rest._netcattyArtifactSummary = {
+          renderedInline: true,
+          kind: 'sql-result',
+          title: typeof artifactRecord.title === 'string' ? artifactRecord.title : undefined,
+          rowCount: typeof artifactRecord.rowCount === 'number' ? artifactRecord.rowCount : undefined,
+          columns: Array.isArray(artifactRecord.columns) ? artifactRecord.columns.slice(0, 32) : undefined,
+          hasOpenAction: Boolean(artifactRecord.openAction),
+          note: 'SQL query result table preview was rendered directly inline in the chat UI for the user.',
+        };
+      }
+      modelPayload = rest;
+    }
+  }
+  const fitted = fitLargeToolResultForModel({
+    result: modelPayload,
+    capabilityId: `plugin.ai.tool.${spec.name}`,
+    chatSessionId,
+    toolOutputStore,
+    maxStringChars,
+    normalizeStrings: false,
+  });
+  const serialized = typeof fitted === 'string' ? fitted : JSON.stringify(fitted);
+  return {
+    type: 'text',
+    value: redactSecretsForModel(serialized ?? 'null', chatSessionId),
+  };
+}
+
+function createPluginAiTool(
+  spec: PluginAISidebarToolSpec,
+  sharedContext: CattyToolContext,
+): ReturnType<typeof tool> {
+  const normalizedSchema = {
+    type: 'object' as const,
+    properties: {},
+    ...(spec.inputSchema ?? {}),
+  };
+  const pluginTool = tool({
+    description: `[${spec.pluginName}] ${spec.description}`,
+    inputSchema: jsonSchema<Record<string, unknown>>(normalizedSchema),
+    contextSchema: cattyToolContextSchema,
+    execute: async (args, options) => {
+      const toolContext = (options as { context?: CattyToolContext } | undefined)?.context ?? sharedContext;
+      const deps = toolDepsFromContext(toolContext);
+      const bridgeWithPlugins = deps.bridge as (NetcattyBridge & {
+        invokePluginAiTool?: (payload: {
+          pluginId: string;
+          toolName: string;
+          args: Record<string, unknown>;
+          viewId?: string;
+          chatSessionId?: string;
+        }) => Promise<unknown>;
+      }) | undefined;
+      const invokeFn = bridgeWithPlugins?.invokePluginAiTool
+        ?? netcattyBridge.get()?.invokePluginAiTool;
+      if (typeof invokeFn !== 'function') {
+        return { error: `Plugin tool bridge is unavailable for "${spec.name}".` };
+      }
+      try {
+        const raw = await invokeFn({
+          pluginId: spec.pluginId,
+          toolName: spec.name,
+          args: (args && typeof args === 'object' && !Array.isArray(args)) ? args : {},
+          ...(spec.viewId ? { viewId: spec.viewId } : {}),
+          ...(deps.chatSessionId ? { chatSessionId: deps.chatSessionId } : {}),
+        });
+        return stampPluginArtifactOrigin(raw, spec);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { error: message || `Plugin tool "${spec.name}" failed.` };
+      }
+    },
+  });
+  pluginTool.toModelOutput = ({ output }) => summarizePluginToolOutputForModel(
+    output,
+    spec,
+    sharedContext.chatSessionId,
+    sharedContext.toolOutputStore,
+    sharedContext.toolOutputMaxChars,
+  );
+  return pluginTool as ReturnType<typeof tool>;
+}
+
 export function createCattyToolsFromCatalog(
   bridge: NetcattyBridge,
   context: ToolDeps['context'],
@@ -1324,6 +1479,7 @@ export function createCattyToolsFromCatalog(
     modelVisionSupport?: VisionSupport;
     activeModelId?: string;
     pendingScreenImages?: PendingRemoteScreenImage[];
+    pluginTools?: readonly PluginAISidebarToolSpec[];
   },
 ): CattyToolsBundle {
   const sharedContext = buildCattyToolContext({
@@ -1374,7 +1530,24 @@ export function createCattyToolsFromCatalog(
     toolsContext[rawSpec.toolName] = sharedContext;
   }
 
-  return { tools: catalogTools, toolsContext, pendingScreenImages };
+  let dynamicToolPolicies: Map<string, PluginDynamicToolPolicy> | undefined;
+  const pluginTools = selection?.pluginTools ?? [];
+  if (pluginTools.length > 0) {
+    dynamicToolPolicies = new Map();
+    for (const pluginSpec of pluginTools) {
+      if (!pluginSpec.qualifiedName || Object.prototype.hasOwnProperty.call(catalogTools, pluginSpec.qualifiedName)) {
+        continue;
+      }
+      catalogTools[pluginSpec.qualifiedName] = createPluginAiTool(pluginSpec, sharedContext);
+      toolsContext[pluginSpec.qualifiedName] = sharedContext;
+      dynamicToolPolicies.set(pluginSpec.qualifiedName, {
+        write: pluginSpec.risk === 'write',
+        capabilityId: `plugin.ai.tool:${pluginSpec.pluginId}:${pluginSpec.name}`,
+      });
+    }
+  }
+
+  return { tools: catalogTools, toolsContext, pendingScreenImages, dynamicToolPolicies };
 }
 
 /** Test helper: attach shared context when calling tool.execute directly. */

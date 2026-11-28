@@ -6,7 +6,7 @@ const MAX_HISTORY_CACHE_ENTRIES_PER_SESSION_LIST = 64;
 const historyCache = new WeakMap<AISession[], Map<HistoryCacheKey, AISession[]>>();
 
 function buildHistoryCacheKey(
-  scopeType: 'terminal' | 'workspace',
+  scopeType: 'terminal' | 'workspace' | 'global',
   scopeTargetId: string | undefined,
   scopeHostIds: string[] | undefined,
   activeTerminalSessionIds: Set<string>,
@@ -26,7 +26,7 @@ function buildHistoryCacheKey(
 
 export function getScopedHistorySessions(
   sessions: AISession[],
-  scopeType: 'terminal' | 'workspace',
+  scopeType: 'terminal' | 'workspace' | 'global',
   scopeTargetId: string | undefined,
   scopeHostIds: string[] | undefined,
   activeTerminalSessionIds: Set<string>,
@@ -103,7 +103,7 @@ export function _getScopedHistoryCacheSizeForTests(sessions: AISession[]): numbe
  */
 export function getPreferredAutoResumeSessionId(
   historySessions: readonly AISession[],
-  scopeType: 'terminal' | 'workspace',
+  scopeType: 'terminal' | 'workspace' | 'global',
   scopeTargetId: string | undefined,
   scopeHostIds: string[] | undefined,
   activeTerminalSessionIds: Set<string>,

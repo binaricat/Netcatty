@@ -346,6 +346,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   onOpenVaultHost,
   onOpenVaultSnippet,
   onOpenVaultSection,
+  pluginContext = null,
+  pluginSuggestedPrompts,
+  pendingPluginPrompt = null,
+  onPendingPluginPromptConsumed,
+  onClosePanel,
+  borderlessChrome = false,
 }) => {
   const { t } = useI18n();
   const scopeKey = `${scopeType}:${scopeTargetId ?? ''}`;
@@ -622,7 +628,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const liveTargets = new Set(liveScopeTargetIds ?? workspaceMemberTerminalIds ?? []);
     for (const workspace of workspaces) liveTargets.add(workspace.id);
     liveTargets.add(scopeTargetId);
-    if (canRebindChat(session, liveTargets)) {
+    if (canRebindChat(session, liveTargets) && (scopeType === 'terminal' || scopeType === 'workspace')) {
       // Same race as the manager rebind: stop any in-flight turn first so the
       // scope rewrite never happens under a live stream.
       await stopActiveTurnBeforeScopeRebind(target.sessionId, {
@@ -1687,7 +1693,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   }, [updateSessionTitle]);
 
   const buildExecutorContextForScope = useCallback((scope: {
-    type: 'terminal' | 'workspace';
+    type: 'terminal' | 'workspace' | 'global';
     targetId?: string;
     label?: string;
   }): ExecutorContext => {
@@ -2002,6 +2008,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           autoTitleSession,
           selectedUserSkillSlugs: selectedSkillSlugs,
           titleText,
+          pluginContext,
         }, modelAttachments.length > 0 ? modelAttachments : undefined);
       }
     } finally {
@@ -2024,6 +2031,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     clearScopeDraft, showScopeSessionView, setActiveSessionId,
     flushDraftText, currentAgentConfig, buildExternalAgentRuntimeModelTarget,
     loadSdkRuntimeModelCatalog, applySdkRuntimeModelCatalog, collectCustomModelIds,
+    pluginContext,
   ]);
 
   const handleCompact = useCallback(async () => {
@@ -2074,6 +2082,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           autoTitleSession: () => {},
           selectedUserSkillSlugs: [],
           forceCompaction: true,
+          pluginContext,
         },
       );
     } finally {
@@ -2096,6 +2105,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     selectedCattyThinking,
     globalPermissionMode,
     isStreaming,
+    pluginContext,
     scopeKey,
     scopeLabel,
     scopeTargetId,
@@ -2318,7 +2328,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       && session.scope.type === scopeType
       && session.scope.targetId === scopeTargetId,
     );
-    if (isAlreadyInScope || !scopeTargetId || !rebindSessionScope) {
+    if (isAlreadyInScope || !scopeTargetId || !rebindSessionScope || scopeType === 'global') {
       handleSelectSession(sessionId);
       return;
     }
@@ -2435,24 +2445,28 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   }, [exportSessionsBackup, t]);
 
   const globalManagerNode = useMemo(() => (
-    <GlobalAIChatSessionManager
-      sessions={sessions}
-      activeSessionIdMap={activeSessionIdMap}
-      currentScopeType={scopeType}
-      currentScopeTargetId={scopeTargetId}
-      currentScopeHostIds={scopeHostIds}
-      workspaces={workspaces}
-      terminalInfos={managerTerminalInfos}
-      hosts={hosts}
-      externalAgents={externalAgents}
-      rebindTargets={managerRebindTargets}
-      onSelect={(sessionId) => { void handleManagerActivate(sessionId); }}
-      onFocusScope={onFocusAIScopeTarget ? handleManagerFocusScope : undefined}
-      onRebind={handleManagerRebind}
-      onRename={handleRenameSession}
-      onDelete={(sessionId) => { void handleManagerDelete(sessionId); }}
-      onExport={handleManagerExport}
-    />
+    scopeType === 'global'
+      ? undefined
+      : (
+          <GlobalAIChatSessionManager
+            sessions={sessions}
+            activeSessionIdMap={activeSessionIdMap}
+            currentScopeType={scopeType}
+            currentScopeTargetId={scopeTargetId}
+            currentScopeHostIds={scopeHostIds}
+            workspaces={workspaces}
+            terminalInfos={managerTerminalInfos}
+            hosts={hosts}
+            externalAgents={externalAgents}
+            rebindTargets={managerRebindTargets}
+            onSelect={(sessionId) => { void handleManagerActivate(sessionId); }}
+            onFocusScope={onFocusAIScopeTarget ? handleManagerFocusScope : undefined}
+            onRebind={handleManagerRebind}
+            onRename={handleRenameSession}
+            onDelete={(sessionId) => { void handleManagerDelete(sessionId); }}
+            onExport={handleManagerExport}
+          />
+        )
   ), [
     sessions,
     activeSessionIdMap,
@@ -2485,6 +2499,22 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }));
     setShowHistory(false);
   }, [ensureScopeDraft, showScopeDraftView, updateScopeDraft]);
+
+  const consumedPluginPromptIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!pendingPluginPrompt) return;
+    if (consumedPluginPromptIdRef.current === pendingPluginPrompt.id) return;
+    consumedPluginPromptIdRef.current = pendingPluginPrompt.id;
+    onPendingPluginPromptConsumed?.(pendingPluginPrompt.id);
+    const trimmedPrompt = pendingPluginPrompt.prompt.trim();
+    if (!trimmedPrompt) return;
+    setShowHistory(false);
+    if (pendingPluginPrompt.autoSend && !isStreaming) {
+      void handleSend(trimmedPrompt);
+    } else {
+      setInputValue(trimmedPrompt);
+    }
+  }, [handleSend, isStreaming, onPendingPluginPromptConsumed, pendingPluginPrompt, setInputValue]);
 
   // Hidden retained panels keep the composer mounted (parent is `hidden` +
   // inert) so reopen does not remount ChatInput. Skip the message list.
@@ -2609,6 +2639,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         onOpenVaultHost={onOpenVaultHost}
         onOpenVaultSnippet={onOpenVaultSnippet}
         onOpenVaultSection={onOpenVaultSection}
+        pluginContext={pluginContext}
+        pluginSuggestedPrompts={pluginSuggestedPrompts}
+        onClosePanel={onClosePanel}
+        borderlessChrome={borderlessChrome}
       />
       </div>
     </React.Profiler>
@@ -2698,6 +2732,12 @@ export function aiChatSidePanelPropsAreEqual(
   if (prev.onOpenVaultSnippet !== next.onOpenVaultSnippet) return false;
   if (prev.onOpenVaultSection !== next.onOpenVaultSection) return false;
   if (prev.onFocusAIScopeTarget !== next.onFocusAIScopeTarget) return false;
+  if (prev.pluginContext !== next.pluginContext) return false;
+  if (prev.pluginSuggestedPrompts !== next.pluginSuggestedPrompts) return false;
+  if (prev.pendingPluginPrompt !== next.pendingPluginPrompt) return false;
+  if (prev.onPendingPluginPromptConsumed !== next.onPendingPluginPromptConsumed) return false;
+  if (prev.onClosePanel !== next.onClosePanel) return false;
+  if (prev.borderlessChrome !== next.borderlessChrome) return false;
 
   const scopeKey = `${prev.scopeType}:${prev.scopeTargetId ?? ''}`;
   if (

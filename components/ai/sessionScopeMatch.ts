@@ -2,7 +2,7 @@ import type { AISession } from "../../infrastructure/ai/types";
 
 export function getSessionScopeMatchRank(
   session: AISession,
-  scopeType: "terminal" | "workspace",
+  scopeType: "terminal" | "workspace" | "global",
   scopeTargetId?: string,
   scopeHostIds?: string[],
   /**
@@ -37,6 +37,7 @@ export function getSessionScopeMatchRank(
 
   if (session.scope.type !== scopeType) return 0;
   if (session.scope.targetId === scopeTargetId) return 3;
+  if (scopeType === "global") return 0;
 
   if (scopeType === "terminal" && activeTerminalSessionIds?.has(session.id)) {
     return 0;

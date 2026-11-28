@@ -70,7 +70,11 @@ export function pruneInactiveScopedSessions(
   orphanedSessionIds: string[];
 } {
   const orphanedSessionIds = sessions
-    .filter((session) => session.scope.targetId && !activeTargetIds.has(session.scope.targetId))
+    .filter((session) => (
+      (session.scope.type === "terminal" || session.scope.type === "workspace")
+      && session.scope.targetId
+      && !activeTargetIds.has(session.scope.targetId)
+    ))
     .filter((session) => !activeSessionIds.has(session.id))
     .map((session) => session.id);
 

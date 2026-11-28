@@ -192,6 +192,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     toolApproval: runtimeContext.delegated ? undefined : buildCattyToolApproval({
       permissionMode: runtimeContext.permissionMode,
       chatSessionId: runtimeContext.chatSessionId,
+      dynamicToolPolicies: toolsBundle.dynamicToolPolicies,
     }),
     // The SDK evaluates stopWhen only when tool work would allow another
     // step. A natural final reply (even on the last allowed step) bypasses it.

@@ -1,6 +1,10 @@
-import React, { type Dispatch, type SetStateAction } from 'react';
-import { History, Plus, Undo2, X } from 'lucide-react';
+import React, { useState, type Dispatch, type SetStateAction } from 'react';
+import { History, Plus, Sparkles, Undo2, Wrench, X } from 'lucide-react';
 import type { AIPermissionMode, AISession, ChatMessage, DiscoveredAgent, ExternalAgentConfig, AgentModelPreset, ProviderConfig, UploadedFile } from '../infrastructure/ai/types';
+import type {
+  PluginAISidebarPrompt,
+  PluginAISidebarTurnContext,
+} from '../infrastructure/ai/pluginAiSidebarTypes';
 import type { Host, VaultNote } from '../types';
 import type { UserSkillOption } from './ai/userSkillsState';
 import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
@@ -135,6 +139,11 @@ interface AIChatPanelContentProps {
   parked?: boolean;
   /** Disable header transitions while send preflight is in flight. */
   sending?: boolean;
+  /** Contextual plugin view metadata & registered tools injected into Catty Agent. */
+  pluginContext?: PluginAISidebarTurnContext | null;
+  pluginSuggestedPrompts?: readonly PluginAISidebarPrompt[];
+  onClosePanel?: () => void;
+  borderlessChrome?: boolean;
 }
 
 export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
@@ -224,7 +233,12 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   onOpenVaultSection,
   parked = false,
   sending = false,
+  pluginContext = null,
+  pluginSuggestedPrompts,
+  onClosePanel,
+  borderlessChrome = false,
 }) => {
+  const [showPluginTools, setShowPluginTools] = useState(false);
   const handleContinue = React.useCallback(() => handleSend(t('ai.chat.continue')), [handleSend, t]);
   const mentionHosts = React.useMemo(
     () => terminalSessions.map((session) => ({
@@ -269,7 +283,9 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
         <React.Profiler {...getAIPanelProfilerProps('AIChatPanel.Header')}>
           <div className={cn(
             TERMINAL_SIDE_PANEL_INNER_HEADER_CLASS,
-            'px-2 flex items-center justify-between border-b border-border/50',
+            borderlessChrome
+              ? 'px-2.5 flex items-center justify-between'
+              : 'px-2 flex items-center justify-between border-b border-border/50',
           )}>
             <AgentSelector
               currentAgentId={currentAgentId}
@@ -334,9 +350,77 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                 </TooltipTrigger>
                 <TooltipContent>{t('ai.chat.newChat')}</TooltipContent>
               </Tooltip>
+              {onClosePanel && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 rounded-md text-muted-foreground/62 hover:bg-white/[0.05] hover:text-foreground"
+                      aria-label={t('common.close')}
+                      onClick={onClosePanel}
+                    >
+                      <X size={13} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('common.close')}</TooltipContent>
+                </Tooltip>
+              )}
             </div>
           </div>
         </React.Profiler>
+      )}
+
+      {/* ── Borderless Plugin Context Strip ── */}
+      {!parked && pluginContext && !showHistory && (
+        <div
+          data-section="plugin-ai-context-strip"
+          className="shrink-0 px-3 pt-2 pb-1"
+        >
+          <div className="rounded-xl bg-muted/30 dark:bg-white/[0.035] px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2 min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Sparkles size={12} className="shrink-0 text-primary/80" />
+                <span className="truncate text-[12px] font-medium text-foreground/90">
+                  {pluginContext.title || pluginContext.pluginName}
+                </span>
+              </div>
+              {pluginContext.tools.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowPluginTools((prev) => !prev)}
+                  className={cn(
+                    'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium transition-colors cursor-pointer',
+                    showPluginTools
+                      ? 'bg-primary/15 text-primary'
+                      : 'bg-background/60 text-muted-foreground hover:bg-background hover:text-foreground',
+                  )}
+                >
+                  <Wrench size={10} />
+                  <span>{pluginContext.tools.length} tools</span>
+                </button>
+              )}
+            </div>
+            {pluginContext.subtitle && (
+              <p className="mt-0.5 truncate text-[11px] text-muted-foreground/75">
+                {pluginContext.subtitle}
+              </p>
+            )}
+            {showPluginTools && pluginContext.tools.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1 pt-1.5 border-t border-border/20">
+                {pluginContext.tools.map((tool) => (
+                  <span
+                    key={tool.qualifiedName}
+                    title={tool.description}
+                    className="inline-flex items-center gap-1 rounded-md bg-background/65 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                  >
+                    <span>{tool.name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ── Main content ── */}
@@ -374,6 +458,28 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                 onOpenVaultSection={onOpenVaultSection}
               />
             </React.Profiler>
+          )}
+
+          {/* Borderless Plugin Starter Prompt Chips (when chat is empty) */}
+          {!parked && messages.length === 0 && pluginSuggestedPrompts && pluginSuggestedPrompts.length > 0 && (
+            <div
+              data-section="plugin-ai-suggested-prompts"
+              className="shrink-0 px-3 pb-2"
+            >
+              <div className="flex flex-wrap gap-1.5">
+                {pluginSuggestedPrompts.map((item, idx) => (
+                  <button
+                    key={`${item.label}-${idx}`}
+                    type="button"
+                    disabled={sending || isStreaming || !canSendCurrentAgent}
+                    onClick={() => handleSend(item.prompt)}
+                    className="rounded-lg bg-muted/35 dark:bg-white/[0.045] hover:bg-muted/65 dark:hover:bg-white/[0.09] px-2.5 py-1.5 text-left text-[11.5px] leading-snug text-foreground/80 hover:text-foreground transition-colors cursor-pointer disabled:pointer-events-none disabled:opacity-45"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           {/* Recent sessions (Zed-style, shown when no messages) */}

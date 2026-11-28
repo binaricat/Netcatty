@@ -997,6 +997,10 @@ export type PluginAIChatResult = {
   expiresAt: number;
 };
 
+export type PluginAICloseSidebarParams = {
+  viewId?: ContributionId;
+};
+
 export type PluginAIContextLimits = {"contexts":4,"inputBytes":16384,"chunkBytes":4096,"outputBytes":32768,"outputTokens":2048,"turnMs":60000};
 
 export type PluginAIEmptyParams = Record<string, never>;
@@ -1135,7 +1139,35 @@ export type PluginAIHostSelectedSummary = {
   version: string;
 };
 
+export type PluginAIInvokeToolParams = {
+  toolName: string;
+  args: { [key: string]: JsonValue };
+  viewId?: ContributionId;
+  chatSessionId?: string;
+};
+
 export type PluginAIModelInvocationFeature = "ai.model-invocation";
+
+export type PluginAIOpenSidebarParams = {
+  viewId?: ContributionId;
+  prompt?: string;
+  autoSend?: boolean;
+};
+
+export type PluginAIRegisterToolsParams = {
+  viewId?: ContributionId;
+  tools: Array<PluginAIToolDefinition>;
+};
+
+export type PluginAISetContextParams = {
+  viewId: ContributionId;
+  title?: string;
+  subtitle?: string;
+  summary?: string;
+  suggestedPrompts?: Array<PluginAISuggestedPrompt>;
+};
+
+export type PluginAISidebarToolsFeature = "ai.sidebar-tools";
 
 export type PluginAIStartTurnParams = {
   chatHandle: string;
@@ -1157,6 +1189,21 @@ export type PluginAIStreamEvent = ({
   kind: "end";
   sequence: number;
 });
+
+export type PluginAISuggestedPrompt = {
+  label: string;
+  prompt: string;
+};
+
+export type PluginAIToolDefinition = {
+  name: string;
+  description: string;
+  inputSchema: { [key: string]: JsonValue };
+  risk?: PluginAIToolRisk;
+  viewId?: ContributionId;
+};
+
+export type PluginAIToolRisk = "read" | "write";
 
 export type PluginAITurnRef = {
   turnHandle: string;

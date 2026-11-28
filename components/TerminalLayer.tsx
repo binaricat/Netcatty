@@ -2348,7 +2348,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // here dismisses the panel.
   const handleToggleAiFromTopBar = useCallback(() => {
     const tabId = activeTabIdRef.current;
-    if (!tabId) return;
+    if (!tabId || tabId === 'vault') return;
 
     const intent = resolveAiSidePanelToggleIntent(
       sidePanelOpenTabsRef.current.get(tabId) ?? null,

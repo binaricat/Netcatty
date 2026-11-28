@@ -242,6 +242,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       supportsMultimodalToolResult,
       modelVisionSupport,
       activeModelId,
+      pluginTools: context.pluginContext?.tools,
     },
   );
   const { tools } = toolsBundle;
@@ -253,6 +254,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     permissionMode: context.globalPermissionMode,
     webSearchEnabled: isWebSearchReady(context.webSearchConfig),
     userSkillsContext,
+    pluginContext: context.pluginContext,
   });
 
   if (!context.activeProvider) {

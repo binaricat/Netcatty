@@ -339,6 +339,10 @@ declare global {
     onPluginContributionsChanged?(callback: (event: { reason: string; pluginId: string | null; revision: number }) => void): () => void;
     listPluginViewBadges?(): Promise<ReadonlyArray<NetcattyPluginViewBadge>>;
     onPluginViewBadgesChanged?(callback: (badges: ReadonlyArray<NetcattyPluginViewBadge>) => void): () => void;
+    getPluginAiSidebarState?(): Promise<NetcattyPluginAiSidebarState>;
+    onPluginAiSidebarStateChanged?(callback: (state: NetcattyPluginAiSidebarState) => void): () => void;
+    onPluginAiSidebarCommand?(callback: (command: NetcattyPluginAiSidebarCommand) => void): () => void;
+    invokePluginAiTool?(payload: NetcattyPluginAiToolInvokeRequest): Promise<unknown>;
     onPluginViewClosed?(callback: (event: NetcattyPluginViewClosedEvent) => void): () => void;
     getPluginScopeCatalog?(): Promise<NetcattyPluginScopeCatalog>;
     setPluginScopeCatalog?(catalog: NetcattyPluginScopeCatalog): Promise<void>;
@@ -521,6 +525,55 @@ declare global {
   type NetcattyPluginViewOpenRequest = import('@netcatty/plugin-contract').HostDrawnViewOpenRequest;
 
   type NetcattyPluginViewBadge = import('@netcatty/plugin-contract').PluginViewBadge;
+
+  interface NetcattyPluginAiSidebarPrompt {
+    readonly label: string;
+    readonly prompt: string;
+  }
+
+  interface NetcattyPluginAiSidebarContext {
+    readonly pluginId: string;
+    readonly pluginName: string;
+    readonly viewId: string;
+    readonly title?: string;
+    readonly subtitle?: string;
+    readonly summary?: string;
+    readonly suggestedPrompts?: ReadonlyArray<NetcattyPluginAiSidebarPrompt>;
+    readonly updatedAt: number;
+  }
+
+  interface NetcattyPluginAiSidebarTool {
+    readonly pluginId: string;
+    readonly pluginName: string;
+    readonly name: string;
+    readonly qualifiedName: string;
+    readonly description: string;
+    readonly inputSchema: Readonly<Record<string, unknown>>;
+    readonly risk: 'read' | 'write';
+    readonly viewId?: string;
+  }
+
+  interface NetcattyPluginAiSidebarState {
+    readonly contexts: ReadonlyArray<NetcattyPluginAiSidebarContext>;
+    readonly tools: ReadonlyArray<NetcattyPluginAiSidebarTool>;
+  }
+
+  interface NetcattyPluginAiSidebarCommand {
+    readonly action: 'open' | 'close';
+    readonly pluginId: string;
+    readonly viewId: string;
+    readonly prompt?: string;
+    readonly autoSend?: boolean;
+    readonly timestamp: number;
+  }
+
+  interface NetcattyPluginAiToolInvokeRequest {
+    readonly pluginId: string;
+    readonly toolName: string;
+    readonly args: Readonly<Record<string, unknown>>;
+    readonly viewId?: string;
+    readonly chatSessionId?: string;
+  }
 
   interface NetcattyPluginViewClosedEvent {
     instanceId: string;

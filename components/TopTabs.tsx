@@ -1294,7 +1294,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 size="icon"
                 className="h-7 w-7 shrink-0 app-no-drag top-tab-utility-btn"
                 style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-                onClick={() => window.dispatchEvent(new CustomEvent('netcatty:toggle-ai-panel'))}
+                onClick={() => window.dispatchEvent(new CustomEvent('netcatty:toggle-ai-panel', { cancelable: true }))}
               >
                 <Sparkles size={16} />
               </Button>

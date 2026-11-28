@@ -797,12 +797,78 @@ export interface PluginNetworkClient {
   connect(request: import("@netcatty/plugin-contract").ByteStreamConnectRequest, cancellationToken?: CancellationToken): Promise<PluginByteConnection>;
 }
 
+export interface PluginAIToolArtifactAction {
+  readonly toolName: string;
+  readonly label?: string;
+  readonly args: Readonly<Record<string, JsonValue>>;
+}
+
+export interface PluginBiChartToolArtifactKpi {
+  readonly label: string;
+  readonly value: string;
+  readonly delta?: string;
+  readonly tone?: "default" | "positive" | "negative" | "warning";
+}
+
+export interface PluginBiChartToolArtifact {
+  readonly kind: "bi-chart";
+  readonly title?: string;
+  readonly subtitle?: string;
+  readonly chartSpec: Readonly<Record<string, JsonValue>>;
+  readonly kpis?: readonly PluginBiChartToolArtifactKpi[];
+  readonly sql?: string;
+  readonly pinAction?: PluginAIToolArtifactAction;
+  readonly openAction?: PluginAIToolArtifactAction;
+}
+
+export interface PluginSqlResultToolArtifact {
+  readonly kind: "sql-result";
+  readonly title?: string;
+  readonly sql: string;
+  readonly columns: readonly string[];
+  readonly rows: readonly (readonly JsonValue[])[];
+  readonly rowCount: number;
+  readonly totalRows?: number;
+  readonly durationMs?: number;
+  readonly truncated?: boolean;
+  readonly openAction?: PluginAIToolArtifactAction;
+  readonly chartAction?: PluginAIToolArtifactAction;
+}
+
+export type PluginAIToolArtifact = PluginBiChartToolArtifact | PluginSqlResultToolArtifact;
+
+export interface PluginAIToolExecutionContext {
+  readonly viewId?: string;
+  readonly chatSessionId?: string;
+  readonly cancellationToken: CancellationToken;
+}
+
+export type PluginAIToolExecutor = (
+  toolName: string,
+  args: Readonly<Record<string, JsonValue>>,
+  meta: PluginAIToolExecutionContext,
+) => JsonValue | Promise<JsonValue>;
+
 export interface PluginAIClient {
   openChat(params: import("@netcatty/plugin-contract").PluginAIEmptyParams): Promise<import("@netcatty/plugin-contract").PluginAIChatResult>;
   startTurn(params: import("@netcatty/plugin-contract").PluginAIStartTurnParams): Promise<import("@netcatty/plugin-contract").PluginAITurnResult>;
   readTurn(params: import("@netcatty/plugin-contract").PluginAITurnRef): Promise<import("@netcatty/plugin-contract").PluginAIStreamEvent>;
   stopTurn(params: import("@netcatty/plugin-contract").PluginAITurnRef): Promise<import("@netcatty/plugin-contract").PluginAIBooleanResult>;
   closeChat(params: import("@netcatty/plugin-contract").PluginAIChatRef): Promise<import("@netcatty/plugin-contract").PluginAIBooleanResult>;
+  /** Register contextual tools for the native Catty Agent sidebar (requires feature "ai.sidebar-tools" + permission "ai.invoke"). */
+  registerTools(
+    tools: readonly import("@netcatty/plugin-contract").PluginAIToolDefinition[],
+    executor: PluginAIToolExecutor,
+    options?: Readonly<{ viewId?: string }>,
+  ): Promise<Disposable>;
+  /** Publish live contextual summary and starter prompts for the active plugin view in the Catty Agent sidebar. */
+  setContext(params: import("@netcatty/plugin-contract").PluginAISetContextParams): Promise<void>;
+  /** Clear contextual summary and starter prompts for a plugin view. */
+  clearContext(viewId: string): Promise<void>;
+  /** Open or focus the native Catty Agent contextual sidebar for this plugin view. */
+  openSidebar(params?: import("@netcatty/plugin-contract").PluginAIOpenSidebarParams): Promise<void>;
+  /** Close the native Catty Agent contextual sidebar for this plugin view. */
+  closeSidebar(params?: import("@netcatty/plugin-contract").PluginAICloseSidebarParams): Promise<void>;
 }
 
 export interface PluginSelectedContextClient {
@@ -1121,7 +1187,7 @@ export function throwIfCancellationRequested(token: CancellationToken): void {
 
 export { PLUGIN_NETWORK_CREDENTIAL_LEASE_FEATURE } from "@netcatty/plugin-contract";
 export { PLUGIN_BYTE_STREAM_FEATURE, PLUGIN_HOST_BYTE_STREAM_FEATURE, PLUGIN_BYTE_STREAM_LIMITS } from "@netcatty/plugin-contract";
-export { PLUGIN_AI_MODEL_INVOCATION_FEATURE, PLUGIN_SELECTED_CONTEXT_FEATURE } from "@netcatty/plugin-contract";
+export { PLUGIN_AI_MODEL_INVOCATION_FEATURE, PLUGIN_AI_SIDEBAR_TOOLS_FEATURE, PLUGIN_SELECTED_CONTEXT_FEATURE } from "@netcatty/plugin-contract";
 
 export { PLUGIN_HOST_INTERACTION_FEATURE } from "@netcatty/plugin-contract";
 export { PLUGIN_HOST_VAULT_FEATURE } from "@netcatty/plugin-contract";

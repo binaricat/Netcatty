@@ -77,6 +77,7 @@ export interface CattyTurnContext {
   titleText?: string;
   selectedUserSkillSlugs?: string[];
   forceCompaction?: boolean;
+  pluginContext?: import('../../pluginAiSidebarTypes').PluginAISidebarTurnContext | null;
 }
 
 export interface ExternalTurnContext {
