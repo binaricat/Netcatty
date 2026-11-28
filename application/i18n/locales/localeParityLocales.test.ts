@@ -8,12 +8,6 @@ import ru from "./ru.ts";
 import zhCN from "./zh-CN.ts";
 import zhTW from "./zh-TW.ts";
 
-// Locales that are not at full key parity with `en` yet. They are tracked here
-// so the remaining debt stays visible instead of silently rendering in English
-// through the `DEFAULT_UI_LOCALE` fallback in `I18nProvider.resolveMessage`.
-// Move a locale out of this list once it covers every `en` key.
-const LOCALES_PENDING_PARITY = ["ru"] as const;
-
 const hasKey = (messages: Record<string, string>, key: string) =>
   Object.hasOwn(messages, key);
 
@@ -110,7 +104,7 @@ test("en shortcut labels stay identical to DEFAULT_KEY_BINDINGS", () => {
   }
 });
 
-test("every locale outside the pending list is at full parity with en", () => {
+test("every translated locale defines every message key from en", () => {
   const locales = [
     { name: "es", messages: es },
     { name: "ru", messages: ru },
@@ -119,10 +113,6 @@ test("every locale outside the pending list is at full parity with en", () => {
   ];
 
   for (const locale of locales) {
-    if ((LOCALES_PENDING_PARITY as readonly string[]).includes(locale.name)) {
-      continue;
-    }
-
     const missing = Object.keys(en).filter(
       (key) => !hasKey(locale.messages, key),
     );
