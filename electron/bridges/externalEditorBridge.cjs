@@ -74,6 +74,116 @@ function buildSshBridgeConfigBlock({
   ].join("\n");
 }
 
+const SAMPLE_BRIDGE_HOSTNAMES = ["a.netcatty", "host-01234567.netcatty"];
+
+function sshGlobToRegExp(pattern) {
+  let regexStr = "^";
+  for (let i = 0; i < pattern.length; i += 1) {
+    const ch = pattern[i];
+    if (ch === "*") regexStr += ".*";
+    else if (ch === "?") regexStr += ".";
+    else regexStr += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  regexStr += "$";
+  return new RegExp(regexStr, "i");
+}
+
+function tokenizeSshConfigArgs(rawArgs) {
+  const tokens = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < rawArgs.length; i += 1) {
+    const ch = rawArgs[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && (ch === " " || ch === "\t")) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (current.length > 0) tokens.push(current);
+  return tokens;
+}
+
+function sshPatternListMatchesHost(patterns, hostname) {
+  let matchedPositive = false;
+  for (const rawPattern of patterns) {
+    if (!rawPattern) continue;
+    const negated = rawPattern.startsWith("!");
+    const pat = negated ? rawPattern.slice(1) : rawPattern;
+    if (!pat) continue;
+    if (sshGlobToRegExp(pat).test(hostname)) {
+      if (negated) return false;
+      matchedPositive = true;
+    }
+  }
+  return matchedPositive;
+}
+
+function sshConfigLineMatchesBridgeHost(line) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("#")) return false;
+  const match = /^(host|match)(?:[ \t]+|[ \t]*=[ \t]*)(.+)$/i.exec(trimmed);
+  if (!match) return false;
+  const directive = match[1].toLowerCase();
+  const args = tokenizeSshConfigArgs(match[2].trim());
+  if (args.length === 0) return false;
+
+  if (directive === "host") {
+    const patterns = args.flatMap((token) => token.split(",").filter(Boolean));
+    return SAMPLE_BRIDGE_HOSTNAMES.some((hostname) => sshPatternListMatchesHost(patterns, hostname));
+  }
+
+  // `Match` criteria: `Match all` matches everything; if a `host`/`originalhost`
+  // criterion is present and cannot match `*.netcatty`, this block won't affect
+  // bridge hosts. Otherwise (e.g. `Match final all`, `Match exec ...`, `Match user ...`)
+  // conservatively treat it as potentially matching `*.netcatty`.
+  for (let i = 0; i < args.length; i += 1) {
+    const token = args[i];
+    const eqIdx = token.indexOf("=");
+    const rawKey = (eqIdx === -1 ? token : token.slice(0, eqIdx)).toLowerCase();
+    const negatedKey = rawKey.startsWith("!");
+    const key = negatedKey ? rawKey.slice(1) : rawKey;
+    if (key === "host" || key === "originalhost") {
+      const value = eqIdx === -1 ? (args[i + 1] || "") : token.slice(eqIdx + 1);
+      if (eqIdx === -1) i += 1;
+      const patterns = value.split(",").filter(Boolean);
+      const matchesAny = SAMPLE_BRIDGE_HOSTNAMES.some((hostname) =>
+        sshPatternListMatchesHost(patterns, hostname),
+      );
+      if (!negatedKey && !matchesAny) {
+        return false;
+      }
+      if (negatedKey && matchesAny) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function findFirstMatchingSshConfigBlockIndex(content, limitIndex = content.length) {
+  if (typeof content !== "string" || content.length === 0) return -1;
+  const bounded = content.slice(0, Math.max(0, Math.min(limitIndex, content.length)));
+  let offset = 0;
+  while (offset < bounded.length) {
+    const nlIndex = bounded.indexOf("\n", offset);
+    const lineEnd = nlIndex === -1 ? bounded.length : nlIndex;
+    const rawLine = bounded.slice(offset, lineEnd).replace(/\r$/, "");
+    if (sshConfigLineMatchesBridgeHost(rawLine)) {
+      return offset;
+    }
+    offset = nlIndex === -1 ? bounded.length : nlIndex + 1;
+  }
+  return -1;
+}
+
 function parseSshBridgeConfigPresence(content) {
   if (typeof content !== "string") return { installed: false, startIndex: -1, endIndex: -1 };
   const startIndex = content.indexOf(SSH_CONFIG_MARKER_START);
@@ -85,18 +195,44 @@ function parseSshBridgeConfigPresence(content) {
 }
 
 function upsertSshBridgeConfigContent(existingContent, block) {
-  const content = typeof existingContent === "string" ? existingContent : "";
-  const { installed, startIndex, endIndex } = parseSshBridgeConfigPresence(content);
-  if (installed) {
-    const before = content.slice(0, startIndex);
-    const after = content.slice(endIndex);
-    return `${before}${block}${after}`;
+  const rawContent = typeof existingContent === "string" ? existingContent : "";
+  const presence = parseSshBridgeConfigPresence(rawContent);
+  if (presence.installed) {
+    const earlierWildcard = findFirstMatchingSshConfigBlockIndex(rawContent, presence.startIndex);
+    if (earlierWildcard === -1) {
+      const before = rawContent.slice(0, presence.startIndex);
+      const after = rawContent.slice(presence.endIndex);
+      return `${before}${block}${after}`;
+    }
+    // Relocate the existing block ahead of the earlier wildcard/matching rule.
+    const stripped = removeSshBridgeConfigContent(rawContent);
+    return upsertSshBridgeConfigContent(stripped, block);
   }
-  if (!content.trim()) {
+  if (!rawContent.trim()) {
     return `${block}\n`;
   }
-  const trailing = content.endsWith("\n") ? (content.endsWith("\n\n") ? "" : "\n") : "\n\n";
-  return `${content}${trailing}${block}\n`;
+
+  const eol = rawContent.includes("\r\n") ? "\r\n" : "\n";
+  const normalizedBlock = eol === "\r\n" ? block.replace(/\r?\n/g, "\r\n") : block;
+  const insertBefore = findFirstMatchingSshConfigBlockIndex(rawContent);
+  if (insertBefore !== -1) {
+    const before = rawContent.slice(0, insertBefore);
+    const after = rawContent.slice(insertBefore);
+    if (!before) {
+      return `${normalizedBlock}${eol}${eol}${after}`;
+    }
+    const leadingSep = before.endsWith(`${eol}${eol}`)
+      ? ""
+      : before.endsWith(eol)
+        ? eol
+        : `${eol}${eol}`;
+    return `${before}${leadingSep}${normalizedBlock}${eol}${eol}${after}`;
+  }
+
+  const trailing = rawContent.endsWith(eol)
+    ? (rawContent.endsWith(`${eol}${eol}`) ? "" : eol)
+    : `${eol}${eol}`;
+  return `${rawContent}${trailing}${normalizedBlock}${eol}`;
 }
 
 function removeSshBridgeConfigContent(existingContent) {
@@ -109,7 +245,12 @@ function removeSshBridgeConfigContent(existingContent) {
   // Collapse extra blank lines left behind by removal without touching user content.
   if (after.startsWith("\r\n")) after = after.slice(2);
   else if (after.startsWith("\n")) after = after.slice(1);
-  if (before.endsWith("\n\n") && (!after || after.startsWith("\n"))) {
+  if (before === "") {
+    if (after.startsWith("\r\n")) after = after.slice(2);
+    else if (after.startsWith("\n")) after = after.slice(1);
+  } else if (before.endsWith("\r\n\r\n") && (!after || after.startsWith("\r\n"))) {
+    before = before.slice(0, -2);
+  } else if (before.endsWith("\n\n") && (!after || after.startsWith("\n"))) {
     before = before.slice(0, -1);
   }
   const combined = `${before}${after}`;
@@ -137,14 +278,16 @@ function getSshBridgeConfigStatus(options = {}) {
   } catch {
     // unreadable
   }
-  const { installed } = parseSshBridgeConfigPresence(content);
+  const { installed, startIndex } = parseSshBridgeConfigPresence(content);
   const expectedBlock = buildSshBridgeConfigBlock({
     proxyLauncherPath,
     knownHostsPath,
     discoveryPath,
     platform,
   });
-  const upToDate = installed && content.includes(expectedBlock);
+  const normalizedContent = content.replace(/\r\n/g, "\n");
+  const hasEarlierWildcard = installed && findFirstMatchingSshConfigBlockIndex(content, startIndex) !== -1;
+  const upToDate = installed && normalizedContent.includes(expectedBlock) && !hasEarlierWildcard;
 
   return {
     installed,

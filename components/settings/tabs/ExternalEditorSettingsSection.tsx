@@ -60,6 +60,26 @@ export function ExternalEditorSettingsSection() {
   const selectedConfig = settings.editors[selectedEditor];
   const detectedForSelected = detectedEditors[selectedEditor];
 
+  const storedCustomArgsText = useMemo(
+    () => (settings.editors.custom.customArgs || ['{sshUri}']).join(' '),
+    [settings.editors.custom.customArgs],
+  );
+  const [customArgsDraft, setCustomArgsDraft] = useState(storedCustomArgsText);
+  const [isEditingCustomArgs, setIsEditingCustomArgs] = useState(false);
+
+  useEffect(() => {
+    if (!isEditingCustomArgs) {
+      setCustomArgsDraft(storedCustomArgsText);
+    }
+  }, [isEditingCustomArgs, storedCustomArgsText]);
+
+  const commitCustomArgsDraft = useCallback((rawValue: string) => {
+    const tokens = rawValue.trim().split(/\s+/).filter(Boolean);
+    const nextTokens = tokens.length > 0 ? tokens : ['{sshUri}'];
+    setCustomEditorArgs(nextTokens);
+    setCustomArgsDraft(nextTokens.join(' '));
+  }, [setCustomEditorArgs]);
+
   const refreshStatus = useCallback(async () => {
     setDetecting(true);
     try {
@@ -247,10 +267,18 @@ export function ExternalEditorSettingsSection() {
               </div>
             </div>
             <Input
-              value={(selectedConfig.customArgs || ['{sshUri}']).join(' ')}
-              onChange={(e) => {
-                const tokens = e.target.value.split(/\s+/).filter(Boolean);
-                setCustomEditorArgs(tokens.length > 0 ? tokens : ['{sshUri}']);
+              value={customArgsDraft}
+              onFocus={() => setIsEditingCustomArgs(true)}
+              onChange={(e) => setCustomArgsDraft(e.target.value)}
+              onBlur={(e) => {
+                setIsEditingCustomArgs(false);
+                commitCustomArgsDraft(e.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  commitCustomArgsDraft(e.currentTarget.value);
+                  e.currentTarget.blur();
+                }
               }}
               placeholder="{sshUri}"
               className="font-mono text-xs h-8"

@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -203,6 +204,115 @@ test("openRemoteInExternalEditor registers bridge target and spawns with shell: 
     assert.equal(cfgStatus.installed, true);
   } finally {
     process.env.HOME = origHome;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("installSshBridgeConfig inserts before wildcard Host */Match rules and relocates legacy appended blocks", () => {
+  const tmpDir = makeTempDir("nc-ext-editor-wildcard-");
+  const sshConfigPath = path.join(tmpDir, ".ssh", "config");
+  const stateDir = path.join(tmpDir, "state");
+  fs.mkdirSync(path.dirname(sshConfigPath), { recursive: true });
+
+  const userConfig = [
+    "ServerAliveInterval 60",
+    "",
+    "Host github.com",
+    "    User git",
+    "",
+    "Host *",
+    "    ProxyCommand /usr/bin/custom-proxy %h %p",
+    "    UserKnownHostsFile ~/.ssh/custom_known_hosts",
+    "",
+  ].join("\n");
+  fs.writeFileSync(sshConfigPath, userConfig, "utf8");
+
+  try {
+    const installed = installSshBridgeConfig({
+      sshConfigPath,
+      stateDir,
+      proxyLauncherPath: "/opt/netcatty/netcatty-ssh-proxy",
+      platform: "linux",
+    });
+    assert.equal(installed.installed, true);
+    assert.equal(installed.upToDate, true);
+
+    const content = fs.readFileSync(sshConfigPath, "utf8");
+    const serverAliveIdx = content.indexOf("ServerAliveInterval 60");
+    const githubIdx = content.indexOf("Host github.com");
+    const bridgeIdx = content.indexOf("Host *.netcatty");
+    const wildcardIdx = content.indexOf("Host *\n");
+    assert.ok(serverAliveIdx >= 0 && serverAliveIdx < githubIdx, "top-level global option stays before Host blocks");
+    assert.ok(bridgeIdx > githubIdx && bridgeIdx < wildcardIdx, "Host *.netcatty is placed before Host *");
+
+    // Verify OpenSSH actually selects Netcatty's ProxyCommand and UserKnownHostsFile.
+    let hasSsh = false;
+    try {
+      execFileSync("ssh", ["-V"], { stdio: "ignore" });
+      hasSsh = true;
+    } catch {
+      hasSsh = false;
+    }
+    if (hasSsh) {
+      const resolved = execFileSync("ssh", ["-G", "-F", sshConfigPath, "prod-01234567.netcatty"], {
+        encoding: "utf8",
+      });
+      assert.match(resolved, /^proxycommand ".*netcatty-ssh-proxy" %h/im);
+      assert.match(resolved, /^userknownhostsfile .*known_hosts/im);
+      assert.doesNotMatch(resolved, /^proxycommand \/usr\/bin\/custom-proxy/im);
+    }
+
+    // Clean removal restores exact user config.
+    removeSshBridgeConfig({
+      sshConfigPath,
+      stateDir,
+      proxyLauncherPath: "/opt/netcatty/netcatty-ssh-proxy",
+      platform: "linux",
+    });
+    assert.equal(fs.readFileSync(sshConfigPath, "utf8"), userConfig);
+
+    // Simulate a legacy installation appended AFTER `Host *`.
+    const block = buildSshBridgeConfigBlock({
+      proxyLauncherPath: "/opt/netcatty/netcatty-ssh-proxy",
+      knownHostsPath: installed.knownHostsPath,
+      discoveryPath: installed.discoveryPath,
+      platform: "linux",
+    });
+    fs.writeFileSync(sshConfigPath, `${userConfig}\n${block}\n`, "utf8");
+
+    const staleStatus = getSshBridgeConfigStatus({
+      sshConfigPath,
+      stateDir,
+      proxyLauncherPath: "/opt/netcatty/netcatty-ssh-proxy",
+      platform: "linux",
+    });
+    assert.equal(staleStatus.installed, true);
+    assert.equal(staleStatus.upToDate, false);
+
+    const updatedStatus = installSshBridgeConfig({
+      sshConfigPath,
+      stateDir,
+      proxyLauncherPath: "/opt/netcatty/netcatty-ssh-proxy",
+      platform: "linux",
+    });
+    assert.equal(updatedStatus.installed, true);
+    assert.equal(updatedStatus.upToDate, true);
+    const relocated = fs.readFileSync(sshConfigPath, "utf8");
+    assert.equal(relocated.split(SSH_CONFIG_MARKER_START).length, 2);
+    assert.ok(relocated.indexOf("Host *.netcatty") < relocated.indexOf("Host *\n"));
+
+    // Also handles `Host *` on line 1 and `Match all` blocks cleanly.
+    const lineOneWildcard = "Host *\n    ProxyCommand /bin/false\n";
+    const insertedTop = upsertSshBridgeConfigContent(lineOneWildcard, block);
+    assert.ok(insertedTop.indexOf("Host *.netcatty") < insertedTop.indexOf("Host *\n"));
+    assert.equal(removeSshBridgeConfigContent(insertedTop), lineOneWildcard);
+
+    const matchAllConfig = "Match host *.corp.internal\n    User corp\n\nMatch all\n    UserKnownHostsFile /dev/null\n";
+    const insertedBeforeMatch = upsertSshBridgeConfigContent(matchAllConfig, block);
+    assert.ok(insertedBeforeMatch.indexOf("Match host *.corp.internal") < insertedBeforeMatch.indexOf("Host *.netcatty"));
+    assert.ok(insertedBeforeMatch.indexOf("Host *.netcatty") < insertedBeforeMatch.indexOf("Match all"));
+    assert.equal(removeSshBridgeConfigContent(insertedBeforeMatch), matchAllConfig);
+  } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

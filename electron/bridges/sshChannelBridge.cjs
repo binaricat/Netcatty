@@ -141,6 +141,44 @@ function isConnHealthy(conn) {
   return true;
 }
 
+function getLiveTransport(transport) {
+  return transport && transport.state !== "dead" && transport.state !== "closing"
+    ? transport
+    : null;
+}
+
+function getSftpClientTransport(sftpClient, sftpClients) {
+  if (!sftpClient) return null;
+  const direct = sftpClient.__netcattyRefHolder?.connRef || sftpClient.connRef || null;
+  if (direct) return direct;
+  if (sftpClient.__netcattySharedChannelOwnerId && sftpClients?.get) {
+    const owner = sftpClients.get(sftpClient.__netcattySharedChannelOwnerId);
+    if (owner && owner !== sftpClient) {
+      return owner.__netcattyRefHolder?.connRef || owner.connRef || null;
+    }
+  }
+  return null;
+}
+
+function getSftpClientConn(sftpClient, sftpClients) {
+  const transport = getSftpClientTransport(sftpClient, sftpClients);
+  return transport?.conn || sftpClient?._sshConn || sftpClient?.client || null;
+}
+
+function getSftpClientEndpoint(sftpClient, sftpClients) {
+  const transport = getSftpClientTransport(sftpClient, sftpClients);
+  return transport?.endpoint || sftpClient?._reuseEndpoint || null;
+}
+
+function matchesTargetEndpointTuple(target, ep) {
+  return Boolean(
+    target.hostname
+    && String(ep.hostname || "").toLowerCase() === String(target.hostname).toLowerCase()
+    && Number(ep.port || 22) === Number(target.port || 22)
+    && (!target.username || ep.username === target.username),
+  );
+}
+
 /**
  * Resolve a live remote `ssh2.Client` (and optional `sshConnectionPool` transport)
  * for a registered bridge target.
@@ -152,76 +190,68 @@ function resolveRemoteTransportForTarget(target, { sessions, sftpClients }) {
   if (target.sessionId && sessions?.get) {
     const session = sessions.get(target.sessionId);
     if (session?.conn && isConnHealthy(session.conn)) {
-      const transport = session.connRef && session.connRef.state !== "dead" && session.connRef.state !== "closing"
-        ? session.connRef
-        : null;
-      return { conn: session.conn, transport };
+      return { conn: session.conn, transport: getLiveTransport(session.connRef) };
     }
   }
 
   // 2. Check originating SFTP client if invoked from SFTP browser.
   if (target.sftpId && sftpClients?.get) {
     const sftpClient = sftpClients.get(target.sftpId);
-    const conn = sftpClient?.connRef?.conn || sftpClient?._sshConn || sftpClient?.client || null;
+    const conn = getSftpClientConn(sftpClient, sftpClients);
     if (isConnHealthy(conn)) {
-      const transport = sftpClient?.connRef && sftpClient.connRef.state !== "dead" && sftpClient.connRef.state !== "closing"
-        ? sftpClient.connRef
-        : null;
+      const transport = getLiveTransport(getSftpClientTransport(sftpClient, sftpClients));
       return { conn, transport };
     }
   }
 
-  // 3. Fall back to any live terminal session matching hostId or hostname+port+username.
+  // 3. Fall back to any live terminal session matching hostId or (when profile
+  //    identity does not conflict) hostname+port+username.
   if (sessions?.values) {
+    let endpointFallback = null;
     for (const session of sessions.values()) {
       if (!session?.conn || !isConnHealthy(session.conn)) continue;
       const ep = session._reuseEndpoint || session.connRef?.endpoint;
       if (!ep) continue;
+      if (target.hostId && ep.hostId && ep.hostId !== target.hostId) {
+        continue;
+      }
       if (target.hostId && ep.hostId && ep.hostId === target.hostId) {
         return {
           conn: session.conn,
-          transport: session.connRef && session.connRef.state !== "dead" ? session.connRef : null,
+          transport: getLiveTransport(session.connRef),
         };
       }
-      if (
-        target.hostname
-        && String(ep.hostname || "").toLowerCase() === String(target.hostname).toLowerCase()
-        && Number(ep.port || 22) === Number(target.port || 22)
-        && (!target.username || ep.username === target.username)
-      ) {
-        return {
+      if (!endpointFallback && matchesTargetEndpointTuple(target, ep)) {
+        endpointFallback = {
           conn: session.conn,
-          transport: session.connRef && session.connRef.state !== "dead" ? session.connRef : null,
+          transport: getLiveTransport(session.connRef),
         };
       }
     }
+    if (endpointFallback) return endpointFallback;
   }
 
-  // 4. Fall back to any live SFTP client matching hostId / hostname+port+username.
+  // 4. Fall back to any live SFTP client matching hostId or (when profile
+  //    identity does not conflict) hostname+port+username.
   if (sftpClients?.values) {
+    let endpointFallback = null;
     for (const sftpClient of sftpClients.values()) {
-      const conn = sftpClient?.connRef?.conn || sftpClient?._sshConn || sftpClient?.client || null;
+      const conn = getSftpClientConn(sftpClient, sftpClients);
       if (!isConnHealthy(conn)) continue;
-      const ep = sftpClient?.connRef?.endpoint || sftpClient?._reuseEndpoint;
+      const ep = getSftpClientEndpoint(sftpClient, sftpClients);
       if (!ep) continue;
-      if (target.hostId && ep.hostId && ep.hostId === target.hostId) {
-        return {
-          conn,
-          transport: sftpClient?.connRef && sftpClient.connRef.state !== "dead" ? sftpClient.connRef : null,
-        };
+      if (target.hostId && ep.hostId && ep.hostId !== target.hostId) {
+        continue;
       }
-      if (
-        target.hostname
-        && String(ep.hostname || "").toLowerCase() === String(target.hostname).toLowerCase()
-        && Number(ep.port || 22) === Number(target.port || 22)
-        && (!target.username || ep.username === target.username)
-      ) {
-        return {
-          conn,
-          transport: sftpClient?.connRef && sftpClient.connRef.state !== "dead" ? sftpClient.connRef : null,
-        };
+      const transport = getLiveTransport(getSftpClientTransport(sftpClient, sftpClients));
+      if (target.hostId && ep.hostId && ep.hostId === target.hostId) {
+        return { conn, transport };
+      }
+      if (!endpointFallback && matchesTargetEndpointTuple(target, ep)) {
+        endpointFallback = { conn, transport };
       }
     }
+    if (endpointFallback) return endpointFallback;
   }
 
   // 5. Wake an idle-parked transport in sshConnectionPool if one exists for the endpoint.
@@ -248,12 +278,76 @@ function resolveRemoteTransportForTarget(target, { sessions, sftpClients }) {
 /**
  * Wire bidirectional data, stderr, exit, signal, and window-change between
  * an accepted local ssh2.Server channel (`clientStream`) and a remote ssh2.Client
- * channel (`remoteStream`).
+ * channel (`remoteStream`), applying backpressure in every direction.
  */
-function bridgeChannelStreams(clientStream, remoteStream) {
+function bridgeChannelStreams(clientStream, remoteStream, options = {}) {
   let closed = false;
   let exitForwarded = false;
   let pendingExit = null;
+  const relayCleanups = [];
+
+  const relayWithBackpressure = (source, dest, { onWriteError, initiallyBackpressured = false } = {}) => {
+    let waitingDrain = Boolean(initiallyBackpressured);
+    const onDrain = () => {
+      if (!waitingDrain) return;
+      waitingDrain = false;
+      if (!closed) {
+        try {
+          source.resume?.();
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    const onData = (chunk) => {
+      if (closed) return;
+      try {
+        const ok = dest.write(chunk);
+        if (ok === false && !waitingDrain && typeof source.pause === "function") {
+          waitingDrain = true;
+          source.pause();
+        }
+      } catch {
+        if (onWriteError) onWriteError();
+      }
+    };
+
+    if (waitingDrain && typeof source.pause === "function") {
+      try {
+        source.pause();
+      } catch {
+        // ignore
+      }
+    }
+
+    dest.on("drain", onDrain);
+    source.on("data", onData);
+
+    relayCleanups.push(() => {
+      try {
+        dest.removeListener?.("drain", onDrain);
+      } catch {
+        // ignore
+      }
+      try {
+        source.removeListener?.("data", onData);
+      } catch {
+        // ignore
+      }
+    });
+  };
+
+  const cleanupRelays = () => {
+    while (relayCleanups.length > 0) {
+      const fn = relayCleanups.pop();
+      try {
+        fn();
+      } catch {
+        // ignore
+      }
+    }
+  };
 
   const flushExit = () => {
     if (exitForwarded || !pendingExit) return;
@@ -275,6 +369,7 @@ function bridgeChannelStreams(clientStream, remoteStream) {
   const finishClose = () => {
     if (closed) return;
     closed = true;
+    cleanupRelays();
     flushExit();
     try {
       clientStream.end();
@@ -293,36 +388,17 @@ function bridgeChannelStreams(clientStream, remoteStream) {
     }
   };
 
-  remoteStream.on("data", (chunk) => {
-    if (!closed) {
-      try {
-        clientStream.write(chunk);
-      } catch {
-        finishClose();
-      }
-    }
+  relayWithBackpressure(remoteStream, clientStream, {
+    onWriteError: finishClose,
   });
 
   if (remoteStream.stderr && clientStream.stderr) {
-    remoteStream.stderr.on("data", (chunk) => {
-      if (!closed) {
-        try {
-          clientStream.stderr.write(chunk);
-        } catch {
-          // ignore stderr write failures
-        }
-      }
-    });
+    relayWithBackpressure(remoteStream.stderr, clientStream.stderr);
   }
 
-  clientStream.on("data", (chunk) => {
-    if (!closed) {
-      try {
-        remoteStream.write(chunk);
-      } catch {
-        finishClose();
-      }
-    }
+  relayWithBackpressure(clientStream, remoteStream, {
+    onWriteError: finishClose,
+    initiallyBackpressured: Boolean(options.clientInitiallyBackpressured),
   });
 
   clientStream.on("end", () => {
@@ -355,6 +431,7 @@ function bridgeChannelStreams(clientStream, remoteStream) {
 
   clientStream.on("close", () => {
     closed = true;
+    cleanupRelays();
     try {
       remoteStream.close?.();
     } catch {
@@ -442,6 +519,7 @@ function attachClientChannelMultiplexer(client, remoteConn) {
         return opts;
       };
 
+      const MAX_EARLY_BUFFER_BYTES = 64 * 1024;
       const acceptAndBridge = (accept, openRemote) => {
         // Call accept() synchronously before any async remote channel open!
         // OpenSSH clients with stdin=/dev/null (including Zed on Windows) send
@@ -452,10 +530,19 @@ function attachClientChannelMultiplexer(client, remoteConn) {
         if (!clientStream) return;
 
         const earlyChunks = [];
+        let earlyBytes = 0;
+        let clientPausedEarly = false;
         let clientEndedEarly = false;
         let clientClosedEarly = false;
 
-        const onEarlyData = (chunk) => earlyChunks.push(chunk);
+        const onEarlyData = (chunk) => {
+          earlyChunks.push(chunk);
+          earlyBytes += chunk.length;
+          if (!clientPausedEarly && earlyBytes >= MAX_EARLY_BUFFER_BYTES && typeof clientStream.pause === "function") {
+            clientPausedEarly = true;
+            clientStream.pause();
+          }
+        };
         const onEarlyEnd = () => { clientEndedEarly = true; };
         const onEarlyClose = () => { clientClosedEarly = true; };
 
@@ -488,16 +575,30 @@ function attachClientChannelMultiplexer(client, remoteConn) {
             return;
           }
 
-          activeRemoteStream = remoteStream;
-          bridgeChannelStreams(clientStream, remoteStream);
-
+          let clientInitiallyBackpressured = false;
           for (const chunk of earlyChunks) {
             try {
-              remoteStream.write(chunk);
+              if (remoteStream.write(chunk) === false) {
+                clientInitiallyBackpressured = true;
+              }
             } catch {
               break;
             }
           }
+
+          activeRemoteStream = remoteStream;
+          bridgeChannelStreams(clientStream, remoteStream, {
+            clientInitiallyBackpressured,
+          });
+
+          if (!clientInitiallyBackpressured && clientPausedEarly && typeof clientStream.resume === "function") {
+            try {
+              clientStream.resume();
+            } catch {
+              // ignore
+            }
+          }
+
           if (clientEndedEarly) {
             try {
               remoteStream.end();
@@ -1033,6 +1134,8 @@ module.exports = {
   createSshChannelBridge,
   ensureHostKeyAndKnownHosts,
   isValidBridgeHostname,
+  resolveRemoteTransportForTarget,
+  bridgeChannelStreams,
   init: defaultBridge.init,
   ensureStarted: defaultBridge.ensureStarted,
   registerTarget: defaultBridge.registerTarget,

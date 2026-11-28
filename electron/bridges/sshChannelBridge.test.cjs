@@ -11,7 +11,19 @@ const path = require("node:path");
 const test = require("node:test");
 const { Client, Server, utils } = require("ssh2");
 
-const { createSshChannelBridge } = require("./sshChannelBridge.cjs");
+const { EventEmitter } = require("node:events");
+const { Duplex } = require("node:stream");
+const {
+  createSshChannelBridge,
+  resolveRemoteTransportForTarget,
+  bridgeChannelStreams,
+} = require("./sshChannelBridge.cjs");
+const {
+  createTransport,
+  borrowTransport,
+  returnTransport,
+  resetSshTransportRegistryForTests,
+} = require("./sshConnectionPool.cjs");
 const { buildSshBridgeConfigBlock } = require("./externalEditorBridge.cjs");
 const { getSshProxyLauncherPath, SSH_BRIDGE_DISCOVERY_ENV_VAR } = require("../cli/sshBridgeDiscoveryPath.cjs");
 
@@ -274,4 +286,299 @@ test("sshChannelBridge multiplexes real OpenSSH ssh exec, stdin/stdout, exit cod
     await remote.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+function makeFakeConn(label) {
+  const conn = new EventEmitter();
+  conn.label = label;
+  conn._sock = { destroyed: false };
+  conn.exec = () => {};
+  conn.end = () => {
+    conn._ended = true;
+  };
+  return conn;
+}
+
+test("resolveRemoteTransportForTarget keeps fallback selection within the originating hostId profile", () => {
+  const connBastionB = makeFakeConn("bastion-b");
+  const connBastionA = makeFakeConn("bastion-a");
+
+  // Two saved profiles share the same private IP/port/username behind different bastions.
+  const sessions = new Map([
+    ["sess-b", {
+      conn: connBastionB,
+      _reuseEndpoint: {
+        hostId: "host-profile-b",
+        hostname: "10.0.0.5",
+        port: 22,
+        username: "ubuntu",
+      },
+    }],
+    ["sess-a", {
+      conn: connBastionA,
+      _reuseEndpoint: {
+        hostId: "host-profile-a",
+        hostname: "10.0.0.5",
+        port: 22,
+        username: "ubuntu",
+      },
+    }],
+  ]);
+
+  // Originating session for profile A closed; fallback must skip profile B and pick profile A.
+  const resolved = resolveRemoteTransportForTarget(
+    {
+      sessionId: "sess-a-closed",
+      hostId: "host-profile-a",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "ubuntu",
+    },
+    { sessions, sftpClients: new Map() },
+  );
+  assert.equal(resolved?.conn, connBastionA);
+
+  // When only profile B is live, profile A must NOT fall back to profile B.
+  sessions.delete("sess-a");
+  const rejected = resolveRemoteTransportForTarget(
+    {
+      sessionId: "sess-a-closed",
+      hostId: "host-profile-a",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "ubuntu",
+    },
+    { sessions, sftpClients: new Map() },
+  );
+  assert.equal(rejected, null);
+
+  // Same profile isolation applies to SFTP fallback.
+  const sftpConnB = makeFakeConn("sftp-bastion-b");
+  const sftpConnA = makeFakeConn("sftp-bastion-a");
+  const sftpClients = new Map([
+    ["sftp-b", {
+      client: sftpConnB,
+      __netcattyRefHolder: {
+        connRef: {
+          conn: sftpConnB,
+          state: "live",
+          endpoint: {
+            hostId: "host-profile-b",
+            hostname: "10.0.0.5",
+            port: 22,
+            username: "ubuntu",
+          },
+        },
+      },
+    }],
+    ["sftp-a", {
+      client: sftpConnA,
+      __netcattyRefHolder: {
+        connRef: {
+          conn: sftpConnA,
+          state: "live",
+          endpoint: {
+            hostId: "host-profile-a",
+            hostname: "10.0.0.5",
+            port: 22,
+            username: "ubuntu",
+          },
+        },
+      },
+    }],
+  ]);
+
+  const resolvedSftp = resolveRemoteTransportForTarget(
+    {
+      sftpId: "sftp-a-closed",
+      hostId: "host-profile-a",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "ubuntu",
+    },
+    { sessions: new Map(), sftpClients },
+  );
+  assert.equal(resolvedSftp?.conn, sftpConnA);
+
+  sftpClients.delete("sftp-a");
+  const rejectedSftp = resolveRemoteTransportForTarget(
+    {
+      sftpId: "sftp-a-closed",
+      hostId: "host-profile-a",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "ubuntu",
+    },
+    { sessions: new Map(), sftpClients },
+  );
+  assert.equal(rejectedSftp, null);
+});
+
+test("resolveRemoteTransportForTarget resolves managed SFTP transport from __netcattyRefHolder.connRef", () => {
+  resetSshTransportRegistryForTests();
+  try {
+    const conn = makeFakeConn("sftp-managed");
+    const transport = createTransport({
+      conn,
+      endpoint: {
+        hostId: "host-sftp-1",
+        hostname: "10.1.2.3",
+        port: 22,
+        username: "deploy",
+        protocol: "ssh",
+      },
+      idleTtlMs: 10,
+    });
+    const refHolder = { id: "sftp-1", __sshLeaseKind: "sftp" };
+    borrowTransport(transport, {
+      kind: "sftp",
+      holder: refHolder,
+      leaseId: "sftp:sftp-1",
+    });
+
+    const sftpClient = {
+      client: conn,
+      __netcattyRefHolder: refHolder,
+      __netcattyTransportManaged: true,
+    };
+    const sftpClients = new Map([["sftp-1", sftpClient]]);
+
+    const resolved = resolveRemoteTransportForTarget(
+      {
+        sftpId: "sftp-1",
+        hostId: "host-sftp-1",
+        hostname: "10.1.2.3",
+        port: 22,
+        username: "deploy",
+      },
+      { sessions: new Map(), sftpClients },
+    );
+
+    assert.equal(resolved?.conn, conn);
+    assert.equal(resolved?.transport, transport);
+
+    // Borrowing an editor lease keeps the transport live even after SFTP closes.
+    const editorHolder = { id: "ssh-bridge:test" };
+    borrowTransport(resolved.transport, { kind: "forward", holder: editorHolder });
+    returnTransport(refHolder);
+    assert.equal(transport.state, "live");
+    assert.equal(transport.leases.size, 1);
+
+    returnTransport(editorHolder);
+  } finally {
+    resetSshTransportRegistryForTests();
+  }
+});
+
+test("bridgeChannelStreams applies backpressure across stdout, stderr, and stdin", async () => {
+  const makeBackpressureChannel = ({ blockWrites = false, highWaterMark = 1024 } = {}) => {
+    let blocked = blockWrites;
+    let pendingWriteCb = null;
+    const received = [];
+    let exitCode = null;
+
+    const stream = new Duplex({
+      highWaterMark,
+      read() {},
+      write(chunk, _enc, cb) {
+        received.push(Buffer.from(chunk));
+        if (blocked) {
+          pendingWriteCb = cb;
+        } else {
+          cb();
+        }
+      },
+    });
+    stream.stderr = new Duplex({
+      highWaterMark,
+      read() {},
+      write(chunk, _enc, cb) {
+        stream.stderrReceived.push(Buffer.from(chunk));
+        if (stream.stderrBlocked) {
+          stream.stderrPendingCb = cb;
+        } else {
+          cb();
+        }
+      },
+    });
+    stream.stderrBlocked = blockWrites;
+    stream.stderrPendingCb = null;
+    stream.stderrReceived = [];
+    stream.exit = (code) => {
+      exitCode = code;
+    };
+    stream.getExitCode = () => exitCode;
+    stream.getReceived = () => Buffer.concat(received);
+    stream.getStderrReceived = () => Buffer.concat(stream.stderrReceived);
+    stream.unblock = () => {
+      blocked = false;
+      if (pendingWriteCb) {
+        const cb = pendingWriteCb;
+        pendingWriteCb = null;
+        cb();
+      }
+    };
+    stream.unblockStderr = () => {
+      stream.stderrBlocked = false;
+      if (stream.stderrPendingCb) {
+        const cb = stream.stderrPendingCb;
+        stream.stderrPendingCb = null;
+        cb();
+      }
+    };
+    return stream;
+  };
+
+  // 1. remote -> client stdout backpressure
+  const client = makeBackpressureChannel({ blockWrites: true, highWaterMark: 1024 });
+  const remote = makeBackpressureChannel({ blockWrites: true, highWaterMark: 1024 });
+  bridgeChannelStreams(client, remote);
+
+  const chunk64k = Buffer.alloc(64 * 1024, 0x41);
+  // Push 4 MiB into remote readable side while client writable is blocked.
+  const totalChunks = 64;
+  for (let i = 0; i < totalChunks; i += 1) {
+    remote.push(chunk64k);
+  }
+  remote.push(null);
+
+  await new Promise((r) => setImmediate(r));
+  // Backpressure must pause remote before draining all 4 MiB into client's writable queue.
+  assert.equal(remote.isPaused(), true);
+  assert.ok(
+    client.writableLength < 256 * 1024,
+    `expected client writable buffer to stay bounded, got ${client.writableLength}`,
+  );
+
+  // Same for remote.stderr -> client.stderr
+  for (let i = 0; i < 16; i += 1) {
+    remote.stderr.push(Buffer.alloc(16 * 1024, 0x45));
+  }
+  remote.stderr.push(null);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(remote.stderr.isPaused(), true);
+  assert.ok(client.stderr.writableLength < 64 * 1024);
+
+  // Same for client -> remote stdin
+  for (let i = 0; i < 16; i += 1) {
+    client.push(Buffer.alloc(16 * 1024, 0x42));
+  }
+  client.push(null);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(client.isPaused(), true);
+  assert.ok(remote.writableLength < 64 * 1024);
+
+  // Unblock all destinations and verify full delivery + exit code.
+  const done = new Promise((resolve) => client.once("finish", resolve));
+  const remoteDone = new Promise((resolve) => remote.once("finish", resolve));
+  remote.emit("exit", 0);
+  client.unblock();
+  client.unblockStderr();
+  remote.unblock();
+
+  await Promise.all([done, remoteDone]);
+  assert.equal(client.getReceived().length, totalChunks * chunk64k.length);
+  assert.equal(client.getStderrReceived().length, 16 * 16 * 1024);
+  assert.equal(remote.getReceived().length, 16 * 16 * 1024);
+  assert.equal(client.getExitCode(), 0);
 });
