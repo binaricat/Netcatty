@@ -199,11 +199,11 @@ export const ruSystemManagerMessages: Messages = {
   'systemManager.k8s.status.CrashLoopBackOff': 'Циклические сбои',
   'systemManager.k8s.status.ContainerCreating': 'Создаётся контейнер',
   'systemManager.k8s.status.Terminating': 'Завершается',
-  'systemManager.k8s.status.ImagePullBackOff': 'Ожидает повторной загрузки образа',
+  'systemManager.k8s.status.ImagePullBackOff': 'Повтор загрузки',
   'systemManager.k8s.status.ErrImagePull': 'Ошибка загрузки образа',
   'systemManager.k8s.status.Error': 'Ошибка',
   'systemManager.k8s.status.Evicted': 'Вытеснен',
-  'systemManager.k8s.status.OOMKilled': 'Остановлен из-за нехватки памяти',
+  'systemManager.k8s.status.OOMKilled': 'Нехватка памяти',
 
   'systemManager.ports.unavailable': 'На этом хосте не обнаружены инструменты портов (ss / netstat).',
   'systemManager.ports.loading': 'Загрузка слушающих портов…',
