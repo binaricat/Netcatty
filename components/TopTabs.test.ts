@@ -44,6 +44,7 @@ const {
 } = await import("./top-tabs/TopTabItems.tsx");
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
 const {
+  applySessionPresentation,
   publishSessionPromptHost,
   sessionPresentationStore,
 } = await import("../application/state/sessionPresentationStore.ts");
@@ -142,6 +143,18 @@ test("workspace tabs keep explicit names ahead of live prompt hosts", () => {
     "My Workspace",
   );
   sessionPresentationStore.clearSession("s1");
+});
+
+test("agent-mode session tabs show a published jump target host", () => {
+  const session = topTabSession("jump-target", "jump-host", {
+    customName: "",
+    hostLabel: "jumpssh.riverbegin.cn",
+    promptHostname: "",
+    promptHostnameFromJumpServer: undefined,
+  });
+  publishSessionPromptHost("jump-target", "k8s-10-1-64-1", { fromJumpServer: true });
+  assert.equal(formatSessionTopTabLabel(applySessionPresentation(session), "agent"), "k8s-10-1-64-1");
+  sessionPresentationStore.clearSession("jump-target");
 });
 
 test("host tree tab gutter never goes negative", () => {

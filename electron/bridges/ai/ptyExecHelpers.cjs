@@ -8,6 +8,7 @@ const {
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,
 } = require("./shellUtils.cjs");
+const { renderCursorBoundScreenText } = require("../terminalLogSanitizer.cjs");
 const { classifyLocalShellType } = require("../../../lib/localShell.cjs");
 
 // Build a stateful decoder for a full exec call. Serial data events can
@@ -65,6 +66,45 @@ function subscribeToPtyData(ptyStream, onData) {
 // comfortably larger than the prompt including the escape codes it may carry.
 const PROMPT_SUFFIX_MIN_WINDOW_CHARS = 2048;
 const PROMPT_SUFFIX_WINDOW_PER_PROMPT_CHAR = 8;
+// Full-screen clears (ED 2 / RIS) discard prior screen content so earlier
+// lines cannot combine with post-clear text. ED 3 (`\x1b[3J`) only clears
+// scrollback and leaves the visible screen intact.
+// eslint-disable-next-line no-control-regex
+const SCREEN_CLEAR_CONTROL_REGEX = /\u001B(?:c|\[2J)/g;
+// Only trigger rendered fallback when the tail actually contains a redraw,
+// cursor, or erase control (bare CR, BS, or CSI cursor/erase A-H/J/K/f).
+// SGR colors (`\x1b[32m`), OSC titles, and bracketed paste modes must stay
+// off this path so colored log floods do not invoke TerminalTextRenderer.
+// eslint-disable-next-line no-control-regex
+const REDRAW_CONTROL_REGEX = /\r(?!\n)|\u0008|(?:\u001B\[|\u009B)[0-9;]*[A-HJKf]/;
+
+function sliceAfterLastScreenClear(text) {
+  let lastEnd = 0;
+  SCREEN_CLEAR_CONTROL_REGEX.lastIndex = 0;
+  let match;
+  while ((match = SCREEN_CLEAR_CONTROL_REGEX.exec(text)) !== null) {
+    lastEnd = match.index + match[0].length;
+  }
+  return lastEnd > 0 ? text.slice(lastEnd) : text;
+}
+
+function hasTabNearPrompt(tail, strippedTailNoCr, normalizedPrompt) {
+  if (!tail.includes("\t") || !normalizedPrompt.includes(" ")) return false;
+  const trailingNewlines = normalizedPrompt.match(/\n+$/)?.[0] || "";
+  if (trailingNewlines && !strippedTailNoCr.endsWith(trailingNewlines)) return false;
+  const promptBody = trailingNewlines
+    ? normalizedPrompt.slice(0, -trailingNewlines.length)
+    : normalizedPrompt;
+  const tailBody = trailingNewlines
+    ? strippedTailNoCr.slice(0, -trailingNewlines.length)
+    : strippedTailNoCr;
+  const promptLastLine = promptBody.slice(promptBody.lastIndexOf("\n") + 1);
+  const trimmedPromptEnd = promptLastLine.trimEnd();
+  const lastSpaceIdx = trimmedPromptEnd.lastIndexOf(" ");
+  const trailingToken = lastSpaceIdx >= 0 ? promptLastLine.slice(lastSpaceIdx + 1) : promptLastLine;
+  return (trailingToken.length > 0 && tailBody.endsWith(trailingToken))
+    || /\t[ \t]*$/.test(tailBody);
+}
 
 function hasExpectedPromptSuffix(text, expectedPrompt) {
   if (!expectedPrompt) return false;
@@ -76,18 +116,45 @@ function hasExpectedPromptSuffix(text, expectedPrompt) {
     PROMPT_SUFFIX_MIN_WINDOW_CHARS,
     String(expectedPrompt).length * PROMPT_SUFFIX_WINDOW_PER_PROMPT_CHAR,
   );
-  const tail = fullText.length > windowChars ? fullText.slice(-windowChars) : fullText;
+  const rawTail = fullText.length > windowChars ? fullText.slice(-windowChars) : fullText;
+  const tail = sliceAfterLastScreenClear(rawTail);
   const strippedTail = stripAnsi(tail);
+  const strippedTailNoCr = strippedTail.replace(/\r/g, "");
   // Drop CR so a redraw inside one line (`root@host:~\r# `) still matches
   // the cached prompt. That collapses a two-line PS1's `\r\r\n` to a single
   // LF, which no longer ends with the cache (`user@host: /root\n\n\n$ `).
-  if (strippedTail.replace(/\r/g, "").endsWith(normalizedPrompt)) return true;
+  if (strippedTailNoCr.endsWith(normalizedPrompt)) return true;
   // The idle-prompt cache turns those CRs into LFs and keeps the blank
   // lines. Compare that form too, only when the cache itself spans lines,
   // so a bare `$`/`#` is unchanged.
-  if (!ansiFreePrompt.includes("\n")) return false;
-  const crAsLfPrompt = ansiFreePrompt.replace(/\r/g, "\n");
-  return strippedTail.replace(/\r/g, "\n").endsWith(crAsLfPrompt);
+  if (ansiFreePrompt.includes("\n")) {
+    const crAsLfPrompt = ansiFreePrompt.replace(/\r/g, "\n");
+    if (strippedTail.replace(/\r/g, "\n").endsWith(crAsLfPrompt)) return true;
+    // Screen-derived multiline prompts trim trailing whitespace on lines above
+    // the cursor (matching xterm's translateToString(true)) while preserving
+    // exact spacing on the final cursor line. Normalize trailing spaces on
+    // non-final lines on CRLF-only streams too, gated on a final-line match.
+    const promptLastLine = normalizedPrompt.slice(normalizedPrompt.lastIndexOf("\n") + 1);
+    if (
+      strippedTailNoCr.endsWith(promptLastLine)
+      && strippedTailNoCr.replace(/[ \t]+\n/g, "\n").endsWith(normalizedPrompt)
+    ) {
+      return true;
+    }
+  }
+  // Only fall back to rendered screen comparison when raw matching fails and
+  // the tail contains terminal redraw controls (bare CR overwrite, backspace,
+  // or CSI/C1 erase/cursor controls). Running this strictly after the raw
+  // fast paths avoids regressing scrolling PTYs that repaint prompts with
+  // absolute cursor positioning (e.g. `\x1b[24;1H\x1b[Kuser@host:~$ `), while
+  // letting screen-derived multiline prompts match raw CR+EL redraws.
+  if (!REDRAW_CONTROL_REGEX.test(tail) && !hasTabNearPrompt(tail, strippedTailNoCr, normalizedPrompt)) {
+    return false;
+  }
+  const rendered = renderCursorBoundScreenText(tail);
+  if (!rendered) return false;
+  return rendered.rawText.endsWith(normalizedPrompt)
+    || rendered.trimmedAboveText.endsWith(normalizedPrompt);
 }
 
 function escapePosixSingleQuoted(text) {

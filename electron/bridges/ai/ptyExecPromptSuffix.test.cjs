@@ -92,3 +92,111 @@ test("prompt suffix check does not scan the whole buffer on every call", () => {
   const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
   assert.ok(elapsedMs < 250, `50 checks took ${elapsedMs.toFixed(0)} ms`);
 });
+
+test("prompt suffix check skips rendered fallback on SGR-colored and tab-delimited log floods", () => {
+  const coloredLogs = "\x1b[32mINFO\x1b[0m\t\x1b[36mrequest completed\x1b[0m\r\n".repeat(120);
+  const started = process.hrtime.bigint();
+  for (let i = 0; i < 5000; i += 1) {
+    assert.equal(hasExpectedPromptSuffix(coloredLogs, "root@3160T:~# "), false);
+  }
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.ok(elapsedMs < 500, `5000 colored-log checks took ${elapsedMs.toFixed(0)} ms`);
+});
+
+test("screen-derived multiline prompts match raw CR+EL redraws while rejecting unsafe states", () => {
+  const seededPrompt = "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ";
+  const rawRedraw = "^C\r\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\r\n# \r\x1b[K# ";
+  assert.equal(hasExpectedPromptSuffix(rawRedraw, seededPrompt), true);
+
+  // ANSI-styled header with trailing spaces on the header line and repeated CR+EL redraws.
+  const styledRedraw =
+    "\x1b[?2004h\x1b[32m[root@k8s-10-1-64-1 ~]\x1b[0m br0 = 10.1.64.1   \r\r\n# \r\x1b[K# \r\x1b[2K# ";
+  assert.equal(hasExpectedPromptSuffix(styledRedraw, seededPrompt), true);
+
+  // Pending input after redraw must not match.
+  assert.equal(
+    hasExpectedPromptSuffix("[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\r\n# \r\x1b[K# ls", seededPrompt),
+    false,
+  );
+
+  // Missing trailing space on expected prompt must still not match.
+  assert.equal(
+    hasExpectedPromptSuffix(rawRedraw, "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#"),
+    false,
+  );
+
+  // Mid-line cursor (text remains to the right of cursor) must not match.
+  assert.equal(
+    hasExpectedPromptSuffix("[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\r\n# ls\x1b[2D", seededPrompt),
+    false,
+  );
+
+  // Non-empty text below cursor (primary-screen menu) must not match.
+  assert.equal(
+    hasExpectedPromptSuffix("[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\n# \r\nMenu\x1b[1A\x1b[3G", seededPrompt),
+    false,
+  );
+
+  // Alternate screen active must not match.
+  assert.equal(
+    hasExpectedPromptSuffix(`${rawRedraw}\x1b[?1049hvim`, seededPrompt),
+    false,
+  );
+
+  // Pre-clear header line must not combine with a post-clear bare marker.
+  assert.equal(
+    hasExpectedPromptSuffix("[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\n\x1b[2J\x1b[H# ", seededPrompt),
+    false,
+  );
+
+  // Bare marker without header must not match.
+  assert.equal(
+    hasExpectedPromptSuffix("output\r\n# \r\x1b[K# ", seededPrompt),
+    false,
+  );
+
+  // Scrolling PTY that repaints a prompt with absolute cursor positioning must still match.
+  assert.equal(
+    hasExpectedPromptSuffix(`${"row\r\n".repeat(80)}\x1b[24;1H\x1b[Kuser@host:~$ `, "user@host:~$ "),
+    true,
+  );
+
+  // Scrollback-only clear (ED 3) leaves the visible prompt intact.
+  assert.equal(
+    hasExpectedPromptSuffix("user@host:~$ \x1b[3J", "user@host:~$ "),
+    true,
+  );
+
+  // Rehydrated multiline prompt whose header had trailing spaces matches CRLF-only output
+  // without requiring redraw controls, while still enforcing trailing space on the cursor line.
+  assert.equal(
+    hasExpectedPromptSuffix("user@host: /workspace   \r\n$ ", "user@host: /workspace\n$ "),
+    true,
+  );
+  assert.equal(
+    hasExpectedPromptSuffix("user@host: /workspace   \r\n$ ", "user@host: /workspace\n$"),
+    false,
+  );
+  assert.equal(
+    hasExpectedPromptSuffix("user@host: /workspace   \r\n$ ls", "user@host: /workspace\n$ "),
+    false,
+  );
+
+  // Rehydrated prompts whose literal tabs expanded to spaces in xterm match raw tab output.
+  assert.equal(
+    hasExpectedPromptSuffix("output\r\nuser@host:\t~$ ", "user@host:      ~$ "),
+    true,
+  );
+  assert.equal(
+    hasExpectedPromptSuffix("output\r\nuser@host:\t~$ ls", "user@host:      ~$ "),
+    false,
+  );
+  assert.equal(
+    hasExpectedPromptSuffix("output\r\nuser@host:~$\t", "user@host:~$    "),
+    true,
+  );
+  assert.equal(
+    hasExpectedPromptSuffix("output\r\nuser@host:\t/workspace\r\n$ ", "user@host:      /workspace\n$ "),
+    true,
+  );
+});

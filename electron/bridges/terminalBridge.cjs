@@ -86,6 +86,7 @@ function getShellUtils() {
 }
 const stripAnsi = (...args) => getShellUtils().stripAnsi(...args);
 const trackSessionIdlePrompt = (...args) => getShellUtils().trackSessionIdlePrompt(...args);
+const bumpSessionReadinessGeneration = (...args) => getShellUtils().bumpSessionReadinessGeneration(...args);
 const { createZmodemSentry } = require("./zmodemHelper.cjs");
 const { discoverShells } = require("./shellDiscovery.cjs");
 const { isWindowsAppExecutionAliasPath } = require("../../lib/localShell.cjs");
@@ -1884,6 +1885,9 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
   if (data !== "\x03" && !payload.automated && !isTerminalReportSequence(data)) {
     disarmTerminalInterruptOutputGate(session);
   }
+  if (!isTerminalReportSequence(data)) {
+    bumpSessionReadinessGeneration(session);
+  }
 
   try {
     if (
@@ -2088,6 +2092,7 @@ function writeToSessionWithInterception(
 function notifySessionUserInput(event, payload) {
   const session = sessions.get(payload?.sessionId);
   if (!session) return;
+  bumpSessionReadinessGeneration(session);
   if (session.type === 'telnet-native' || session.type === 'serial') {
     session.autoLogin?.handleUserInput();
   }
@@ -2096,6 +2101,9 @@ function notifySessionUserInput(event, payload) {
 function writeToSession(event, payload) {
   const session = sessions.get(payload.sessionId);
   if (!session) return;
+  if (!isTerminalReportSequence(payload.data)) {
+    bumpSessionReadinessGeneration(session);
+  }
 
   try {
     reportOpenedSessionActivity?.({ sessionId: payload.sessionId, phase: "touch" });
@@ -2192,6 +2200,7 @@ function interruptSession(event, payload) {
     return;
   }
   rememberInterruptTrace(session, trace);
+  bumpSessionReadinessGeneration(session);
   resetTerminalFlowAckSample(session);
   logTerminalInterruptDebug("interrupt-session-received", {
     sessionId: payload.sessionId,
@@ -2449,6 +2458,7 @@ function resizeSession(event, payload) {
 function clearSessionPtyBuffer(event, payload) {
   const session = sessions.get(payload?.sessionId);
   if (!session?.proc || typeof session.proc.clear !== "function") return;
+  bumpSessionReadinessGeneration(session);
   try {
     session.proc.clear();
   } catch (err) {
@@ -3086,6 +3096,7 @@ module.exports = {
   resizeSession,
   clearSessionPtyBuffer,
   setSessionFlowPaused,
+  requestTerminalOutputDrain,
   ackSessionFlow,
   closeSession,
   interruptSession,

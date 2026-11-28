@@ -12,7 +12,12 @@ export const getSessionConnectionLabel = (
 
 type SessionTabLabelSession = Pick<
   TerminalSession,
-  'customName' | 'hostLabel' | 'promptHostname' | 'dynamicTitle' | 'codingCliProviderId'
+  | 'customName'
+  | 'hostLabel'
+  | 'promptHostname'
+  | 'promptHostnameFromJumpServer'
+  | 'dynamicTitle'
+  | 'codingCliProviderId'
 >;
 
 const joinWorkspaceLabels = (labels: readonly string[]): string | null => {
@@ -160,7 +165,8 @@ const titleHostnameKey = (hostname: string): string =>
 
 /**
  * Resolve the label shown on session tabs and pane headers.
- * Live prompt and Shell titles require all mode; agent mode permits Agent titles only.
+ * Live shell titles require all mode; agent mode permits Agent titles and
+ * nested JumpServer target hostnames.
  */
 export const resolveSessionTabTitle = (
   session: SessionTabLabelSession,
@@ -176,10 +182,12 @@ export const resolveSessionTabTitle = (
   if (session.codingCliProviderId && dynamicTitle) {
     return dynamicTitle;
   }
-  if (dynamicTabTitleMode !== 'all') {
-    return connectionLabel;
-  }
   const promptHostname = session.promptHostname?.trim();
+  if (dynamicTabTitleMode !== 'all') {
+    return promptHostname && session.promptHostnameFromJumpServer
+      ? promptHostname
+      : connectionLabel;
+  }
   if (!dynamicTitle) return promptHostname || connectionLabel;
   if (promptHostname) {
     const reportedHost = shellTitleHostname(dynamicTitle);

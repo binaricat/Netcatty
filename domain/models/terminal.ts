@@ -757,6 +757,8 @@ export interface TerminalSession {
   dynamicTitle?: string;
   /** Runtime hostname detected from the current shell prompt (presentation only) */
   promptHostname?: string;
+  /** The prompt hostname came from a target reached through an interactive jump host. */
+  promptHostnameFromJumpServer?: boolean;
   /** Sticky coding CLI provider detected from launch command or window title */
   codingCliProviderId?: CodingCliProviderId;
   /** Runtime marker for sessions reconstructed from startup restore. */

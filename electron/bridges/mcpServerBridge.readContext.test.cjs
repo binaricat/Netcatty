@@ -35,6 +35,24 @@ for (const mode of ["observer", "confirm", "auto"]) {
     } }]);
   });
 }
+test("ordinary readContext never forwards internal includeReadinessContext even if passed in params", async (t) => {
+  const bridge = setup(t, "observer");
+  const calls = [];
+  bridge.setVaultAgentInvoker(async (op, params) => {
+    calls.push({ op, params });
+    return { ok: true, content: "bounded output" };
+  });
+  const result = await bridge.dispatchBuiltinRpc("netcatty/readContext", {
+    chatSessionId: "chat",
+    sessionId: "a",
+    range: "tail",
+    maxLines: 5,
+    includeReadinessContext: true,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal("includeReadinessContext" in calls[0].params, false);
+});
 test("missing, ambiguous, empty and foreign scopes never reach the renderer", async (t) => {
   const bridge = setup(t);
   bridge.setVaultAgentInvoker(() => assert.fail("must not read"));

@@ -843,7 +843,11 @@ export interface TerminalLayerProps {
   onUpdateSessionFontSize?: (sessionId: string, fontSize: number) => void;
   onUpdateSessionRestoreCwd?: (sessionId: string, cwd: string | null) => void;
   onUpdateSessionDynamicTitle?: (sessionId: string, title: string | null) => void;
-  onUpdateSessionPromptHost?: (sessionId: string, hostname: string | null) => void;
+  onUpdateSessionPromptHost?: (
+    sessionId: string,
+    hostname: string | null,
+    options?: { fromJumpServer?: boolean },
+  ) => void;
   onUpdateSessionCodingCliProvider?: (sessionId: string, providerId: import('../../domain/codingCliProviders').CodingCliProviderId | null) => void;
   onClearSessionFontSizeOverride?: (sessionId: string) => void;
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;

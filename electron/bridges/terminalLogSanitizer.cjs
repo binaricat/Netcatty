@@ -590,6 +590,52 @@ function terminalCursorState(terminalData, options) {
   };
 }
 
+function renderCursorBoundScreenText(terminalData, options) {
+  const renderer = new TerminalTextRenderer({
+    alternateScreenActive: options?.alternateScreenActive === true,
+  });
+  renderer.feed(terminalData || "");
+  renderer.finish();
+  if (renderer.alternateScreenActive) return null;
+  const cursorRow = renderer.row;
+  const cursorCol = renderer.col;
+  for (let r = cursorRow + 1; r < renderer.lines.length; r += 1) {
+    if (getTrimmedLineLength(renderer.lines[r]) > 0) {
+      return null;
+    }
+  }
+  const cursorLineCells = renderer.lines[cursorRow] || [];
+  if (cursorLineCells[cursorCol]?.continuation) {
+    return null;
+  }
+  for (let c = cursorCol; c < cursorLineCells.length; c += 1) {
+    const cell = cursorLineCells[c];
+    if (!cell || cell.continuation) continue;
+    const ch = cell.ch || " ";
+    if (ch !== " " && ch !== "\t") {
+      return null;
+    }
+  }
+  const cursorPrefix = cursorLineCells.slice(0, cursorCol).map(cellText).join("");
+  const cursorLineText = cursorCol > cursorLineCells.length
+    ? `${cursorPrefix}${" ".repeat(cursorCol - cursorLineCells.length)}`
+    : cursorPrefix;
+  const rawLines = [];
+  const trimmedAboveLines = [];
+  const startRow = Math.max(0, renderer.screenBaseRow || 0);
+  for (let r = startRow; r < cursorRow; r += 1) {
+    const lineText = (renderer.lines[r] || []).map(cellText).join("");
+    rawLines.push(lineText);
+    trimmedAboveLines.push(lineText.replace(/[ \t]+$/g, ""));
+  }
+  rawLines.push(cursorLineText);
+  trimmedAboveLines.push(cursorLineText);
+  return {
+    rawText: rawLines.join("\n"),
+    trimmedAboveText: trimmedAboveLines.join("\n"),
+  };
+}
+
 // Alternate-screen transitions from TerminalTextRenderer, without a text
 // buffer. Callers replay the bytes a rolling tail dropped so truncation
 // cannot clear the guard.
@@ -675,6 +721,7 @@ module.exports = {
   terminalDataToPlainText,
   terminalCursorLine,
   terminalCursorState,
+  renderCursorBoundScreenText,
   alternateScreenActiveAfter,
 };
 

@@ -448,7 +448,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const promptHostnameSignalController = useMemo(
     () => createPromptHostnameSessionSignalController({
       getSession: (sessionId) => sessionsRef.current.find((session) => session.id === sessionId),
-      onChange: (sessionId, hostname) => onUpdateSessionPromptHost?.(sessionId, hostname),
+      onChange: (sessionId, hostname, options) => {
+        onUpdateSessionPromptHost?.(sessionId, hostname, options);
+      },
     }),
     [onUpdateSessionPromptHost],
   );

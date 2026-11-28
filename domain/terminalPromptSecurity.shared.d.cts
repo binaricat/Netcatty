@@ -22,4 +22,5 @@ export function isUntrustedTerminalInputPrompt(
   options?: ConfirmedPromptOptions,
 ): boolean;
 export function isJumpServerMenuPrompt(value: string): boolean;
+export function isJumpServerMenuLine(value: string): boolean;
 export function extractTerminalPromptHostname(value: string): string | null;

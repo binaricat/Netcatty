@@ -8,7 +8,16 @@ const {
   execViaChannel,
   execViaRawPty,
 } = require("../bridges/ai/ptyExec.cjs");
-const { getFreshIdlePrompt, getVisibleIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
+const {
+  stripAnsi,
+  extractTrailingIdlePrompt,
+  getFreshIdlePrompt,
+  getVisibleIdlePrompt,
+  formatSyntheticEcho,
+  trackSessionIdlePrompt,
+  getSessionReadinessGeneration,
+  bumpSessionReadinessGeneration,
+} = require("../bridges/ai/shellUtils.cjs");
 const { classifyShellReadiness } = require("../bridges/ai/shellReadinessState.cjs");
 const {
   ensureSessionShellKind,
@@ -130,6 +139,7 @@ function createWorkerAiExecHandler({
   sessions,
   activePtyExecs = new Map(),
   activeSessionJobs = new Map(),
+  activeExecCounts = new Map(),
 }) {
   return async function handleWorkerAiExec(event, payload = {}) {
     const {
@@ -180,124 +190,140 @@ function createWorkerAiExecHandler({
       };
     }
 
-    const ptyStream = session.stream || session.pty || session.proc;
-
-    if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
-      if (precheck === true) return { ok: true };
-      const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
-      if (blocked) return blocked;
-      return execViaRawPty(ptyStream, command, {
-        timeoutMs,
-        trackForCancellation: activePtyExecs,
-        chatSessionId,
-        encoding: sessionProtocol === "serial" ? (session.serialEncoding || "utf8") : "utf8",
-      });
+    const trackActiveExec = precheck !== true;
+    if (trackActiveExec) {
+      activeExecCounts.set(sessionId, (activeExecCounts.get(sessionId) || 0) + 1);
     }
 
-    if (ptyStream && typeof ptyStream.write === "function") {
-      // Remote sessions may not set shellKind at connect time; probe once so
-      // fish login shells get the fish wrapper (issue #1854). Cancellable so
-      // Stop during the probe window does not still type the command.
-      if (!noProbe) {
-        const probed = await ensureSessionShellKindForExec(session, {
+    try {
+      const ptyStream = session.stream || session.pty || session.proc;
+
+      if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
+        if (precheck === true) return { ok: true };
+        const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
+        if (blocked) return blocked;
+        bumpSessionReadinessGeneration(session);
+        return await execViaRawPty(ptyStream, command, {
+          timeoutMs,
+          trackForCancellation: activePtyExecs,
+          chatSessionId,
+          encoding: sessionProtocol === "serial" ? (session.serialEncoding || "utf8") : "utf8",
+        });
+      }
+
+      if (ptyStream && typeof ptyStream.write === "function") {
+        // Remote sessions may not set shellKind at connect time; probe once so
+        // fish login shells get the fish wrapper (issue #1854). Cancellable so
+        // Stop during the probe window does not still type the command.
+        if (!noProbe) {
+          const probed = await ensureSessionShellKindForExec(session, {
+            trackForCancellation: activePtyExecs,
+            chatSessionId,
+          });
+          if (!probed.ok) return probed;
+        }
+        const safety = checkBlocklist(command, session);
+        if (safety.blocked) {
+          return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+        }
+        if (precheck === true) return { ok: true };
+        const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
+        if (blocked) return blocked;
+        bumpSessionReadinessGeneration(session);
+        return await execViaPty(ptyStream, command, {
+          beforeInput: async () => {
+            const blocked = await checkWorkerExecution(event, null, chatSessionId);
+            if (blocked) throw new Error(blocked.error);
+          },
+          onInterrupt: () => clearSessionFlowState(session),
+          stripMarkers: true,
+          trackForCancellation: activePtyExecs,
+          timeoutMs,
+          shellKind: session.shellKind,
+          loginShellHint: session._loginShellKind,
+          probeLiveShell: true,
+          bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
+          skipPendingInputClear: session.singleChannelSsh === true,
+          onProbeAborted: (marker) => {
+            event?.sender?.send?.("netcatty:data", {
+              sessionId,
+              data: `${marker}_R\n`,
+            });
+          },
+          onEchoSuppressionPrime: (marker) => {
+            event?.sender?.send?.("netcatty:data", {
+              sessionId,
+              data: `${marker}_I\n`,
+            });
+          },
+          chatSessionId,
+          expectedPrompt: getFreshIdlePrompt(session),
+          getReadyPrompt: typeof session._promptTrackTail === "string"
+            ? () => getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) : undefined,
+          classifyReadiness: () => classifyShellReadiness(session),
+          typedInput: true,
+          echoCommand: (rawCommand) => {
+            event?.sender?.send?.("netcatty:data", {
+              sessionId,
+              data: formatSyntheticEcho(rawCommand),
+              syntheticEcho: true,
+            });
+          },
+          enforceWallTimeout: enforceWallTimeout === true,
+        });
+      }
+
+      if (isNetworkDevice) {
+        return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
+      }
+
+      const sshClient = session.sshClient || session.conn;
+      if (!session.singleChannelSsh && sshClient && typeof sshClient.exec === "function") {
+        if (!noProbe) {
+          const probed = await ensureSessionShellKindForExec(session, {
+            trackForCancellation: activePtyExecs,
+            chatSessionId,
+          });
+          if (!probed.ok) return probed;
+        }
+        const safety = checkBlocklist(command, session);
+        if (safety.blocked) {
+          return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+        }
+        if (precheck === true) return { ok: true };
+        const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
+        if (blocked) return blocked;
+        return await execViaChannel(sshClient, command, {
+          timeoutMs,
           trackForCancellation: activePtyExecs,
           chatSessionId,
         });
-        if (!probed.ok) return probed;
       }
-      const safety = checkBlocklist(command, session);
-      if (safety.blocked) {
-        return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-      }
-      if (precheck === true) return { ok: true };
-      const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
-      if (blocked) return blocked;
-      return execViaPty(ptyStream, command, {
-        beforeInput: async () => {
-          const blocked = await checkWorkerExecution(event, null, chatSessionId);
-          if (blocked) throw new Error(blocked.error);
-        },
-        onInterrupt: () => clearSessionFlowState(session),
-        stripMarkers: true,
-        trackForCancellation: activePtyExecs,
-        timeoutMs,
-        shellKind: session.shellKind,
-        loginShellHint: session._loginShellKind,
-        probeLiveShell: true,
-        bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
-        skipPendingInputClear: session.singleChannelSsh === true,
-        onProbeAborted: (marker) => {
-          event?.sender?.send?.("netcatty:data", {
-            sessionId,
-            data: `${marker}_R\n`,
-          });
-        },
-        onEchoSuppressionPrime: (marker) => {
-          event?.sender?.send?.("netcatty:data", {
-            sessionId,
-            data: `${marker}_I\n`,
-          });
-        },
-        chatSessionId,
-        expectedPrompt: getFreshIdlePrompt(session),
-        getReadyPrompt: typeof session._promptTrackTail === "string"
-          ? () => getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) : undefined,
-        classifyReadiness: () => classifyShellReadiness(session),
-        typedInput: true,
-        echoCommand: (rawCommand) => {
-          event?.sender?.send?.("netcatty:data", {
-            sessionId,
-            data: formatSyntheticEcho(rawCommand),
-            syntheticEcho: true,
-          });
-        },
-        enforceWallTimeout: enforceWallTimeout === true,
-      });
-    }
 
-    if (isNetworkDevice) {
-      return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
-    }
-
-    const sshClient = session.sshClient || session.conn;
-    if (!session.singleChannelSsh && sshClient && typeof sshClient.exec === "function") {
-      if (!noProbe) {
-        const probed = await ensureSessionShellKindForExec(session, {
+      if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
+        if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
+          return { ok: false, error: "Serial file transfer is already in progress" };
+        }
+        if (precheck === true) return { ok: true };
+        const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
+        if (blocked) return blocked;
+        bumpSessionReadinessGeneration(session);
+        return await execViaRawPty(session.serialPort, command, {
+          timeoutMs,
           trackForCancellation: activePtyExecs,
           chatSessionId,
+          encoding: session.serialEncoding || "utf8",
         });
-        if (!probed.ok) return probed;
       }
-      const safety = checkBlocklist(command, session);
-      if (safety.blocked) {
-        return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-      }
-      if (precheck === true) return { ok: true };
-      const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
-      if (blocked) return blocked;
-      return execViaChannel(sshClient, command, {
-        timeoutMs,
-        trackForCancellation: activePtyExecs,
-        chatSessionId,
-      });
-    }
 
-    if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
-      if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
-        return { ok: false, error: "Serial file transfer is already in progress" };
+      return { ok: false, error: "No terminal stream or SSH client available for this session" };
+    } finally {
+      if (trackActiveExec) {
+        const nextCount = (activeExecCounts.get(sessionId) || 1) - 1;
+        if (nextCount <= 0) activeExecCounts.delete(sessionId);
+        else activeExecCounts.set(sessionId, nextCount);
       }
-      if (precheck === true) return { ok: true };
-      const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
-      if (blocked) return blocked;
-      return execViaRawPty(session.serialPort, command, {
-        timeoutMs,
-        trackForCancellation: activePtyExecs,
-        chatSessionId,
-        encoding: session.serialEncoding || "utf8",
-      });
     }
-
-    return { ok: false, error: "No terminal stream or SSH client available for this session" };
   };
 }
 
@@ -472,6 +498,7 @@ function createWorkerAiJobStartHandler({
     );
     let handle;
     try {
+      bumpSessionReadinessGeneration(session);
       handle = startPtyJob(ptyStream, command, {
         beforeInput: async () => {
           const blocked = await checkWorkerExecution(event, null, chatSessionId);
@@ -604,14 +631,28 @@ function createWorkerAiJobStopHandler({ backgroundJobs = new Map() }) {
   };
 }
 
+function getSessionOutputDeliveryState(session) {
+  const flowState = session?.flowState;
+  const bufferedBytes = Number.isFinite(flowState?.bufferedBytes)
+    ? Math.max(0, flowState.bufferedBytes)
+    : 0;
+  const unackedBytes = Number.isFinite(flowState?.unackedBytes)
+    ? Math.max(0, flowState.unackedBytes)
+    : 0;
+  const outputPaused = Boolean(flowState?.outputPaused || flowState?.rendererPaused);
+  return { bufferedBytes, unackedBytes, outputPaused };
+}
+
 function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
   const activePtyExecs = new Map();
   const backgroundJobs = new Map();
   const activeSessionJobs = new Map();
+  const activeExecCounts = new Map();
   ipcMain.handle("netcatty:ai:exec", createWorkerAiExecHandler({
     sessions,
     activePtyExecs,
     activeSessionJobs,
+    activeExecCounts,
   }));
   ipcMain.handle("netcatty:ai:jobStart", createWorkerAiJobStartHandler({
     sessions,
@@ -626,14 +667,105 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
     // live here in the default worker path, so the main process cannot see
     // prompt tracking state without this route. Never mutates the session and
     // never writes to the PTY.
-    const session = sessions.get(payload?.sessionId);
+    const sessionId = payload?.sessionId;
+    const session = sessions.get(sessionId);
     if (!session) return { ok: true, found: false };
+    const taskInFlight = activeSessionJobs.has(sessionId) || (activeExecCounts.get(sessionId) || 0) > 0;
+    const { bufferedBytes, unackedBytes, outputPaused } = getSessionOutputDeliveryState(session);
     return {
       ok: true,
       found: true,
       trackedShell: typeof session._promptTrackTail === "string",
       freshIdlePrompt: getFreshIdlePrompt(session) || "",
       visibleIdlePrompt: getVisibleIdlePrompt(session) || "",
+      readiness: classifyShellReadiness(session, { taskInFlight }),
+      generation: getSessionReadinessGeneration(session),
+      bufferedBytes,
+      unackedBytes,
+      outputPaused,
+    };
+  });
+  ipcMain.handle("netcatty:ai:seedIdlePrompt", (_event, payload = {}) => {
+    const sessionId = payload?.sessionId;
+    const session = sessions.get(sessionId);
+    if (!session) return { ok: true, found: false };
+    const taskInFlight = activeSessionJobs.has(sessionId) || (activeExecCounts.get(sessionId) || 0) > 0;
+    const currentPrompt = getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) || "";
+    const currentReadiness = classifyShellReadiness(session, { taskInFlight });
+    const currentGeneration = getSessionReadinessGeneration(session);
+    const { bufferedBytes, unackedBytes, outputPaused } = getSessionOutputDeliveryState(session);
+    const outputDrained = payload?.outputDrained === true;
+    const expectedGeneration = payload?.expectedGeneration;
+    if (
+      !Number.isFinite(expectedGeneration)
+      || expectedGeneration !== currentGeneration
+      || outputPaused
+      || bufferedBytes > 0
+      || (!outputDrained && unackedBytes > 0)
+    ) {
+      return {
+        ok: true,
+        found: true,
+        ready: Boolean(currentPrompt),
+        prompt: currentPrompt,
+        readiness: currentReadiness,
+        generation: currentGeneration,
+        stale: true,
+      };
+    }
+    if (typeof session._promptTrackTail !== "string") {
+      return {
+        ok: true,
+        found: true,
+        ready: false,
+        prompt: "",
+        readiness: currentReadiness,
+        generation: currentGeneration,
+      };
+    }
+    if (currentPrompt) {
+      return {
+        ok: true,
+        found: true,
+        ready: true,
+        prompt: currentPrompt,
+        readiness: currentReadiness,
+        generation: currentGeneration,
+      };
+    }
+    if (currentReadiness !== "unknown") {
+      return {
+        ok: true,
+        found: true,
+        ready: false,
+        prompt: "",
+        readiness: currentReadiness,
+        generation: currentGeneration,
+      };
+    }
+    const rawContext = typeof payload?.context === "string" ? payload.context : "";
+    const plainContext = stripAnsi(rawContext);
+    if (plainContext.trim()) {
+      // The renderer's visible buffer can survive a worker-side tracker reset or
+      // a paint sequence that never reached prompt tracking. Seeding is
+      // read-only: validate the plain visible snapshot before updating the
+      // idleness cache, and never write to the PTY or inject control sequences.
+      const candidateChunk = `\r\n${plainContext}`;
+      if (
+        classifyShellReadiness({ _promptTrackTail: candidateChunk }) === "unknown"
+        && extractTrailingIdlePrompt(candidateChunk)
+      ) {
+        trackSessionIdlePrompt(session, candidateChunk);
+      }
+    }
+    const prompt = getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) || "";
+    return {
+      ok: true,
+      found: true,
+      ready: Boolean(prompt),
+      prompt,
+      readiness: classifyShellReadiness(session, { taskInFlight }),
+      generation: getSessionReadinessGeneration(session),
     };
   });
   ipcMain.handle("netcatty:ai:jobStop", createWorkerAiJobStopHandler({

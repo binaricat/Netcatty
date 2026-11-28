@@ -22,6 +22,7 @@ const ALPINE_PROMPT_IDENTITY_PATTERN =
 const MACOS_ROOT_PROMPT_IDENTITY_PATTERN =
   /^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?:~|\/[^#$>\\\s]*)\s+[A-Za-z0-9_.-]+[#$]?$/u;
 const JUMP_SERVER_MENU_PROMPT_PATTERN = /^(?:Opt|\[Host\])>$/u;
+const JUMP_SERVER_MENU_LINE_PATTERN = /^(?:Opt|\[Host\])>(?:\s+\S.*)?$/u;
 const PROMPT_HOST_PATTERN =
   /^(?:\[[A-Fa-f0-9:.]+\]|[A-Za-z0-9_][A-Za-z0-9_.-]*)$/u;
 
@@ -181,6 +182,12 @@ function isJumpServerMenuPrompt(value) {
   return JUMP_SERVER_MENU_PROMPT_PATTERN.test(line);
 }
 
+function isJumpServerMenuLine(value) {
+  const line = lastLogicalLine(value).trim();
+  if (!line) return false;
+  return JUMP_SERVER_MENU_LINE_PATTERN.test(line);
+}
+
 function extractTerminalPromptHostname(value) {
   const plain = stripTerminalControlSequences(value);
   if (!plain) return null;
@@ -257,5 +264,6 @@ module.exports = {
   isBashPs2ContinuationLine,
   isUntrustedTerminalInputPrompt,
   isJumpServerMenuPrompt,
+  isJumpServerMenuLine,
   extractTerminalPromptHostname,
 };

@@ -504,10 +504,14 @@ const {
 } = backgroundJobApi;
 
 let disposeWorkerSessionClosed = null;
+let drainTerminalOutputFn = null;
 
 function init(deps) {
   sessions = deps.sessions;
   terminalWorkerManager = deps.terminalWorkerManager || null;
+  drainTerminalOutputFn = typeof deps.drainTerminalOutput === "function"
+    ? deps.drainTerminalOutput
+    : null;
   fileTransferBridge = deps.transferBridge || null;
   electronModule = deps.electronModule || null;
   cliDiscoveryFilePathOverride = deps.cliDiscoveryFilePath || null;
@@ -1735,11 +1739,201 @@ async function queryWorkerShellReadiness(sessionId, status) {
     return {
       trackedShell: result.trackedShell === true,
       ready: Boolean(result.freshIdlePrompt || result.visibleIdlePrompt),
+      readiness: result.readiness === "busy" || result.readiness === "unknown"
+        ? result.readiness
+        : null,
+      generation: Number.isFinite(result.generation) ? result.generation : null,
+      bufferedBytes: Number.isFinite(result.bufferedBytes) ? Math.max(0, result.bufferedBytes) : 0,
+      unackedBytes: Number.isFinite(result.unackedBytes) ? Math.max(0, result.unackedBytes) : 0,
+      outputPaused: result.outputPaused === true,
     };
   } catch {
     return null;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+function extractCursorBoundedContextForSeed(visible) {
+  // Hibernated snapshots lack xterm's live `isWrapped` line-wrap metadata, so
+  // physical rows cannot safely distinguish soft-wrapped commands from prompts.
+  if (visible?.source === "snapshot") return "";
+  // Prefer the renderer's logical-line-reconstructed cursor tail when provided;
+  // an empty string is an explicit fail-closed refusal (e.g. wrapped head
+  // evicted, mid-line cursor, or non-empty rows below cursor).
+  if (typeof visible?.readinessContext === "string") {
+    return visible.readinessContext;
+  }
+  if (typeof visible?.content !== "string") return "";
+  const content = visible.content;
+  if (!content.trim()) return "";
+  const cursorLine = visible.cursorLine;
+  const startLine = visible.startLine;
+  const endLine = visible.endLine;
+  if (
+    !Number.isInteger(cursorLine)
+    || !Number.isInteger(startLine)
+    || !Number.isInteger(endLine)
+  ) {
+    return content;
+  }
+  if (cursorLine < startLine || cursorLine > endLine) {
+    return "";
+  }
+  if (visible.cursorAtLineEnd === false) {
+    return "";
+  }
+  const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const relativeCursor = cursorLine - startLine;
+  if (relativeCursor < 0 || relativeCursor >= lines.length) {
+    return "";
+  }
+  // Only drop unused physical viewport rows below the cursor when they are
+  // blank. Non-empty text below the cursor indicates a primary-screen TUI or
+  // menu rather than an idle shell prompt at the cursor.
+  for (let i = relativeCursor + 1; i < lines.length; i += 1) {
+    if (lines[i].trim().length > 0) {
+      return "";
+    }
+  }
+  const boundedLines = lines.slice(0, relativeCursor + 1);
+  return boundedLines.join("\n");
+}
+
+async function rehydrateWorkerPromptFromVisibleContext({
+  sessionId,
+  chatSessionId,
+  scopedSessionIds,
+  isCancelled,
+  cancelPromise,
+}) {
+  const checkPreflightAbort = () => {
+    if (isCancelled?.() || isChatSessionCancelled(chatSessionId)) {
+      return { ok: false, error: "Cancelled", cancelled: true };
+    }
+    if (closingTerminalSessions.has(sessionId)) {
+      return { ok: false, error: `Session "${sessionId}" is closing.`, closing: true };
+    }
+    const scopeErr = validateSessionScope(sessionId, chatSessionId, scopedSessionIds);
+    if (scopeErr) {
+      return { ok: false, error: scopeErr };
+    }
+    return null;
+  };
+  const awaitCancellable = (promise) => {
+    const safePromise = Promise.resolve(promise).catch(() => null);
+    return cancelPromise ? Promise.race([safePromise, cancelPromise]) : safePromise;
+  };
+
+  const initialAbort = checkPreflightAbort();
+  if (initialAbort) return initialAbort;
+  if (!terminalWorkerManager?.request || !invokeVaultAgentFn) {
+    return { ok: true, seeded: false };
+  }
+
+  const readiness = await awaitCancellable(queryWorkerShellReadiness(sessionId, "connected"));
+  const afterProbeAbort = checkPreflightAbort();
+  if (afterProbeAbort) return afterProbeAbort;
+  if (!readiness) return { ok: true, seeded: false };
+  if (readiness.ready) return { ok: true, seeded: true };
+  if (
+    readiness.trackedShell !== true
+    || readiness.readiness !== "unknown"
+    || !Number.isFinite(readiness.generation)
+    || readiness.outputPaused
+  ) {
+    return { ok: true, seeded: false };
+  }
+
+  // Ensure the renderer has consumed all worker output tracked up through
+  // `readiness.generation` before capturing the visible buffer; otherwise a
+  // newly-started command (e.g. `cat`) whose echo is still buffered or in
+  // flight to the renderer could leave the old prompt on screen.
+  const drainFn = drainTerminalOutputFn
+    || (typeof terminalWorkerManager?.drainOutputSession === "function"
+      ? require("./terminalBridge.cjs").requestTerminalOutputDrain
+      : null);
+  let outputDrained = false;
+  if (drainFn) {
+    const drainResult = await awaitCancellable(drainFn(sessionId, terminalWorkerManager));
+    const afterDrainAbort = checkPreflightAbort();
+    if (afterDrainAbort) return afterDrainAbort;
+    if (drainResult?.success !== true) {
+      return { ok: true, seeded: false };
+    }
+    outputDrained = true;
+  } else if (readiness.bufferedBytes > 0 || readiness.unackedBytes > 0) {
+    return { ok: true, seeded: false };
+  }
+
+  const visible = await awaitCancellable(handleReadContext({
+    sessionId,
+    chatSessionId,
+    scopedSessionIds,
+    range: "tail",
+    maxLines: 120,
+  }, { includeReadinessContext: true }));
+  const afterReadAbort = checkPreflightAbort();
+  if (afterReadAbort) return afterReadAbort;
+  if (visible?.ok !== true || visible.alternateScreen === true) {
+    return { ok: true, seeded: false };
+  }
+  const seedContext = extractCursorBoundedContextForSeed(visible);
+  if (!seedContext.trim()) {
+    return { ok: true, seeded: false };
+  }
+
+  const seeded = await awaitCancellable(terminalWorkerManager.request(
+    "netcatty:ai:seedIdlePrompt",
+    {
+      sessionId,
+      context: seedContext,
+      expectedGeneration: readiness.generation,
+      outputDrained,
+    },
+    {},
+  ));
+  const afterSeedAbort = checkPreflightAbort();
+  if (afterSeedAbort) return afterSeedAbort;
+  return { ok: true, seeded: seeded?.ok === true && seeded.ready === true };
+}
+
+async function runWorkerPromptRehydrationPreflight({
+  sessionId,
+  chatSessionId,
+  scopedSessionIds,
+}) {
+  if (!chatSessionId && !Array.isArray(scopedSessionIds)) {
+    return { ok: true, seeded: false };
+  }
+  let cancelledDuringPreflight = false;
+  let resolvePreflightCancel = null;
+  let preflightMarker = null;
+  const cancelPromise = new Promise((resolve) => {
+    resolvePreflightCancel = resolve;
+  });
+  if (chatSessionId) {
+    preflightMarker = `__NCMCP_WORKER_PREFLIGHT_${crypto.randomBytes(8).toString("hex")}__`;
+    activePtyExecs.set(preflightMarker, {
+      chatSessionId,
+      cancel: () => {
+        cancelledDuringPreflight = true;
+        resolvePreflightCancel?.(null);
+      },
+    });
+  }
+  try {
+    return await rehydrateWorkerPromptFromVisibleContext({
+      sessionId,
+      chatSessionId,
+      scopedSessionIds,
+      isCancelled: () => cancelledDuringPreflight || isChatSessionCancelled(chatSessionId),
+      cancelPromise,
+    });
+  } finally {
+    if (preflightMarker) {
+      activePtyExecs.delete(preflightMarker);
+    }
   }
 }
 
@@ -2092,6 +2286,7 @@ async function handleWorkerTerminalExec(params = {}, beforeExecute, options = {}
   }
 
   const chatSessionId = params?.chatSessionId || null;
+  const scopedSessionIds = params?.scopedSessionIds;
   const meta = getSessionMeta(sessionId, chatSessionId) || {};
   const metaProtocol = String(meta.protocol || "").toLowerCase();
   if (metaProtocol === "vnc" || metaProtocol === "rdp") {
@@ -2122,6 +2317,16 @@ async function handleWorkerTerminalExec(params = {}, beforeExecute, options = {}
   }
 
   try {
+    if (!isNetworkDeviceLikeMeta(meta)) {
+      const preflight = await runWorkerPromptRehydrationPreflight({
+        sessionId,
+        chatSessionId,
+        scopedSessionIds,
+      });
+      if (!preflight.ok) {
+        return { ok: false, error: preflight.error };
+      }
+    }
     return await terminalWorkerManager.request("netcatty:ai:exec", {
       sessionId,
       command,
@@ -2153,6 +2358,7 @@ async function handleWorkerJobStart(params = {}, beforeExecute) {
   }
 
   const chatSessionId = params?.chatSessionId || null;
+  const scopedSessionIds = params?.scopedSessionIds;
   const meta = getSessionMeta(sessionId, chatSessionId) || {};
   const metaProtocol = String(meta.protocol || "").toLowerCase();
   if (metaProtocol === "vnc" || metaProtocol === "rdp") {
@@ -2172,7 +2378,15 @@ async function handleWorkerJobStart(params = {}, beforeExecute) {
     }
   }
 
-  const pendingStart = { chatSessionId, cancelled: false };
+  let resolvePreflightCancel = null;
+  const cancelPromise = new Promise((resolve) => {
+    resolvePreflightCancel = resolve;
+  });
+  const pendingStart = {
+    chatSessionId,
+    cancelled: false,
+    onCancel: () => resolvePreflightCancel?.(null),
+  };
   let pendingForSession = pendingWorkerJobStarts.get(sessionId);
   if (!pendingForSession) {
     pendingForSession = new Set();
@@ -2181,6 +2395,22 @@ async function handleWorkerJobStart(params = {}, beforeExecute) {
   pendingForSession.add(pendingStart);
 
   try {
+    if (!isNetworkDeviceLikeMeta(meta)) {
+      const preflight = await rehydrateWorkerPromptFromVisibleContext({
+        sessionId,
+        chatSessionId,
+        scopedSessionIds,
+        isCancelled: () => pendingStart.cancelled || isChatSessionCancelled(chatSessionId),
+        cancelPromise,
+      });
+      if (!preflight.ok) {
+        return {
+          ok: false,
+          error: preflight.error,
+          ...(preflight.cancelled || preflight.closing ? { status: "cancelled" } : {}),
+        };
+      }
+    }
     const result = await terminalWorkerManager.request("netcatty:ai:jobStart", {
       sessionId,
       command,
@@ -2339,7 +2569,10 @@ function cancelWorkerBackgroundJobsForSession(chatSessionId) {
   if (!chatSessionId) return;
   for (const pendingStarts of pendingWorkerJobStarts.values()) {
     for (const pendingStart of pendingStarts) {
-      if (pendingStart.chatSessionId === chatSessionId) pendingStart.cancelled = true;
+      if (pendingStart.chatSessionId === chatSessionId) {
+        pendingStart.cancelled = true;
+        pendingStart.onCancel?.();
+      }
     }
   }
   for (const [jobId, job] of workerBackgroundJobs) {
@@ -2374,6 +2607,7 @@ async function cancelWorkerBackgroundJobsForTerminalSession(sessionId) {
   if (!sessionId) return;
   for (const pendingStart of pendingWorkerJobStarts.get(sessionId) || []) {
     pendingStart.cancelled = true;
+    pendingStart.onCancel?.();
   }
   const matchingJobs = [];
   const pending = [];
@@ -2393,7 +2627,7 @@ async function cancelWorkerBackgroundJobsForTerminalSession(sessionId) {
 }
 
 // Read via the existing renderer bridge and the sidebar's bounded reader.
-async function handleReadContext(params = {}) {
+async function handleReadContext(params = {}, options = {}) {
   const scopedIds = resolveScopedSessionIds(params.chatSessionId, params.scopedSessionIds);
   const sessionId = typeof params.sessionId === "string" && params.sessionId.trim()
     ? params.sessionId.trim()
@@ -2416,11 +2650,13 @@ async function handleReadContext(params = {}) {
   if (ownerId != null && (!owner || owner.isDestroyed?.())) {
     return { ok: false, error: "Terminal window is unavailable." };
   }
+  const includeReadinessContext = options?.includeReadinessContext === true;
   const result = await invokeVaultAgentFn("terminal.readContext", {
     sessionId,
     range: params.range,
     startLine: params.startLine,
     maxLines: params.maxLines,
+    ...(includeReadinessContext ? { includeReadinessContext: true } : {}),
   }, { webContents: owner });
   // Scope can change while the renderer drains pending terminal output.
   const currentScopeError = validateSessionScope(sessionId, params.chatSessionId, params.scopedSessionIds);
@@ -3145,6 +3381,7 @@ module.exports = {
   reserveSessionExecution,
   releaseSessionExecution,
   getSessionBusyError,
+  rehydrateWorkerPromptForExec: runWorkerPromptRehydrationPreflight,
   dispatchBuiltinRpc: dispatch,
   EXTERNAL_MCP_CHAT_SESSION_ID,
 };
