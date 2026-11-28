@@ -418,7 +418,7 @@ test('VaultNavSidebar renders plugin view badges in expanded and collapsed modes
   install('cancelAnimationFrame', (id: number) => clearTimeout(id));
   install('IS_REACT_ACT_ENVIRONMENT', true);
 
-  const { default: React, act } = await import('react');
+  const { act } = await import('react');
   const { createRoot } = await import('react-dom/client');
   const { TooltipProvider } = await import('../ui/tooltip');
   const { VaultNavSidebarList } = await import('./VaultNavSidebar');
