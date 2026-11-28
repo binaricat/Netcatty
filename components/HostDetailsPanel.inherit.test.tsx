@@ -308,3 +308,71 @@ test("Host Details preserves cleared inherited companion RDP identity across sav
     assert.equal(effective.rdpConfig?.identityId, "");
   }, companionHost);
 });
+
+test("Host Details retains the inherited desktop username and domain when detaching a standalone RDP identity", async () => {
+  const dom = installDomEnvironment();
+  const previousRaf = globalThis.requestAnimationFrame;
+  const previousCancelRaf = globalThis.cancelAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => setTimeout(() => callback(0), 0) as unknown as number;
+  globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+
+  let renderer: ReactTestRenderer | undefined;
+  let saved: Host | undefined;
+  const group: Partial<GroupConfig> = {
+    rdpConfig: { enabled: true, identityId: "win-admin" },
+  };
+  const standaloneRdp: Host = {
+    ...host,
+    protocol: "rdp",
+    port: undefined,
+    username: "",
+    password: undefined,
+    authMethod: undefined,
+    rdpConfig: undefined,
+  };
+
+  try {
+    await act(async () => {
+      renderer = create(
+        <I18nProvider locale="en">
+          <TooltipProvider>
+            <HostDetailsPanel
+              {...panelProps(group, standaloneRdp)}
+              identities={[
+                {
+                  id: "win-admin",
+                  label: "Windows Admin",
+                  username: "Administrator",
+                  domain: "CORP",
+                  authMethod: "password",
+                  password: "group-secret",
+                  created: 1,
+                },
+              ]}
+              onSave={(value) => { saved = value; }}
+            />
+          </TooltipProvider>
+        </I18nProvider>,
+      );
+    });
+
+    const clearBtn = renderer!.root.findAllByType(Button).find(
+      (btn) => btn.props.size === "icon" && btn.props.className?.includes("h-8 w-8 shrink-0"),
+    );
+    assert.ok(clearBtn, "expected Clear button on inherited standalone RDP identity");
+    await act(async () => { clearBtn.props.onClick({ defaultPrevented: false }); });
+
+    const buttons = renderer!.root.findByType(AsidePanelFooter).findAllByType(Button);
+    await act(async () => { await buttons[buttons.length - 1].props.onClick(); });
+
+    assert.ok(saved);
+    assert.equal(saved.identityId, "");
+    assert.equal(saved.username, "Administrator");
+    assert.equal(saved.rdpConfig?.domain, "CORP");
+  } finally {
+    if (renderer) await act(async () => { renderer!.unmount(); });
+    globalThis.requestAnimationFrame = previousRaf;
+    globalThis.cancelAnimationFrame = previousCancelRaf;
+    dom.cleanup();
+  }
+});

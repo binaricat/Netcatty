@@ -1440,13 +1440,28 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   );
 
   const clearIdentity = useCallback(() => {
+    const effectiveDetachUsername =
+      selectedIdentity?.username
+      || (form.protocol === "rdp"
+        ? effectiveAuthHost.rdpConfig?.username
+        : form.protocol === "vnc"
+          ? effectiveAuthHost.vncConfig?.username
+          : undefined)
+      || effectiveAuth.username;
     setForm((prev) => {
-      const detached = detachEffectiveHostIdentity(prev, effectiveAuth.username);
-      if (prev.protocol === "rdp" && prev.rdpConfig?.identityId !== undefined) {
-        return {
-          ...detached,
-          rdpConfig: { ...prev.rdpConfig, identityId: undefined },
-        };
+      const detached = detachEffectiveHostIdentity(prev, effectiveDetachUsername);
+      if (prev.protocol === "rdp") {
+        const nextDomain = prev.rdpConfig?.domain || selectedIdentity?.domain;
+        if (prev.rdpConfig?.identityId !== undefined || (nextDomain && !prev.rdpConfig?.domain)) {
+          return {
+            ...detached,
+            rdpConfig: {
+              ...(prev.rdpConfig ?? {}),
+              identityId: undefined,
+              ...(nextDomain ? { domain: nextDomain } : {}),
+            },
+          };
+        }
       }
       if (prev.protocol === "vnc" && prev.vncConfig?.identityId !== undefined) {
         return {
@@ -1457,7 +1472,14 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       return detached;
     });
     setIdentitySuggestionsOpen(false);
-  }, [effectiveAuth.username]);
+  }, [
+    effectiveAuth.username,
+    effectiveAuthHost.rdpConfig?.username,
+    effectiveAuthHost.vncConfig?.username,
+    form.protocol,
+    selectedIdentity?.domain,
+    selectedIdentity?.username,
+  ]);
 
   const updateTelnetIdentity = useCallback((identityId: string) => {
     setForm((prev) => ({
