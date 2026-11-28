@@ -177,6 +177,25 @@ test('buildExternalEditorLaunchSpec constructs structured argv for Zed, VS Code,
   assert.equal(zedMacApp.command, 'open');
   assert.deepEqual(zedMacApp.args, ['-a', '/Applications/Zed.app', '--args', 'ssh://prod-12345678.netcatty/srv/app']);
 
+  // Custom placeholders expand in a single literal pass without reinterpreting `$&` or `{kind}`.
+  const customSpec = buildExternalEditorLaunchSpec({
+    editorId: 'custom',
+    executablePath: '/usr/bin/my-ed',
+    customArgs: ['--remote', '{sshTarget}', '--path', '{remotePath}', '--kind', '{kind}'],
+    sshTarget: 'prod-12345678.netcatty',
+    remotePath: '/tmp/report$&/{kind}',
+    kind: 'file',
+    platform: 'linux',
+  });
+  assert.deepEqual(customSpec.args, [
+    '--remote',
+    'prod-12345678.netcatty',
+    '--path',
+    '/tmp/report$&/{kind}',
+    '--kind',
+    'file',
+  ]);
+
   const vscodeDir = buildExternalEditorLaunchSpec({
     editorId: 'vscode',
     executablePath: '/usr/bin/code',

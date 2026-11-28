@@ -443,13 +443,18 @@ export function buildExternalEditorLaunchSpec(input: BuildEditorLaunchSpecInput)
       const template = input.customArgs && input.customArgs.length > 0
         ? input.customArgs
         : [...DEFAULT_CUSTOM_EDITOR_ARGS];
+      const placeholderValues: Record<string, string> = {
+        '{sshUri}': sshUri,
+        '{sshTarget}': input.sshTarget,
+        '{remotePath}': input.remotePath,
+        '{encodedPath}': encodedPath,
+        '{kind}': input.kind,
+      };
       editorArgs = template.map((token) =>
-        token
-          .replace(/\{sshUri\}/g, sshUri)
-          .replace(/\{sshTarget\}/g, input.sshTarget)
-          .replace(/\{remotePath\}/g, input.remotePath)
-          .replace(/\{encodedPath\}/g, encodedPath)
-          .replace(/\{kind\}/g, input.kind),
+        token.replace(
+          /\{(?:sshUri|sshTarget|remotePath|encodedPath|kind)\}/g,
+          (match) => placeholderValues[match],
+        ),
       );
       displayUri = sshUri;
       break;

@@ -711,3 +711,45 @@ test("attachClientChannelMultiplexer catches synchronous remote open throws and 
   remoteConn.emit("close");
   assert.equal(clientEnded, true);
 });
+
+test("attachClientChannelMultiplexer cancels late reverse-forward listens that complete after client close", () => {
+  const client = new EventEmitter();
+  client.end = () => {};
+
+  let pendingForwardCb = null;
+  const unforwarded = [];
+  const remoteConn = new EventEmitter();
+  remoteConn._sock = { destroyed: false };
+  remoteConn.exec = () => {};
+  remoteConn.forwardIn = (bindAddr, bindPort, cb) => {
+    pendingForwardCb = cb;
+  };
+  remoteConn.unforwardIn = (bindAddr, bindPort, cb) => {
+    unforwarded.push({ bindAddr, bindPort });
+    cb?.();
+  };
+
+  attachClientChannelMultiplexer(client, remoteConn);
+  client.emit("ready");
+
+  let accepted = false;
+  let rejected = false;
+  client.emit(
+    "request",
+    () => { accepted = true; },
+    () => { rejected = true; },
+    "tcpip-forward",
+    { bindAddr: "127.0.0.1", bindPort: 0 },
+  );
+  assert.equal(typeof pendingForwardCb, "function");
+
+  // External client closes BEFORE upstream forwardIn replies.
+  client.emit("close");
+
+  // Upstream reply arrives late with assigned port 43210 -> must immediately unforwardIn.
+  pendingForwardCb(null, 43210);
+
+  assert.equal(accepted, false);
+  assert.equal(rejected, true);
+  assert.deepEqual(unforwarded, [{ bindAddr: "127.0.0.1", bindPort: 43210 }]);
+});

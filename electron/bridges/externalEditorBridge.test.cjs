@@ -135,6 +135,23 @@ test("buildLaunchSpec uses structured argv and never injects shell strings", () 
   assert.equal(zedSpec.command, "C:\\Users\\dev\\AppData\\Local\\Programs\\Zed\\Zed.exe");
   assert.deepEqual(zedSpec.args, ["ssh://prod-1234abcd.netcatty/home/dev/a%3B%20rm%20-rf%20/%3B%20b"]);
 
+  // Custom placeholders expand in a single literal pass without interpreting `$&` or re-expanding `{kind}`.
+  const customSpec = buildLaunchSpec({
+    editorId: "custom",
+    executablePath: "/usr/bin/custom-ed",
+    customArgs: ["--target", "{sshTarget}", "{remotePath}", "{kind}"],
+    sshTarget: "prod-1234abcd.netcatty",
+    remotePath: "/tmp/report$&/{kind}",
+    kind: "file",
+    platform: "linux",
+  });
+  assert.deepEqual(customSpec.args, [
+    "--target",
+    "prod-1234abcd.netcatty",
+    "/tmp/report$&/{kind}",
+    "file",
+  ]);
+
   assert.throws(() => buildLaunchSpec({
     editorId: "evil-shell",
     executablePath: "/bin/sh",

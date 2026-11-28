@@ -663,13 +663,18 @@ function buildLaunchSpec({
       ? customArgs.filter((item) => typeof item === "string" && item.length > 0 && !/[\r\n\0]/.test(item)).slice(0, 32)
       : ["{sshUri}"];
     if (template.length === 0) template.push("{sshUri}");
+    const placeholderValues = {
+      "{sshUri}": sshUri,
+      "{sshTarget}": sshTarget,
+      "{remotePath}": remotePath,
+      "{encodedPath}": encodedPath,
+      "{kind}": safeKind,
+    };
     editorArgs = template.map((token) =>
-      token
-        .replace(/\{sshUri\}/g, sshUri)
-        .replace(/\{sshTarget\}/g, sshTarget)
-        .replace(/\{remotePath\}/g, remotePath)
-        .replace(/\{encodedPath\}/g, encodedPath)
-        .replace(/\{kind\}/g, safeKind),
+      token.replace(
+        /\{(?:sshUri|sshTarget|remotePath|encodedPath|kind)\}/g,
+        (match) => placeholderValues[match],
+      ),
     );
   }
 

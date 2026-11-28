@@ -540,6 +540,7 @@ function bridgeChannelStreams(clientStream, remoteStream, options = {}) {
 function attachClientChannelMultiplexer(client, remoteConn) {
   // Reverse port forwarding registrations owned by this client connection.
   const activeReverseForwards = new Map();
+  let clientClosed = false;
 
   const onRemoteTransportClosed = () => {
     try {
@@ -553,6 +554,14 @@ function attachClientChannelMultiplexer(client, remoteConn) {
     remoteConn.once("close", onRemoteTransportClosed);
     remoteConn.once("end", onRemoteTransportClosed);
   }
+
+  client.once("close", () => {
+    clientClosed = true;
+    if (typeof remoteConn?.removeListener === "function") {
+      remoteConn.removeListener("close", onRemoteTransportClosed);
+      remoteConn.removeListener("end", onRemoteTransportClosed);
+    }
+  });
 
   client.on("authentication", (ctx) => {
     // The underlying local socket ALREADY presented our 256-bit per-instance
@@ -760,6 +769,12 @@ function attachClientChannelMultiplexer(client, remoteConn) {
               reject();
               return;
             }
+            if (clientClosed) {
+              try { remoteStream.destroy?.(); } catch {}
+              try { remoteStream.end?.(); } catch {}
+              try { reject(); } catch {}
+              return;
+            }
             const clientStream = accept();
             clientStream.pipe(remoteStream);
             remoteStream.pipe(clientStream);
@@ -781,6 +796,10 @@ function attachClientChannelMultiplexer(client, remoteConn) {
       if (name === "tcpip-forward" && typeof remoteConn.forwardIn === "function") {
         const bindAddr = info.bindAddr || "127.0.0.1";
         const bindPort = info.bindPort || 0;
+        if (clientClosed) {
+          reject?.();
+          return;
+        }
         try {
           remoteConn.forwardIn(bindAddr, bindPort, (err, actualPort) => {
             if (err) {
@@ -788,6 +807,19 @@ function attachClientChannelMultiplexer(client, remoteConn) {
               return;
             }
             const assignedPort = actualPort || bindPort;
+            if (clientClosed) {
+              try {
+                remoteConn.unforwardIn?.(bindAddr, assignedPort, () => {});
+              } catch {
+                // ignore
+              }
+              try {
+                reject?.();
+              } catch {
+                // ignore
+              }
+              return;
+            }
             const key = `${bindAddr}:${assignedPort}`;
             activeReverseForwards.set(key, { bindAddr, bindPort: assignedPort });
             accept?.(assignedPort);
@@ -846,8 +878,6 @@ function attachClientChannelMultiplexer(client, remoteConn) {
     client.once("close", () => {
       if (typeof remoteConn.removeListener === "function") {
         remoteConn.removeListener("tcp connection", onRemoteTcpConnection);
-        remoteConn.removeListener("close", onRemoteTransportClosed);
-        remoteConn.removeListener("end", onRemoteTransportClosed);
       }
       for (const { bindAddr, bindPort } of activeReverseForwards.values()) {
         try {
@@ -858,13 +888,6 @@ function attachClientChannelMultiplexer(client, remoteConn) {
       }
       activeReverseForwards.clear();
     });
-  });
-
-  client.once("close", () => {
-    if (typeof remoteConn?.removeListener === "function") {
-      remoteConn.removeListener("close", onRemoteTransportClosed);
-      remoteConn.removeListener("end", onRemoteTransportClosed);
-    }
   });
 
   client.on("error", () => {

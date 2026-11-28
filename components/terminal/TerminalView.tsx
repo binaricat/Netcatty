@@ -1334,13 +1334,13 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
                   {pendingExternalEditorRequest.remotePath}
                 </div>
                 <div className="flex justify-end gap-2 pt-1">
-                  <Button variant="secondary" size="sm" onClick={() => handleExternalEditorPromptResponse('deny')}>
+                  <Button variant="secondary" size="sm" autoFocus onClick={() => handleExternalEditorPromptResponse('deny')}>
                     {t("terminal.externalEditor.prompt.deny")}
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => handleExternalEditorPromptResponse('once')}>
                     {t("terminal.externalEditor.prompt.allowOnce")}
                   </Button>
-                  <Button size="sm" autoFocus onClick={() => handleExternalEditorPromptResponse('always')}>
+                  <Button size="sm" onClick={() => handleExternalEditorPromptResponse('always')}>
                     {t("terminal.externalEditor.prompt.alwaysTrust")}
                   </Button>
                 </div>
