@@ -291,8 +291,8 @@ test("vault.sftp.* runs bounded list/stat/read/write/mkdir/delete over pooled SS
   await h.invoke("vault.sftp.delete", { hostBindingToken: token, path: "/srv/new.txt" });
   assert.equal(h.sftpFiles.has("/srv/new.txt"), false);
 
-  // Destructive root delete rejected
-  for (const badPath of ["/", ".", "..", "~", "///..//"]) {
+  // Destructive root/home delete rejected (including trailing slash ~/ )
+  for (const badPath of ["/", ".", "..", "~", "~/", "///..//"]) {
     await assert.rejects(
       h.invoke("vault.sftp.delete", { hostBindingToken: token, path: badPath }),
       (err) => err.code === RPC_ERRORS.invalidArgument,
@@ -412,4 +412,47 @@ test("ui.openExternalUrl rejects non-HTTPS/credential URLs and only opens after 
   assert.deepEqual(openedUrls, ["https://netcatty.app/docs"]);
 
   interactionService.shutdown();
+});
+
+test("portForward.create rejects non-loopback bindAddress, SFTPWrapper error events do not crash, and silent TCP host probes reachable", async () => {
+  const net = require("node:net");
+  const { probeTcpReachability } = require("./hostCapabilitiesService.cjs");
+
+  // 1. portForward.create rejects 0.0.0.0 and ::
+  const h = createCapabilitiesHarness();
+  const token = await h.bindHost("host-pf-guard");
+  for (const badBind of ["0.0.0.0", "::", "192.168.1.10"]) {
+    await assert.rejects(
+      h.invoke("portForward.create", { hostBindingToken: token, label: "Expose", type: "local", localPort: 5432, bindAddress: badBind }),
+      (err) => err.code === RPC_ERRORS.invalidArgument,
+    );
+  }
+
+  // 2. SFTPWrapper async 'error' event is handled (no uncaught ERR_UNHANDLED_ERROR)
+  const fakeSftp = new EventEmitter();
+  fakeSftp.readdir = (_p, cb) => cb(null, []);
+  const sftpTransport = new PluginHostSshSftpTransport({
+    sshExecTransport: {
+      async acquireConnection() {
+        const conn = { sftp: (cb) => cb(null, fakeSftp) };
+        return { conn, signal: new AbortController().signal, invalidate() {}, release() {} };
+      },
+    },
+  });
+  await sftpTransport.listDir({}, "/");
+  assert.doesNotThrow(() => fakeSftp.emit("error", new Error("async sftp channel reset")));
+
+  // 3. probeTcpReachability returns reachable: true when TCP connects but server sends no banner before timeout
+  const server = net.createServer((socket) => { socket.resume(); });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { port } = server.address();
+    const probed = await probeTcpReachability({ host: "127.0.0.1", port, timeoutMs: 80, signal: new AbortController().signal });
+    assert.equal(probed.reachable, true, "connected silent TCP host must report reachable: true");
+    assert.equal(probed.bannerVerified, false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  h.shutdown();
 });

@@ -73,6 +73,10 @@ export const VaultNavCustomizePopover: React.FC<VaultNavCustomizePopoverProps> =
     setDropTarget(null);
   }, []);
 
+  React.useEffect(() => {
+    if (!open) clearDrag();
+  }, [open, clearDrag]);
+
   const visibleCount = items.filter((item) => item.visible).length;
 
   return (

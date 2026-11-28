@@ -398,12 +398,17 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
       flushObserver.observe(flushNode, { characterData: true });
       const mountRoot = document.createElement('div');
       mountRoot.setAttribute('style', 'min-height:100%;height:100%');
-      // Mount into mountRoot before attaching it to container so synchronous DOM
-      // or flushSync React commits arrive in a single atomic first-paint batch
-      // instead of flashing an empty container or empty mountRoot frame.
-      const cleanup = mount(mountRoot, typeof message.stateScope === 'string' ? message.stateScope : viewId);
-      if (typeof cleanup === 'function') view.unmount = cleanup;
+      // Attach mountRoot before mount() so initial React layout effects see
+      // isConnected === true and container.contains(target) === true while
+      // MutationObserver microtask batching still delivers the first paint atomically.
       container.appendChild(mountRoot);
+      try {
+        const cleanup = mount(mountRoot, typeof message.stateScope === 'string' ? message.stateScope : viewId);
+        if (typeof cleanup === 'function') view.unmount = cleanup;
+      } catch (error) {
+        close(id);
+        throw error;
+      }
       // A valid component may render nothing; complete initial loading on the
       // next microtask if mount produced no DOM mutations.
       void Promise.resolve().then(() => {

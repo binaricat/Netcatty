@@ -298,35 +298,42 @@ async function scanPackageDirectory(
 
   const files: ScannedFile[] = new Array(discovered.length);
   let nextIndex = 0;
+  let aborted = false;
   const workerCount = Math.min(DIRECTORY_HASH_CONCURRENCY, Math.max(1, discovered.length));
   await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (true) {
+    while (!aborted) {
       const current = nextIndex;
       nextIndex += 1;
       if (current >= discovered.length) return;
-      const entry = discovered[current];
-      const hashes = await hashFile(entry.absolutePath, PACKAGE_LIMITS.singleFileBytes, {
-        computeCrc32,
-      });
-      if (hashes.size !== entry.size || hashes.mode !== entry.mode) {
-        throw new Error(`Package source changed while it was being scanned: ${entry.packagePath}`);
+      try {
+        const entry = discovered[current];
+        const hashes = await hashFile(entry.absolutePath, PACKAGE_LIMITS.singleFileBytes, {
+          computeCrc32,
+        });
+        if (aborted) return;
+        if (hashes.size !== entry.size || hashes.mode !== entry.mode) {
+          throw new Error(`Package source changed while it was being scanned: ${entry.packagePath}`);
+        }
+        const isExecutable = isExecutablePackageFile(entry.packagePath, hashes.mode);
+        if (isExecutable && !companionPaths.has(entry.packagePath)) {
+          throw new Error(`Executable file is not declared as a companion: ${entry.packagePath}`);
+        }
+        const companion = companionPaths.get(entry.packagePath);
+        if (companion && companion.sha256 !== hashes.sha256) {
+          throw new Error(`Companion SHA-256 mismatch: ${entry.packagePath}`);
+        }
+        files[current] = {
+          absolutePath: entry.absolutePath,
+          packagePath: entry.packagePath,
+          size: entry.size,
+          executable: Boolean(companion),
+          crc32: hashes.crc32,
+          sha256: hashes.sha256,
+        };
+      } catch (error) {
+        aborted = true;
+        throw error;
       }
-      const isExecutable = isExecutablePackageFile(entry.packagePath, hashes.mode);
-      if (isExecutable && !companionPaths.has(entry.packagePath)) {
-        throw new Error(`Executable file is not declared as a companion: ${entry.packagePath}`);
-      }
-      const companion = companionPaths.get(entry.packagePath);
-      if (companion && companion.sha256 !== hashes.sha256) {
-        throw new Error(`Companion SHA-256 mismatch: ${entry.packagePath}`);
-      }
-      files[current] = {
-        absolutePath: entry.absolutePath,
-        packagePath: entry.packagePath,
-        size: entry.size,
-        executable: Boolean(companion),
-        crc32: hashes.crc32,
-        sha256: hashes.sha256,
-      };
     }
   }));
   assertManifestSnapshotMatches(

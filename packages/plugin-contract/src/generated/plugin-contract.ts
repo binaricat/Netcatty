@@ -1337,7 +1337,7 @@ export type PortForwardCreateParams = {
   label: string;
   type: "local" | "remote" | "dynamic";
   localPort: number;
-  bindAddress?: string;
+  bindAddress?: "127.0.0.1" | "::1" | "localhost";
   remoteHost?: string;
   remotePort?: number;
 };

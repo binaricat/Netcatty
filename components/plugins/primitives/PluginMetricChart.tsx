@@ -75,6 +75,7 @@ export function formatMetricValue(value: number | null | undefined, unit: Plugin
 function formatClockTime(epochMs: number): string {
   if (!Number.isFinite(epochMs)) return '';
   const date = new Date(epochMs);
+  if (Number.isNaN(date.getTime())) return '';
   const hh = String(date.getHours()).padStart(2, '0');
   const mm = String(date.getMinutes()).padStart(2, '0');
   const ss = String(date.getSeconds()).padStart(2, '0');
@@ -100,21 +101,30 @@ interface PlotSegment {
 function sanitizeSeries(raw: PluginMetricChartSeries[] | undefined): CleanSeries[] {
   if (!Array.isArray(raw)) return [];
   const limited = raw.slice(0, MAX_SERIES);
+  const seenIds = new Set<string>();
   return limited
     .filter((item): item is PluginMetricChartSeries => Boolean(item && typeof item === 'object'))
     .map((item, idx) => {
       const rawPoints = Array.isArray(item.points) ? item.points.slice(-MAX_POINTS_PER_SERIES) : [];
       const points: Array<{ at: number; value: number | null }> = [];
-      let latestValue: number | null = null;
       for (const pt of rawPoints) {
         if (!pt || typeof pt !== 'object' || typeof pt.at !== 'number' || !Number.isFinite(pt.at)) continue;
         const val = typeof pt.value === 'number' && Number.isFinite(pt.value) ? pt.value : null;
         points.push({ at: pt.at, value: val });
-        if (val !== null) latestValue = val;
       }
       points.sort((a, b) => a.at - b.at);
+      let latestValue: number | null = null;
+      for (let i = points.length - 1; i >= 0; i -= 1) {
+        if (points[i].value !== null) {
+          latestValue = points[i].value;
+          break;
+        }
+      }
+      const baseId = typeof item.id === 'string' && item.id ? item.id : `series-${idx}`;
+      const uniqueId = seenIds.has(baseId) ? `${baseId}-${idx}` : baseId;
+      seenIds.add(uniqueId);
       return {
-        id: typeof item.id === 'string' && item.id ? item.id : `series-${idx}`,
+        id: uniqueId,
         label: typeof item.label === 'string' && item.label ? item.label : `Series ${idx + 1}`,
         color: resolveColor(item.color, idx),
         unit: item.unit ?? '',
@@ -273,15 +283,20 @@ export function PluginMetricChart(props: PluginMetricChartWidgetProps) {
     const resolvedEnd = typeof props.endAt === 'number' && Number.isFinite(props.endAt)
       ? props.endAt
       : (Number.isFinite(maxAt) ? maxAt : Date.now());
+    const rawDataSpan = Number.isFinite(minAt) && resolvedEnd > minAt ? resolvedEnd - minAt : NaN;
     const resolvedRange = typeof props.rangeMs === 'number' && Number.isFinite(props.rangeMs) && props.rangeMs > 0
       ? props.rangeMs
-      : (Number.isFinite(minAt) && resolvedEnd > minAt ? Math.max(1000, resolvedEnd - minAt) : 5 * 60_000);
-    const resolvedStart = resolvedEnd - resolvedRange;
+      : (Number.isFinite(rawDataSpan) ? Math.max(1000, rawDataSpan) : 5 * 60_000);
+    const candidateStart = resolvedEnd - resolvedRange;
+    const resolvedStart = Number.isFinite(candidateStart) && Number.isFinite(resolvedEnd - candidateStart)
+      ? candidateStart
+      : resolvedEnd - 5 * 60_000;
 
     const unit = series[0]?.unit ?? '';
-    const resolvedMin = typeof props.min === 'number' && Number.isFinite(props.min)
+    const rawMin = typeof props.min === 'number' && Number.isFinite(props.min)
       ? props.min
-      : (Number.isFinite(minVal) && minVal < 0 ? minVal * 1.1 : 0);
+      : (Number.isFinite(minVal) && minVal < 0 ? (Number.isFinite(minVal * 1.1) ? minVal * 1.1 : minVal) : 0);
+    let resolvedMin = Number.isFinite(rawMin) ? rawMin : 0;
 
     let resolvedMax: number;
     if (typeof props.max === 'number' && Number.isFinite(props.max)) {
@@ -294,13 +309,18 @@ export function PluginMetricChart(props: PluginMetricChartWidgetProps) {
         if (t.value > peak) peak = t.value;
       }
       if (peak <= resolvedMin) {
-        resolvedMax = resolvedMin + (unit === 'ms' ? 10 : 1);
+        const padded = resolvedMin + (unit === 'ms' ? 10 : 1);
+        resolvedMax = Number.isFinite(padded) ? padded : resolvedMin;
       } else {
-        resolvedMax = peak * 1.1;
+        const paddedPeak = peak * 1.1;
+        resolvedMax = Number.isFinite(paddedPeak) ? paddedPeak : peak;
       }
     }
 
-    if (resolvedMax <= resolvedMin) resolvedMax = resolvedMin + 1;
+    if (!Number.isFinite(resolvedMax - resolvedMin) || resolvedMax <= resolvedMin) {
+      resolvedMin = 0;
+      resolvedMax = 100;
+    }
 
     return {
       startAt: resolvedStart,
@@ -474,7 +494,7 @@ export function PluginMetricChart(props: PluginMetricChartWidgetProps) {
   }, [variant, hasData, series, startAt, endAt, yMin, yMax, padLeft, padTop, plotWidth, plotHeight]);
 
   const tooltipLeft = hoverSnapshot
-    ? (hoverSnapshot.x > width * 0.62 ? Math.max(4, hoverSnapshot.x - 168) : Math.min(width - 164, hoverSnapshot.x + 10))
+    ? (hoverSnapshot.x > width * 0.62 ? Math.max(4, hoverSnapshot.x - 168) : Math.max(4, Math.min(width - 164, hoverSnapshot.x + 10)))
     : 0;
 
   return (

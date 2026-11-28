@@ -51,11 +51,17 @@ function assertInteractionRequest(params) {
     throw fail("invalidArgument", "Host interaction choice IDs must be unique");
   }
   if (params.kind === "openExternalUrl") {
+    if (typeof params.url !== "string" || /[\u0000-\u001f\u007f]/u.test(params.url)) {
+      throw fail("invalidArgument", "External URL is invalid");
+    }
     let parsed;
     try { parsed = new URL(params.url); } catch { throw fail("invalidArgument", "External URL is invalid"); }
     if (parsed.protocol !== "https:" || parsed.username || parsed.password || !parsed.hostname) {
       throw fail("invalidArgument", "Only HTTPS URLs without credentials may be opened");
     }
+    const normalized = structuredClone(params);
+    normalized.url = parsed.href;
+    return Object.freeze(normalized);
   }
   return Object.freeze(structuredClone(params));
 }

@@ -11,6 +11,7 @@ const fail = (code, message) => new PluginRpcError(RPC_ERRORS[code], message);
 const MAX_CONCURRENT_PROBES_PER_RUNTIME = 12;
 const MAX_CONCURRENT_PROBES_TOTAL = 48;
 const MAX_TERMINAL_SCREEN_BYTES = 262_144;
+const ALLOWED_LOOPBACK_BIND_ADDRESSES = new Set(["127.0.0.1", "::1", "localhost"]);
 
 function probeTcpReachability({ host, port, timeoutMs, signal }) {
   return new Promise((resolve) => {
@@ -32,7 +33,9 @@ function probeTcpReachability({ host, port, timeoutMs, signal }) {
     }
     signal?.addEventListener("abort", onAbort, { once: true });
     socket.setTimeout(timeoutMs);
+    const onConnectTimeout = () => finish({ reachable: false, protocol: "ssh", port, rttMs: null, bannerVerified: false, error: "Connection timed out" });
     socket.once("connect", () => {
+      socket.removeListener("timeout", onConnectTimeout);
       const rttMs = Math.max(0, Math.round(performance.now() - startedAt));
       socket.setTimeout(Math.min(timeoutMs, 1500));
       socket.once("data", (chunk) => {
@@ -51,7 +54,7 @@ function probeTcpReachability({ host, port, timeoutMs, signal }) {
         finish({ reachable: true, protocol: "ssh", port, rttMs, bannerVerified: false });
       });
     });
-    socket.once("timeout", () => finish({ reachable: false, protocol: "ssh", port, rttMs: null, bannerVerified: false, error: "Connection timed out" }));
+    socket.once("timeout", onConnectTimeout);
     socket.once("error", (err) => finish({ reachable: false, protocol: "ssh", port, rttMs: null, bannerVerified: false, error: String(err?.message || "Connection failed").slice(0, 256) }));
     socket.connect(port, host);
   });
@@ -247,10 +250,14 @@ class PluginHostCapabilitiesService {
       await context.assertActive();
       const hostId = this.hostVaultService.resolveDurableHostId(context.pluginId, params.hostBindingToken, context.sourceOwner);
       const { hostBindingToken: _token, ...ruleInput } = params;
+      const bindAddress = (ruleInput.bindAddress ?? "127.0.0.1").trim().toLowerCase();
+      if (!ALLOWED_LOOPBACK_BIND_ADDRESSES.has(bindAddress)) {
+        throw fail("invalidArgument", "Plugin port forwarding bindAddress must be a loopback address (127.0.0.1, ::1, or localhost)");
+      }
       return this.vaultDataBridge.request("portForward.create", {
         ...ruleInput,
         hostId,
-        bindAddress: ruleInput.bindAddress ?? "127.0.0.1",
+        bindAddress,
       }, context.signal);
     }, {
       metadata: { capability: "portForward", mutating: true },
@@ -431,6 +438,9 @@ class PluginHostCapabilitiesService {
     const hostId = this.hostVaultService.resolveDurableHostId(context.pluginId, params.hostBindingToken, context.sourceOwner);
     const controller = new AbortController();
     const lease = { controller, runtimeId: context.runtimeId, pluginId: context.pluginId };
+    if (context.signal?.aborted) {
+      throw fail("cancelled", "Host probe was cancelled");
+    }
     this.activeProbes.add(lease);
     const onAbort = () => controller.abort(context.signal?.reason ?? fail("cancelled", "Host probe was cancelled"));
     context.signal?.addEventListener("abort", onAbort, { once: true });
@@ -444,8 +454,12 @@ class PluginHostCapabilitiesService {
 
       // Anti-port-scan guard: restrict protocol & port strictly to the saved host's configured ports.
       const allowedPorts = new Map();
-      const sshPort = Number(target.sshPort) || 22;
-      allowedPorts.set("ssh", sshPort);
+      const rawSshPort = Number(target.sshPort);
+      if (Number.isSafeInteger(rawSshPort) && rawSshPort >= 1 && rawSshPort <= 65535) {
+        allowedPorts.set("ssh", rawSshPort);
+      } else if (!target.rdpPort && !target.vncPort && target.defaultProtocol !== "rdp" && target.defaultProtocol !== "vnc") {
+        allowedPorts.set("ssh", 22);
+      }
       if (target.rdpPort) allowedPorts.set("rdp", Number(target.rdpPort));
       if (target.vncPort) allowedPorts.set("vnc", Number(target.vncPort));
 
