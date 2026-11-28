@@ -227,12 +227,17 @@ import {
 } from "./terminal/sftpCwd";
 import { useTerminalEffects } from "./terminal/useTerminalEffects";
 import { useTerminalHibernateEffect } from "./terminal/useTerminalHibernateEffect";
-import { readActiveTerminalBufferTextRange } from "./terminal/terminalContextBuffer";
+import {
+  readActiveTerminalBufferTextRange,
+  readCursorLogicalTailForReadiness,
+} from "./terminal/terminalContextBuffer";
 import {
   applyAuthoritativeHibernateSnapshot,
   appendHibernatePendingBuffer,
+  compressHibernateSnapshot,
   isTerminalAlternateScreenActive,
   readTerminalHibernateContext,
+  resolveHibernateWakeHistoryAsync,
   resolveTerminalSnapshotCapture,
   serializeTerminalForHibernate,
 } from "./terminal/terminalHibernateRuntime";
@@ -534,6 +539,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const softHiddenRef = useRef(false);
   const hasRuntimeRef = useRef(false);
   const hibernateSnapshotRef = useRef("");
+  const hibernateCompressedSnapshotRef = useRef<Uint8Array | null>(null);
+  const hibernateCompressionGenRef = useRef(0);
   const hibernateViewportSnapshotRef = useRef("");
   const hibernateScrollbackSnapshotRef = useRef("");
   const hibernateContextSnapshotRef = useRef("");
@@ -781,6 +788,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         viewportY?: number;
       };
       const totalLines = Math.max(0, activeBuffer.length);
+      const includeReadinessContext = request.includeReadinessContext === true;
+      const cursorTail = includeReadinessContext
+        ? readCursorLogicalTailForReadiness(term)
+        : null;
       const viewportStartLine = alternateScreen
         ? 0
         : Math.max(0, activeBuffer.viewportY ?? Math.max(0, totalLines - term.rows));
@@ -819,6 +830,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         hasMoreAfter: lineWindow.endLine >= 0 && lineWindow.endLine < totalLines - 1,
         source: 'live',
         alternateScreen,
+        ...(cursorTail
+          ? {
+            ...(cursorTail.cursorLine !== undefined ? { cursorLine: cursorTail.cursorLine } : {}),
+            cursorAtLineEnd: cursorTail.cursorAtLineEnd,
+            readinessContext: alternateScreen ? '' : cursorTail.text,
+          }
+          : {}),
       };
     }
 
@@ -1773,8 +1791,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             snapshot = serializeAddonRef.current.serialize() || "";
           } else if (hibernatedRef.current || softHiddenRef.current) {
             // Hibernate path: live xterm is torn down; use retained snapshot.
+            const retainedHistory = await resolveHibernateWakeHistoryAsync({
+              snapshot: hibernateSnapshotRef.current,
+              compressedSnapshot: hibernateCompressedSnapshotRef.current,
+              viewportSnapshot: hibernateViewportSnapshotRef.current,
+              scrollbackSnapshot: hibernateScrollbackSnapshotRef.current,
+              pendingBuffer: "",
+              alternateScreen: hibernateAlternateScreenRef.current,
+            });
             snapshot = [
-              hibernateSnapshotRef.current || "",
+              retainedHistory || "",
               hibernatePendingBufferRef.current || "",
             ].join("");
           }
@@ -1872,6 +1898,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           xtermRuntimeRef.current?.cursorLineHighlighter.refresh({ force: true });
           try { term.scrollToBottom?.(); } catch { /* ignore */ }
         } else if (hibernatedRef.current || softHiddenRef.current) {
+          if (typeof hibernateCompressedSnapshotRef !== "undefined") {
+            hibernateCompressionGenRef.current += 1;
+            hibernateCompressedSnapshotRef.current = null;
+          }
           applyAuthoritativeHibernateSnapshot({
             snapshot: hibernateSnapshotRef,
             viewportSnapshot: hibernateViewportSnapshotRef,
@@ -2101,6 +2131,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     hibernatedRef.current = false;
     softHiddenRef.current = false;
     hibernateSnapshotRef.current = "";
+    hibernateCompressionGenRef.current += 1;
+    hibernateCompressedSnapshotRef.current = null;
     hibernateViewportSnapshotRef.current = "";
     hibernateScrollbackSnapshotRef.current = "";
     hibernateContextSnapshotRef.current = "";
@@ -2114,9 +2146,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const forceCloseHibernatedSession = useCallback(() => {
     let pendingCapture: void | Promise<void>;
     if (!terminalDataCapturedRef.current) {
-      const hibernatedData = hibernateSnapshotRef.current + hibernatePendingBufferRef.current;
-      if (hibernatedData) {
-        pendingCapture = handleTerminalDataCaptureOnce(sessionId, hibernatedData);
+      const compressed = hibernateCompressedSnapshotRef.current;
+      const pending = hibernatePendingBufferRef.current;
+      if (compressed && compressed.byteLength > 0 && !hibernateSnapshotRef.current) {
+        const snapshotPayload = {
+          snapshot: "",
+          compressedSnapshot: compressed,
+          viewportSnapshot: hibernateViewportSnapshotRef.current,
+          scrollbackSnapshot: hibernateScrollbackSnapshotRef.current,
+          pendingBuffer: "",
+          alternateScreen: hibernateAlternateScreenRef.current,
+        };
+        pendingCapture = resolveHibernateWakeHistoryAsync(snapshotPayload).then((history) => {
+          const hibernatedData = history + pending;
+          if (hibernatedData) {
+            return handleTerminalDataCaptureOnce(sessionId, hibernatedData);
+          }
+        });
+      } else {
+        const hibernatedData = hibernateSnapshotRef.current + pending;
+        if (hibernatedData) {
+          pendingCapture = handleTerminalDataCaptureOnce(sessionId, hibernatedData);
+        }
       }
     }
     disposeDataRef.current?.();
@@ -2310,6 +2361,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const applyHibernateSnapshot = useCallback((
     snapshot: {
       snapshot: string;
+      compressedSnapshot?: Uint8Array | null;
       viewportSnapshot: string;
       scrollbackSnapshot: string;
       contextSnapshot?: string;
@@ -2318,12 +2370,29 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       alternateScreen: boolean;
     },
   ) => {
-    hibernateSnapshotRef.current = snapshot.snapshot;
+    hibernateCompressionGenRef.current += 1;
+    if (snapshot.compressedSnapshot && snapshot.compressedSnapshot.byteLength > 0) {
+      hibernateCompressedSnapshotRef.current = snapshot.compressedSnapshot;
+      hibernateSnapshotRef.current = "";
+      hibernateScrollbackSnapshotRef.current = "";
+    } else {
+      hibernateCompressedSnapshotRef.current = null;
+      hibernateSnapshotRef.current = snapshot.snapshot;
+      hibernateScrollbackSnapshotRef.current = snapshot.snapshot ? "" : snapshot.scrollbackSnapshot;
+    }
     hibernateViewportSnapshotRef.current = snapshot.viewportSnapshot;
-    hibernateScrollbackSnapshotRef.current = snapshot.scrollbackSnapshot;
-    hibernateContextSnapshotRef.current = snapshot.contextSnapshot ?? "";
-    hibernateContextViewportSnapshotRef.current = snapshot.contextViewportSnapshot ?? "";
-    hibernateContextScrollbackSnapshotRef.current = snapshot.contextScrollbackSnapshot ?? "";
+    const contextViewport = snapshot.contextViewportSnapshot ?? "";
+    const contextScrollback = snapshot.contextScrollbackSnapshot ?? "";
+    const contextFull = snapshot.contextSnapshot ?? "";
+    // Avoid retaining a duplicate full-scrollback plain-text string when
+    // buildTerminalContextSnapshotText already reconstructs it from scrollback + viewport.
+    const isRedundantFullContext =
+      Boolean(contextScrollback)
+      && Boolean(contextViewport)
+      && contextFull === `${contextScrollback}\n${contextViewport}`;
+    hibernateContextSnapshotRef.current = isRedundantFullContext ? "" : contextFull;
+    hibernateContextViewportSnapshotRef.current = contextViewport;
+    hibernateContextScrollbackSnapshotRef.current = contextScrollback;
     hibernateAlternateScreenRef.current = snapshot.alternateScreen;
   }, []);
 
@@ -2403,6 +2472,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         preferWasm: resolveHibernatePreferWasmSerialize(terminalSettingsRef.current),
         prepare: () => xtermRuntimeRef.current?.keywordHighlighter.prepareForSerialization()
           ?? Promise.resolve(),
+        compress: false,
       },
     );
 
@@ -2414,6 +2484,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
 
     applyHibernateSnapshot(snapshot);
+    const compressionGen = hibernateCompressionGenRef.current;
+    const rawSnapshotToCompress = hibernateSnapshotRef.current;
     isBootActiveRef.current = false;
     const connectedBackendId = hibernateStatus === "connected" ? backendId : null;
     if (connectedBackendId) {
@@ -2428,6 +2500,22 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       beginHibernatedSessionListeners(connectedBackendId);
     }
     hibernatedRef.current = true;
+    // Compress the retained snapshot only after the live runtime is detached
+    // and incoming output is safely routed to hibernatePendingBufferRef.
+    if (rawSnapshotToCompress) {
+      void compressHibernateSnapshot(rawSnapshotToCompress).then((compressed) => {
+        if (
+          compressed
+          && compressed.byteLength > 0
+          && hibernatedRef.current
+          && hibernateCompressionGenRef.current === compressionGen
+          && hibernateSnapshotRef.current === rawSnapshotToCompress
+        ) {
+          hibernateCompressedSnapshotRef.current = compressed;
+          hibernateSnapshotRef.current = "";
+        }
+      });
+    }
     // Hibernation rebuilds the autofill controller on wake; drop any open
     // picker so it cannot stay visible against a non-pending controller.
     setPasswordPickerState(null);
@@ -4920,6 +5008,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     const getPayload = (): TerminalHibernateWakePayload => ({
       snapshot: hibernateSnapshotRef.current,
+      compressedSnapshot: hibernateCompressedSnapshotRef.current,
       viewportSnapshot: hibernateViewportSnapshotRef.current || hibernateSnapshotRef.current,
       scrollbackSnapshot: hibernateScrollbackSnapshotRef.current,
       pendingBuffer: hibernatePendingBufferRef.current,
@@ -4930,6 +5019,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       sessionId,
       sessionConnected,
       snapshotChars: hibernateSnapshotRef.current.length,
+      compressedBytes: hibernateCompressedSnapshotRef.current?.byteLength ?? 0,
       viewportChars: hibernateViewportSnapshotRef.current.length,
       scrollbackChars: hibernateScrollbackSnapshotRef.current.length,
       pendingChars: hibernatePendingBufferRef.current.length,
@@ -4975,6 +5065,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     softHiddenRef,
     hibernatePendingBufferRef,
     hibernateSnapshotRef,
+    hibernateCompressedSnapshotRef,
     hibernateViewportSnapshotRef,
     hibernateScrollbackSnapshotRef,
     hibernateContextSnapshotRef,

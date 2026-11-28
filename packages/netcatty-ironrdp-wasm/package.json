@@ -31,7 +31,8 @@
     "patches": [
       "0001-session-responsiveness.patch",
       "0002-load-balance-info-and-shell.patch",
-      "0003-rdpdr-drives-and-multimonitor.patch"
+      "0003-rdpdr-drives-and-multimonitor.patch",
+      "0004-standard-rdp-security.patch"
     ]
   }
 }

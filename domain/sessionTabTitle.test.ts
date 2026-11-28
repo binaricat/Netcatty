@@ -41,6 +41,24 @@ test('agent mode does not use a prompt hostname when the agent has no title', ()
   assert.equal(resolveSessionTabTitle(session, 'agent'), session.hostLabel);
 });
 
+test('agent mode uses a jump-server target hostname instead of the configured jump label', () => {
+  const session = {
+    hostLabel: 'jumpssh.riverbegin.cn',
+    promptHostname: 'k8s-10-1-64-1',
+    promptHostnameFromJumpServer: true,
+  };
+  assert.equal(resolveSessionTabTitle(session, 'agent'), session.promptHostname);
+});
+
+test('disabled dynamic titles keep the configured jump-server label for nested hosts', () => {
+  const session = {
+    hostLabel: 'jumpssh.riverbegin.cn',
+    promptHostname: 'k8s-10-1-64-1',
+    promptHostnameFromJumpServer: true,
+  };
+  assert.equal(resolveSessionTabTitle(session, 'off'), session.hostLabel);
+});
+
 test('persisted merged workspace identities ignore live hostnames', () => {
   const sessions = [
     { id: 'a', hostId: 'h1', hostLabel: 'Production', promptHostname: 'vm-prod' },
@@ -67,6 +85,18 @@ test('auto workspace labels use the same agent title policy as session tabs', ()
   };
   const workspace = { title: DEFAULT_WORKSPACE_TITLE, autoTitle: true, focusedSessionId: session.id };
   assert.equal(resolveWorkspaceTabLabel(workspace, [session], 'agent'), session.dynamicTitle);
+});
+
+test('auto workspace labels show nested jump targets in agent mode', () => {
+  const session = {
+    id: 'a',
+    hostId: 'h1',
+    hostLabel: 'jumpssh.riverbegin.cn',
+    promptHostname: 'k8s-10-1-64-1',
+    promptHostnameFromJumpServer: true,
+  };
+  const workspace = { title: DEFAULT_WORKSPACE_TITLE, autoTitle: true, focusedSessionId: session.id };
+  assert.equal(resolveWorkspaceTabLabel(workspace, [session], 'agent'), session.promptHostname);
 });
 
 test('generated workspace display titles honor mode without changing their saved identity', () => {

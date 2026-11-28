@@ -11,10 +11,23 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const {
-  appendTerminalPerfLogLine,
-  configureTerminalPerformanceDiagnostics,
-} = require("./terminalPerformanceDiagnostics.cjs");
+let terminalPerfDiagUserDataPath = null;
+let terminalPerfDiagModule = null;
+function getTerminalPerfDiag() {
+  if (!terminalPerfDiagModule) {
+    terminalPerfDiagModule = require("./terminalPerformanceDiagnostics.cjs");
+    if (terminalPerfDiagUserDataPath) {
+      try {
+        terminalPerfDiagModule.configureTerminalPerformanceDiagnostics({
+          userDataPath: terminalPerfDiagUserDataPath,
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return terminalPerfDiagModule;
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -490,7 +503,10 @@ function init(deps) {
   ensureLogDir();
   try {
     const userDataPath = electronApp?.getPath?.("userData");
-    configureTerminalPerformanceDiagnostics({ userDataPath });
+    terminalPerfDiagUserDataPath = userDataPath || null;
+    if (terminalPerfDiagModule && userDataPath) {
+      terminalPerfDiagModule.configureTerminalPerformanceDiagnostics({ userDataPath });
+    }
   } catch {
     // ignore
   }
@@ -513,7 +529,7 @@ function registerHandlers(ipcMain) {
       ? payload.message.trim()
       : "diagnostic";
     if (source === "terminal-perf" && message.startsWith(TERMINAL_PERF_LOG_PREFIX)) {
-      appendTerminalPerfLogLine(message);
+      getTerminalPerfDiag().appendTerminalPerfLogLine(message);
       if (shouldMirrorTerminalPerfDiagnostics()) {
         console.info(message);
       }

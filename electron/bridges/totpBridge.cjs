@@ -1,6 +1,5 @@
 "use strict";
 
-const jsQR = require("jsqr");
 const {
   previewTotpText,
   selectTotpFromQrPayloads,
@@ -142,7 +141,10 @@ async function scanScreensForTotp(deps = {}) {
     }
     return { ok: false, error: "not-found" };
   }
-  const decode = deps.decode || ((data, width, height) => jsQR(data, width, height));
+  const decode = deps.decode || ((data, width, height) => {
+    const jsQR = require("jsqr");
+    return jsQR(data, width, height);
+  });
   let payloads;
   try {
     payloads = decodeBitmaps(images, decode);

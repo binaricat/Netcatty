@@ -349,6 +349,9 @@ function createTerminalWorkerRuntime(options = {}) {
     registerBridges,
     terminalDataPipeline,
   } = options;
+  const beforeOutputDrain = typeof options.beforeOutputDrain === "function"
+    ? options.beforeOutputDrain
+    : null;
   // Optional hook for suppressed-but-diagnostic failures so they still reach
   // the main process's persistent crash log via the "worker-error" channel.
   const reportSuppressedError = typeof options.reportSuppressedError === "function"
@@ -856,10 +859,23 @@ function createTerminalWorkerRuntime(options = {}) {
       return;
     }
     if (message?.kind === "output-drain") {
-      outputPorts.postControl(message.sessionId, {
-        kind: "drain",
-        requestId: message.requestId,
-      });
+      try {
+        beforeOutputDrain?.(message.sessionId);
+      } catch (error) {
+        reportSuppressedError?.("output-drain-flush", error, { sessionId: message.sessionId });
+      }
+      const sendDrain = () => {
+        outputPorts.postControl(message.sessionId, {
+          kind: "drain",
+          requestId: message.requestId,
+        });
+      };
+      const pending = pendingOutputBySession.get(message.sessionId);
+      if (pending) {
+        void pending.then(sendDrain, sendDrain);
+      } else {
+        sendDrain();
+      }
       return;
     }
     if (message?.kind === "request") {

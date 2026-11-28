@@ -179,3 +179,44 @@ test("released and forgotten panes free their slot", () => {
   assert.equal(budget.tryAcquire(hidden), true, "acquiring twice keeps one slot");
   assert.equal(budget.getActiveCount(), 1);
 });
+
+test("hidden budget keeps 1 MRU hidden pane warm and releases older hidden panes after idle grace", () => {
+  const clock = createClock();
+  const budget = createWebglContextBudget({
+    maxActiveContexts: 12,
+    minHiddenMs: 3_000,
+    maxHiddenContexts: 1,
+    hiddenIdleReleaseMs: 15_000,
+    now: clock.now,
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
+  });
+  const [a, b, c] = ["a", "b", "c"].map((name) => new FakeMember(name));
+  assert.equal(budget.tryAcquire(a), true);
+  assert.equal(budget.tryAcquire(b), true);
+  assert.equal(budget.tryAcquire(c), true);
+
+  a.hiddenSince = clock.now();
+  budget.noteHidden(a);
+  clock.advance(5_000);
+  b.hiddenSince = clock.now();
+  budget.noteHidden(b);
+
+  // Within 15s of hiding `a`, neither hidden pane is evicted (no rapid-flip thrash).
+  clock.advance(9_999);
+  assert.equal(a.releases, 0);
+  assert.equal(b.releases, 0);
+
+  // At t=15_000, oldest hidden pane `a` is released; MRU hidden `b` and visible `c` stay warm.
+  clock.advance(1);
+  assert.equal(a.releases, 1);
+  assert.equal(b.releases, 0);
+  assert.equal(c.releases, 0);
+  assert.equal(budget.getActiveCount(), 2);
+
+  // Even much later, the single MRU hidden pane `b` stays warm for instant Ctrl-Tab.
+  clock.advance(60_000);
+  assert.equal(b.releases, 0);
+  assert.equal(c.releases, 0);
+  assert.equal(budget.getActiveCount(), 2);
+});

@@ -4,6 +4,7 @@ import {
   createSessionHistorySearch,
   type SessionHistorySearchScan,
 } from './sessionHistorySearch';
+import { usePinyinMatcherVersion } from './usePinyinMatcherVersion';
 
 /** Search outside rendering, yielding between bounded slices for input/paint. */
 export function useSessionHistorySearch<T extends SessionHistorySearchTarget>(
@@ -12,10 +13,12 @@ export function useSessionHistorySearch<T extends SessionHistorySearchTarget>(
   untitledLabel: string,
 ): { filteredSessions: readonly T[]; isSearching: boolean } {
   const search = useMemo(() => createSessionHistorySearch(), []);
+  const pinyinMatcherVersion = usePinyinMatcherVersion();
   const latest = useRef({ sessions, query, untitledLabel });
   const work = useRef<{
     query: string;
     untitledLabel: string;
+    pinyinMatcherVersion: number;
     scan: SessionHistorySearchScan<T>;
   } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -44,9 +47,21 @@ export function useSessionHistorySearch<T extends SessionHistorySearchTarget>(
       search.filterSessionHistory(sessions, '');
       return;
     }
-    if (work.current?.query !== query || work.current.untitledLabel !== untitledLabel) {
+    if (
+      work.current?.query !== query
+      || work.current.untitledLabel !== untitledLabel
+      || work.current.pinyinMatcherVersion !== pinyinMatcherVersion
+    ) {
+      if (work.current && work.current.pinyinMatcherVersion !== pinyinMatcherVersion) {
+        search.clearSessionHistorySearchCache();
+      }
       cancel();
-      work.current = { query, untitledLabel, scan: search.createScan<T>(query, { untitledLabel }) };
+      work.current = {
+        query,
+        untitledLabel,
+        pinyinMatcherVersion,
+        scan: search.createScan<T>(query, { untitledLabel }),
+      };
     }
     if (timer.current !== null) return;
     const job = work.current;
@@ -65,7 +80,7 @@ export function useSessionHistorySearch<T extends SessionHistorySearchTarget>(
     // Session updates reuse the in-flight query's match decisions, so one
     // streaming session cannot restart and starve a large history search.
     timer.current = setTimeout(run, 0);
-  }, [sessions, query, untitledLabel, search]);
+  }, [sessions, query, untitledLabel, search, pinyinMatcherVersion]);
 
   useEffect(() => () => {
     if (timer.current !== null) clearTimeout(timer.current);

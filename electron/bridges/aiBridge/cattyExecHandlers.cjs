@@ -7,7 +7,8 @@ const { formatSyntheticEcho, getVisibleIdlePrompt } = require("../ai/shellUtils.
 const { classifyShellReadiness } = require("../ai/shellReadinessState.cjs");
 const { clearSessionFlowState } = require("../terminalFlowAck.cjs");
 const { remoteDisallowsExecChannelProbe, sessionDisallowsExtraSshChannel, ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
-const defaultAiPrivacyService = require("../../shared/aiPrivacyService.cjs");
+let _defaultAiPrivacyService = null;
+const getDefaultAiPrivacyService = () => (_defaultAiPrivacyService ??= require("../../shared/aiPrivacyService.cjs"));
 
 function assertCattyPrivacySession(privacyService, chatSessionId) {
   if (chatSessionId) {
@@ -67,6 +68,22 @@ async function proxyCattyExecToWorker({
 
   try {
     beforeExecute();
+    if (
+      !isNetworkDeviceLike(meta)
+      && typeof mcpServerBridge.rehydrateWorkerPromptForExec === "function"
+    ) {
+      const preflight = await mcpServerBridge.rehydrateWorkerPromptForExec({
+        sessionId,
+        chatSessionId,
+      });
+      if (!preflight.ok) {
+        return { ok: false, error: preflight.error };
+      }
+      if (mcpServerBridge.getPermissionMode?.() === "observer") {
+        return { ok: false, error: "Execution blocked: permission mode is 'observer'" };
+      }
+      beforeExecute();
+    }
     return await terminalWorkerManager.request("netcatty:ai:exec", {
       sessionId,
       command,
@@ -86,7 +103,13 @@ async function proxyCattyExecToWorker({
 }
 
 function registerCattyExecHandlers(ctx) {
-  const privacyService = ctx.aiPrivacyService || defaultAiPrivacyService;
+  const privacyService = ctx.aiPrivacyService || {
+    isEnabled: () => getDefaultAiPrivacyService().isEnabled(),
+    restore: (...args) => getDefaultAiPrivacyService().restore(...args),
+    redact: (...args) => getDefaultAiPrivacyService().redact(...args),
+    checkSession: (...args) => getDefaultAiPrivacyService().checkSession(...args),
+    createPolicyGuard: (...args) => getDefaultAiPrivacyService().createPolicyGuard(...args),
+  };
   with (ctx) {
   ipcMain.handle("netcatty:ai:exec", async (event, { sessionId, command, chatSessionId, delegationTag }) => {
     // Validate IPC sender (Issue #17)

@@ -12,10 +12,14 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import {
   computeMonitorVirtualBounds,
   mapViewportToVirtualDesktopCoords,
+  resolveEffectiveRdpSecurityMode,
+  resolveNextRdpAutoFallback,
   splitWindowsUserDomain,
   type MonitorLayoutSpec,
   type NormalizedRdpConfig,
+  type RdpAutoFallbackStage,
   type RdpDisplayControlCaps,
+  type RdpNegotiatedSecurityInfo,
 } from '../../domain/remoteDesktop';
 import {
   permilleToFramebufferCoord,
@@ -96,7 +100,7 @@ export interface RdpCanvasViewProps {
   password: string;
   domain: string;
   rdpConfig: NormalizedRdpConfig;
-  fallbackDisableCredSsp: boolean;
+  autoFallbackStage: RdpAutoFallbackStage;
   isVisible: boolean;
   displayMode: RemoteDesktopDisplayMode;
   highDpi?: boolean;
@@ -113,12 +117,17 @@ export interface RdpCanvasViewProps {
   onDisplayControlCaps?: (caps: RdpDisplayControlCaps) => void;
   onFpsChange?: (fps: number) => void;
   onRequestReleaseGrab: () => void;
-  onConnected: (info: { width: number; height: number; encrypted?: boolean }) => void;
+  onConnected: (info: {
+    width: number;
+    height: number;
+    encrypted?: boolean;
+    securityInfo?: RdpNegotiatedSecurityInfo;
+  }) => void;
   onDesktopResize: (size: { width: number; height: number }) => void;
   onRemoteClipboardFilesChange?: (files: RemoteDesktopClipboardFileOffer[]) => void;
   onClipboardFileTransferStatus?: (status: string | null) => void;
   onClipboardTransferChange?: (transfer: RemoteDesktopClipboardTransferState | null) => void;
-  onNegotiationFallbackNeeded?: () => void;
+  onNegotiationFallbackNeeded?: (nextStage: Exclude<RdpAutoFallbackStage, 'none'>) => void;
   onError: (error: { message: string; isAuthError?: boolean; kind?: number }) => void;
   onDisconnected: (reason?: string) => void;
 }
@@ -143,7 +152,7 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       password,
       domain,
       rdpConfig,
-      fallbackDisableCredSsp,
+      autoFallbackStage,
       isVisible,
       displayMode,
       highDpi = true,
@@ -967,9 +976,10 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         const { username: cleanUser, domain: cleanDomain } = splitWindowsUserDomain(username, domain);
         const authToken = extractAuthTokenFromWsUrl(wsUrl);
         const securityMode = rdpConfig.securityMode ?? 'auto';
-        const enableCredSsp =
-          securityMode === 'nla' || (securityMode === 'auto' && !fallbackDisableCredSsp);
-        const enableStandardRdp = securityMode === 'rdp';
+        const effectiveSecurityMode = resolveEffectiveRdpSecurityMode(securityMode, autoFallbackStage);
+        const enableCredSsp = effectiveSecurityMode === 'nla' || effectiveSecurityMode === 'auto';
+        const enableStandardRdp = effectiveSecurityMode === 'rdp';
+        let negotiatedSecurityInfo: RdpNegotiatedSecurityInfo | null = null;
 
         const rdpdrSessionId = propsRef.current.sessionId;
         const bridgeForRdpdr = getRemoteDesktopBridge();
@@ -1046,6 +1056,11 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
           .extension(new mod.Extension('color_depth', rdpConfig.colorDepth || 32))
           .extension(new mod.Extension('enable_credssp', enableCredSsp))
           .extension(new mod.Extension('enable_standard_rdp_security', enableStandardRdp))
+          .extension(
+            new mod.Extension('security_info_callback', (info: RdpNegotiatedSecurityInfo) => {
+              negotiatedSecurityInfo = info;
+            }),
+          )
           .extension(new mod.Extension('client_name', 'Netcatty'));
 
         // RDPDR sandboxed local drive redirection (always attach callback so live hotplug works)
@@ -1491,14 +1506,16 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
               : String(err);
 
           // CRITICAL: In `auto` mode, if negotiation fails BEFORE credentials are sent,
-          // retry ONCE without CredSSP (pure TLS). NEVER auto-retry on WrongPassword /
+          // step through NLA -> TLS -> Standard RDP. NEVER auto-retry on WrongPassword /
           // LogonFailure / AccessDenied to prevent Windows NLA account lockout!
-          if (
-            securityMode === 'auto'
-            && !fallbackDisableCredSsp
-            && kind === mod.IronErrorKind.NegotiationFailure
-          ) {
-            callbacksRef.current.onNegotiationFallbackNeeded?.();
+          const nextFallbackStage = resolveNextRdpAutoFallback({
+            configuredMode: securityMode,
+            currentStage: autoFallbackStage,
+            isNegotiationFailure: kind === mod.IronErrorKind.NegotiationFailure,
+            errorMessage: msg,
+          });
+          if (nextFallbackStage) {
+            callbacksRef.current.onNegotiationFallbackNeeded?.(nextFallbackStage);
             return;
           }
 
@@ -1512,6 +1529,8 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
             kind,
           });
           return;
+        } finally {
+          try { builder.free(); } catch { /* ignore */ }
         }
 
         if (disposed) {
@@ -1527,7 +1546,12 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         try { size.free(); } catch { /* ignore */ }
         setRemoteSize({ width: w, height: h });
         setSessionConnectedSeq((seq) => seq + 1);
-        callbacksRef.current.onConnected({ width: w, height: h, encrypted: !enableStandardRdp });
+        callbacksRef.current.onConnected({
+          width: w,
+          height: h,
+          encrypted: !enableStandardRdp,
+          securityInfo: negotiatedSecurityInfo ?? undefined,
+        });
 
         try {
           const termInfo = await session.run();
@@ -1595,7 +1619,7 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         emitClipboardTransfer(null);
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [wsUrl, fallbackDisableCredSsp]);
+    }, [wsUrl, autoFallbackStage]);
 
     // Debounced dynamic resize via IronRDP Display Control channel
     useEffect(() => {

@@ -790,6 +790,31 @@ test("runtime sends output drain markers through the session output port", () =>
   ]);
 });
 
+test("runtime flushes buffered session output via beforeOutputDrain ahead of the drain marker", () => {
+  const parentPort = createParentPort();
+  const outputPort = new FakePort();
+  let runtime;
+  runtime = createTerminalWorkerRuntime({
+    parentPort,
+    registerBridges() {},
+    beforeOutputDrain(sessionId) {
+      runtime.createSender(7).send("netcatty:data", { sessionId, data: "cat\r\n" });
+    },
+  });
+  runtime.start();
+
+  parentPort.emitMessage({
+    data: { kind: "output-port", sessionId: "s1" },
+    ports: [outputPort],
+  });
+  parentPort.emitMessage({ kind: "output-drain", sessionId: "s1", requestId: "drain-2" });
+
+  assert.deepEqual(outputPort.messages, [
+    { sessionId: "s1", data: "cat\r\n" },
+    { kind: "drain", requestId: "drain-2", sessionId: "s1" },
+  ]);
+});
+
 test("runtime closes an urgent input port when its renderer is destroyed", () => {
   const parentPort = createParentPort();
   const urgentPort = new FakePort();

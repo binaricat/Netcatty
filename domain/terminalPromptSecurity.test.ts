@@ -6,6 +6,7 @@ import {
   appendTerminalPromptSecurityTail,
   foldTerminalPromptSecurityOutput,
   isConfirmedTerminalShellPrompt,
+  isJumpServerMenuLine,
   isJumpServerMenuPrompt,
   isSensitiveTerminalChallenge,
   isUntrustedTerminalInputPrompt,
@@ -95,6 +96,15 @@ test('isJumpServerMenuPrompt detects active JumpServer menus and rejects non-men
   }
   for (const text of ['Opt> 11', 'Opt>\r\n', 'echo Opt>', 'Password:', '[root@target ~]# ']) {
     assert.equal(isJumpServerMenuPrompt(text), false, JSON.stringify(text));
+  }
+});
+
+test('isJumpServerMenuLine detects unanswered and consumed JumpServer menu lines', () => {
+  for (const line of ['Opt> ', 'Opt>', 'Opt> 42', '[Host]> 10.1.64.1', '\x1b[32mOpt> \x1b[0m42']) {
+    assert.equal(isJumpServerMenuLine(line), true, JSON.stringify(line));
+  }
+  for (const text of ['echo Opt> 42', 'OTP> 123456', '[root@target ~]# Opt> 42', 'Opt>42']) {
+    assert.equal(isJumpServerMenuLine(text), false, JSON.stringify(text));
   }
 });
 

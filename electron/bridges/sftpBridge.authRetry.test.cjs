@@ -104,10 +104,11 @@ function loadSftpBridgeWithAuthRetryMocks(t, options = {}) {
           : ["password", "keyboard-interactive"];
         const first = offerNext(firstMethods, false);
         if (attemptIndex === 1 && options.dynamicAuth) {
-          assert.equal(first?.type, "publickey");
-          const password = offerNext(["password", "keyboard-interactive"], false);
-          assert.equal(password?.type, "password");
-          offerNext(["publickey"], false);
+          assert.equal(first?.type, "password");
+          const publickey = offerNext(["publickey"], false);
+          assert.equal(publickey?.type, "publickey");
+          const exhausted = offerNext(["publickey"], false);
+          assert.equal(exhausted, false);
           const err = new Error("All configured authentication methods failed");
           err.level = "client-authentication";
           this.client.emit("error", err);
@@ -443,7 +444,7 @@ test("openSftp retries keyboard-interactive after dynamic auth password rejectio
     MockSftpClient.instances[0].authMethodsOffered.map((method) => (
       method?.type === "publickey" ? "publickey" : method?.type || method
     )),
-    ["none", "publickey", "password", false],
+    ["none", "password", "publickey", false],
   );
   assert.deepEqual(
     MockSftpClient.instances[1].authMethodsOffered.map((method) => (

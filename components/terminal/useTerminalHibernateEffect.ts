@@ -27,6 +27,7 @@ type UseTerminalHibernateEffectOptions = {
   softHiddenRef: React.MutableRefObject<boolean>;
   hibernatePendingBufferRef: React.MutableRefObject<string>;
   hibernateSnapshotRef: React.MutableRefObject<string>;
+  hibernateCompressedSnapshotRef?: React.MutableRefObject<Uint8Array | null>;
   hibernateViewportSnapshotRef: React.MutableRefObject<string>;
   hibernateScrollbackSnapshotRef: React.MutableRefObject<string>;
   hibernateContextSnapshotRef: React.MutableRefObject<string>;
@@ -57,6 +58,7 @@ export function useTerminalHibernateEffect({
   softHiddenRef,
   hibernatePendingBufferRef,
   hibernateSnapshotRef,
+  hibernateCompressedSnapshotRef,
   hibernateViewportSnapshotRef,
   hibernateScrollbackSnapshotRef,
   hibernateContextSnapshotRef,
@@ -90,6 +92,7 @@ export function useTerminalHibernateEffect({
 
     const clearHibernateState = () => {
       hibernateSnapshotRef.current = "";
+      if (hibernateCompressedSnapshotRef) hibernateCompressedSnapshotRef.current = null;
       hibernateViewportSnapshotRef.current = "";
       hibernateScrollbackSnapshotRef.current = "";
       hibernateContextSnapshotRef.current = "";
@@ -128,6 +131,7 @@ export function useTerminalHibernateEffect({
       const sessionConnected = getSessionConnectedRef.current();
       const getPayload = (): TerminalHibernateWakePayload => ({
         snapshot: hibernateSnapshotRef.current,
+        compressedSnapshot: hibernateCompressedSnapshotRef?.current ?? null,
         viewportSnapshot: hibernateViewportSnapshotRef.current || hibernateSnapshotRef.current,
         scrollbackSnapshot: hibernateScrollbackSnapshotRef.current,
         pendingBuffer: hibernatePendingBufferRef.current,
@@ -136,6 +140,7 @@ export function useTerminalHibernateEffect({
       logger.info("[Terminal] Waking from hibernate", {
         sessionId,
         snapshotChars: hibernateSnapshotRef.current.length,
+        compressedBytes: hibernateCompressedSnapshotRef?.current?.byteLength ?? 0,
         viewportChars: hibernateViewportSnapshotRef.current.length,
         scrollbackChars: hibernateScrollbackSnapshotRef.current.length,
         pendingChars: hibernatePendingBufferRef.current.length,
@@ -204,6 +209,7 @@ export function useTerminalHibernateEffect({
     hibernatePendingBufferRef,
     hibernateScrollbackSnapshotRef,
     hibernateSnapshotRef,
+    hibernateCompressedSnapshotRef,
     hibernateViewportSnapshotRef,
     hibernatedRef,
     isSearchOpen,

@@ -14,11 +14,15 @@ const getSession = (sessionId: string) => (
 
 function createHarness() {
   const changes: Change[] = [];
+  const nested: boolean[] = [];
   const controller = createPromptHostnameSessionSignalController({
     getSession,
-    onChange: (sessionId, hostname) => changes.push([sessionId, hostname]),
+    onChange: (sessionId, hostname, options) => {
+      changes.push([sessionId, hostname]);
+      nested.push(options?.fromJumpServer === true);
+    },
   });
-  return { changes, controller };
+  return { changes, controller, nested };
 }
 
 test('prompt observations are independent of IP, alias, and matching connection addresses', () => {
@@ -52,11 +56,56 @@ test('prompt host controller observes the initial jumpserver prompt', () => {
 });
 
 test('prompt host controller publishes a nested target and de-duplicates it', () => {
-  const { changes, controller } = createHarness();
-  controller.handleTerminalOutput('ssh-1', '[root@jump.example.com ~]# ');
+  const { changes, controller, nested } = createHarness();
+  controller.handleTerminalOutput('ssh-1', 'Welcome\r\nOpt> ');
   controller.handleTerminalOutput('ssh-1', 'ssh root@10.1.64.1\r\n[root@10.1.64.1 ~]# ');
   controller.handleTerminalOutput('ssh-1', '\r\n[root@10.1.64.1 ~]# ');
-  assert.deepEqual(changes, [['ssh-1', getSession('ssh-1').hostname], ['ssh-1', '10.1.64.1']]);
+  assert.deepEqual(changes, [['ssh-1', '10.1.64.1']]);
+  assert.deepEqual(nested, [true]);
+});
+
+test('prompt host controller marks ordinary direct prompts as non-jump hosts', () => {
+  const { changes, controller, nested } = createHarness();
+  controller.handleTerminalOutput('ssh-1', 'Last login\r\n[root@vm-prod ~]# ');
+  assert.deepEqual(changes, [['ssh-1', 'vm-prod']]);
+  assert.deepEqual(nested, [false]);
+});
+
+test('prompt host controller tracks a JumpServer menu split across chunks', () => {
+  const { changes, controller, nested } = createHarness();
+  controller.handleTerminalOutput('ssh-1', 'Welcome\r\nO');
+  controller.handleTerminalOutput('ssh-1', 'pt> ');
+  controller.handleTerminalOutput('ssh-1', '10.1.64.1\r\n[root@k8s-10-1-64-1 ~]# ');
+  assert.deepEqual(changes, [['ssh-1', 'k8s-10-1-64-1']]);
+  assert.deepEqual(nested, [true]);
+});
+
+test('prompt host controller detects ANSI-styled JumpServer menus and upgrades matching hostnames', () => {
+  const { changes, controller, nested } = createHarness();
+  controller.handleTerminalOutput('ssh-1', '[root@app-01 ~]# ');
+  controller.handleTerminalOutput('ssh-1', 'ssh jump\r\n\x1b[32mOpt\x1b[0m> \r\n[root@app-01 ~]# ');
+  assert.deepEqual(changes, [['ssh-1', 'app-01'], ['ssh-1', 'app-01']]);
+  assert.deepEqual(nested, [false, true]);
+});
+
+test('prompt host controller detects consumed JumpServer prompts in coalesced output', () => {
+  for (const coalesced of [
+    'Welcome\r\nOpt> 42\r\n[root@target-01 ~]# ',
+    'Welcome\r\n[Host]> 10.1.64.1\r\n[root@target-01 ~]# ',
+    'Welcome\r\n\x1b[32mOpt> \x1b[0m42\r\n[root@target-01 ~]# ',
+  ]) {
+    const { changes, controller, nested } = createHarness();
+    controller.handleTerminalOutput('ssh-1', coalesced);
+    assert.deepEqual(changes, [['ssh-1', 'target-01']], JSON.stringify(coalesced));
+    assert.deepEqual(nested, [true], JSON.stringify(coalesced));
+  }
+
+  // Also works when the consumed menu prompt is split across chunks.
+  const { changes, controller, nested } = createHarness();
+  controller.handleTerminalOutput('ssh-1', 'Welcome\r\nO');
+  controller.handleTerminalOutput('ssh-1', 'pt> 42\r\n[root@target-02 ~]# ');
+  assert.deepEqual(changes, [['ssh-1', 'target-02']]);
+  assert.deepEqual(nested, [true]);
 });
 
 test('prompt host controller observes the original host when returning from a target', () => {

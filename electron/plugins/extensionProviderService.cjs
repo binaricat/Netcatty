@@ -13,7 +13,20 @@ const { assertPluginJsonValue } = require("./jsonBoundary.cjs");
 const { PluginRpcError, RPC_ERRORS, raceWithAbort } = require("./rpcRouter.cjs");
 const { invalidArgument, freezeJson } = require("./validationUtils.cjs");
 const { compileRestrictedJsonSchema } = require("./restrictedJsonSchema.cjs");
-const pluginContractSchema = require("./generated/plugin-contract.schema.json");
+
+let _pluginContractSchema = null;
+function getPluginContractSchema() {
+  if (!_pluginContractSchema) {
+    _pluginContractSchema = require("./generated/plugin-contract.schema.json");
+  }
+  return _pluginContractSchema;
+}
+function getImporterLimits() {
+  return getPluginContractSchema().$defs.ImporterLimits.const;
+}
+function getSyncLimits() {
+  return getPluginContractSchema().$defs.SyncLimits.const;
+}
 
 const EXTENSION_PROVIDER_KINDS = Object.freeze(["connection", "authentication", "importer", "sync"]);
 const PROVIDER_PERMISSIONS = Object.freeze({
@@ -34,11 +47,6 @@ const STREAM_WINDOW_BYTES = 256 * 1024;
 const MAX_AUTH_CHALLENGES = 32;
 const AUTHENTICATION_SECRET_LEASE_TTL_MS = 30_000;
 const AUTHENTICATION_CANCEL_DEADLINE_MS = 1_000;
-const importerLimits = pluginContractSchema.$defs.ImporterLimits.const;
-const MAX_IMPORT_BYTES = importerLimits.maxInputBytes;
-const MAX_IMPORT_OUTPUT_BYTES = importerLimits.maxOutputBytes;
-const MAX_IMPORT_RECORDS = importerLimits.maxRecords;
-const MAX_IMPORT_RECORD_BYTES = importerLimits.maxRecordBytes;
 const SYNC_SECRET_CONFIG_KEYS = new Set(["password", "token", "secret", "apiKey", "accessToken"]);
 
 /** Drop known secret / writeOnly field names from required[] so stripped sync configs still validate. */
@@ -59,34 +67,37 @@ function schemaWithoutSyncSecretRequirements(schema) {
   if (required.length === schema.required.length) return schema;
   return { ...schema, required };
 }
-const syncLimits = pluginContractSchema.$defs.SyncLimits.const;
-const MAX_SYNC_OBJECT_BYTES = syncLimits.maxObjectBytes;
-const MAX_SYNC_OBJECT_KEY_LENGTH = syncLimits.maxObjectKeyLength;
-const MAX_SYNC_REVISION_LENGTH = syncLimits.maxRevisionLength;
-const INLINE_SYNC_OBJECT_BYTES = syncLimits.inlineObjectBytes;
-// inlineObjectBytes is sized to fit under the 128 KiB provider JSON budget after
-// base64 expansion (~4/3) with envelope headroom. Keep the runtime cutoff equal
-// to the public SyncLimits constant so plugins that honor the schema are not
-// rejected with dataLoss in the 90–96 KiB window.
-const INLINE_SYNC_OBJECT_SAFE_BYTES = INLINE_SYNC_OBJECT_BYTES;
-const definitionValidators = Object.freeze({
-  AuthenticationResult: createDefinitionValidator("AuthenticationResult"),
-  ConnectionOpenResult: createDefinitionValidator("ConnectionOpenResult"),
-  ConnectionProbeResult: createDefinitionValidator("ConnectionProbeResult"),
-  ConnectionStatusResult: createDefinitionValidator("ConnectionStatusResult"),
-  ConnectionControlResult: createDefinitionValidator("ConnectionControlResult"),
-  ConnectionValidateResult: createDefinitionValidator("ConnectionValidateResult"),
-  ImporterDetectResult: createDefinitionValidator("ImporterDetectResult"),
-  ImporterParseResult: createDefinitionValidator("ImporterParseResult"),
-  ImporterRecord: createDefinitionValidator("ImporterRecord"),
-  SyncConnectResult: createDefinitionValidator("SyncConnectResult"),
-  SyncDisconnectResult: createDefinitionValidator("SyncDisconnectResult"),
-  SyncGetAccountResult: createDefinitionValidator("SyncGetAccountResult"),
-  SyncCapabilitiesResult: createDefinitionValidator("SyncCapabilitiesResult"),
-  SyncReadObjectResult: createDefinitionValidator("SyncReadObjectResult"),
-  SyncWriteObjectResult: createDefinitionValidator("SyncWriteObjectResult"),
-  SyncDeleteObjectResult: createDefinitionValidator("SyncDeleteObjectResult"),
-});
+
+const DEFINITION_VALIDATOR_NAMES = new Set([
+  "AuthenticationResult",
+  "ConnectionOpenResult",
+  "ConnectionProbeResult",
+  "ConnectionStatusResult",
+  "ConnectionControlResult",
+  "ConnectionValidateResult",
+  "ImporterDetectResult",
+  "ImporterParseResult",
+  "ImporterRecord",
+  "SyncConnectResult",
+  "SyncDisconnectResult",
+  "SyncGetAccountResult",
+  "SyncCapabilitiesResult",
+  "SyncReadObjectResult",
+  "SyncWriteObjectResult",
+  "SyncDeleteObjectResult",
+]);
+const definitionValidators = new Map();
+function getDefinitionValidator(name) {
+  if (!DEFINITION_VALIDATOR_NAMES.has(name)) {
+    throw new TypeError(`Unknown plugin definition validator: ${name}`);
+  }
+  let validator = definitionValidators.get(name);
+  if (!validator) {
+    validator = createDefinitionValidator(name);
+    definitionValidators.set(name, validator);
+  }
+  return validator;
+}
 
 function assertBoundedJson(value, label, maxBytes = MAX_PROVIDER_JSON_BYTES) {
   try { assertPluginJsonValue(value, { maxBytes }); }
@@ -126,7 +137,7 @@ function buildImporterDetectPayload({ bytes, fileName, mediaType }) {
 }
 
 function assertDefinition(name, value, label = name) {
-  const validator = definitionValidators[name];
+  const validator = getDefinitionValidator(name);
   if (!validator(value)) {
     throw new TypeError(`${label} violates the plugin contract: ${formatValidationErrors(validator.errors)}`);
   }
@@ -334,17 +345,17 @@ function normalizeImportRecord(value) {
   } else {
     throw new TypeError("Importer record type is invalid");
   }
-  assertBoundedJson(value, "Importer record", MAX_IMPORT_RECORD_BYTES);
+  assertBoundedJson(value, "Importer record", getImporterLimits().maxRecordBytes);
   return freezeJson(value);
 }
 
 function assertSyncObjectKey(value) {
-  return assertString(value, "Sync object key", MAX_SYNC_OBJECT_KEY_LENGTH);
+  return assertString(value, "Sync object key", getSyncLimits().maxObjectKeyLength);
 }
 
 function assertSyncRevision(value, label = "Sync object revision") {
   if (value == null) return value;
-  return assertString(value, label, MAX_SYNC_REVISION_LENGTH);
+  return assertString(value, label, getSyncLimits().maxRevisionLength);
 }
 
 function assertSyncResult(operation, value) {
@@ -372,13 +383,13 @@ function assertSyncResult(operation, value) {
     if (value.maxObjectBytes != null
       && (!Number.isSafeInteger(value.maxObjectBytes)
         || value.maxObjectBytes < 1
-        || value.maxObjectBytes > MAX_SYNC_OBJECT_BYTES)) {
+        || value.maxObjectBytes > getSyncLimits().maxObjectBytes)) {
       throw new TypeError("Sync maxObjectBytes is invalid");
     }
   } else if (operation === "readObject") {
     assertDefinition("SyncReadObjectResult", value, "Sync readObject result");
     if (value.found === true) {
-      if (!Number.isSafeInteger(value.byteLength) || value.byteLength < 0 || value.byteLength > MAX_SYNC_OBJECT_BYTES) {
+      if (!Number.isSafeInteger(value.byteLength) || value.byteLength < 0 || value.byteLength > getSyncLimits().maxObjectBytes) {
         throw new TypeError("Sync readObject byteLength is invalid");
       }
       if (value.streamed === true) {
@@ -387,7 +398,7 @@ function assertSyncResult(operation, value) {
         if (typeof value.data !== "string") throw new TypeError("Sync readObject data is invalid");
         const decoded = Buffer.byteLength(value.data, "base64");
         // Use the safe inline cutoff (base64 + envelope must fit control-plane JSON).
-        if (value.byteLength > INLINE_SYNC_OBJECT_SAFE_BYTES) {
+        if (value.byteLength > getSyncLimits().inlineObjectBytes) {
           throw new TypeError("Sync readObject inline payload exceeds the inline limit");
         }
         if (decoded < value.byteLength) {
@@ -438,11 +449,16 @@ class PluginExtensionProviderService {
     this.permissionEngine = options.permissionEngine;
     this.runtimeSupervisor = options.runtimeSupervisor;
     this.leaseStore = options.leaseStore;
-    this.maxImportRecordBytes = options.maxImportRecordBytes ?? MAX_IMPORT_RECORD_BYTES;
-    if (!Number.isSafeInteger(this.maxImportRecordBytes)
-      || this.maxImportRecordBytes < 1
-      || this.maxImportRecordBytes > MAX_IMPORT_RECORD_BYTES) {
-      throw new TypeError("Extension Provider importer record limit is invalid");
+    if (options.maxImportRecordBytes !== undefined) {
+      const maxRecordBytes = getImporterLimits().maxRecordBytes;
+      if (!Number.isSafeInteger(options.maxImportRecordBytes)
+        || options.maxImportRecordBytes < 1
+        || options.maxImportRecordBytes > maxRecordBytes) {
+        throw new TypeError("Extension Provider importer record limit is invalid");
+      }
+      this._maxImportRecordBytes = options.maxImportRecordBytes;
+    } else {
+      this._maxImportRecordBytes = null;
     }
     this.expectations = new Map();
     this.sessions = new Map();
@@ -815,9 +831,13 @@ class PluginExtensionProviderService {
     }
   }
 
+  get maxImportRecordBytes() {
+    return this._maxImportRecordBytes ?? getImporterLimits().maxRecordBytes;
+  }
+
   async detectImporter(params, options = {}) {
     const bytes = params?.sample instanceof Uint8Array ? params.sample : new Uint8Array(params?.sample ?? []);
-    if (bytes.byteLength < 1 || bytes.byteLength > MAX_IMPORT_BYTES) throw invalidArgument("Importer sample size is invalid");
+    if (bytes.byteLength < 1 || bytes.byteLength > getImporterLimits().maxInputBytes) throw invalidArgument("Importer sample size is invalid");
     return this.invoke({
       providerId: params.providerId,
       kind: "importer",
@@ -833,11 +853,17 @@ class PluginExtensionProviderService {
 
   async parseImporter(params, options = {}) {
     const providerId = assertString(params?.providerId, "Importer Provider ID");
+    const {
+      maxInputBytes: maxImportBytes,
+      maxOutputBytes: maxImportOutputBytes,
+      maxRecords: maxImportRecords,
+    } = getImporterLimits();
+    const maxImportRecordBytes = this.maxImportRecordBytes;
     const bufferedSource = params?.data === undefined
       ? null
       : params.data instanceof Uint8Array ? params.data : new Uint8Array(params.data ?? []);
     const sourceByteLength = bufferedSource?.byteLength ?? params?.sourceByteLength;
-    if (!Number.isSafeInteger(sourceByteLength) || sourceByteLength < 1 || sourceByteLength > MAX_IMPORT_BYTES) {
+    if (!Number.isSafeInteger(sourceByteLength) || sourceByteLength < 1 || sourceByteLength > maxImportBytes) {
       throw invalidArgument("Importer input size is invalid");
     }
     const source = bufferedSource ? [bufferedSource] : params?.source;
@@ -864,7 +890,7 @@ class PluginExtensionProviderService {
     void outputDone.catch(() => {});
     const assertPendingLineWithinLimit = () => {
       const line = pending.endsWith("\r") ? pending.slice(0, -1) : pending;
-      if (Buffer.byteLength(line, "utf8") > this.maxImportRecordBytes) {
+      if (Buffer.byteLength(line, "utf8") > maxImportRecordBytes) {
         throw new PluginRpcError(RPC_ERRORS.resourceExhausted, "Importer output exceeds its record limits");
       }
     };
@@ -874,7 +900,7 @@ class PluginExtensionProviderService {
       for (const raw of lines) {
         const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
         if (!line) continue;
-        if (Buffer.byteLength(line, "utf8") > this.maxImportRecordBytes || records.length >= MAX_IMPORT_RECORDS) {
+        if (Buffer.byteLength(line, "utf8") > maxImportRecordBytes || records.length >= maxImportRecords) {
           throw new PluginRpcError(RPC_ERRORS.resourceExhausted, "Importer output exceeds its record limits");
         }
         const record = normalizeImportRecord(JSON.parse(line));
@@ -888,7 +914,7 @@ class PluginExtensionProviderService {
           try {
             if (chunk.encoding !== "binary") throw new Error("Importer output must be UTF-8 JSONL bytes");
             outputBytes += chunk.bytes.byteLength;
-            if (outputBytes > MAX_IMPORT_OUTPUT_BYTES) throw new PluginRpcError(RPC_ERRORS.resourceExhausted, "Importer output is too large");
+            if (outputBytes > maxImportOutputBytes) throw new PluginRpcError(RPC_ERRORS.resourceExhausted, "Importer output is too large");
             pending += decoder.decode(chunk.bytes, { stream: true });
             consumeLines(false);
             assertPendingLineWithinLimit();
@@ -1121,7 +1147,7 @@ class PluginExtensionProviderService {
           try {
             if (chunk.encoding !== "binary") throw new Error("Sync object stream must be binary");
             totalBytes += chunk.bytes.byteLength;
-            if (totalBytes > MAX_SYNC_OBJECT_BYTES) {
+            if (totalBytes > getSyncLimits().maxObjectBytes) {
               throw new PluginRpcError(RPC_ERRORS.resourceExhausted, "Sync object exceeds its size limit");
             }
             chunks.push(Buffer.from(chunk.bytes));
@@ -1237,14 +1263,14 @@ class PluginExtensionProviderService {
         ? null
         : new Uint8Array(params.bytes);
     if (!rawBytes) throw invalidArgument("Sync writeObject bytes are required");
-    if (rawBytes.byteLength > MAX_SYNC_OBJECT_BYTES) {
+    if (rawBytes.byteLength > getSyncLimits().maxObjectBytes) {
       throw invalidArgument("Sync writeObject payload exceeds the size limit");
     }
     const deadlineMs = normalizeDeadlineMs(params?.deadlineMs);
     const deadlineAt = performance.now() + deadlineMs;
     const activation = options.activation ?? await this.activate(providerId, "sync", options.signal);
     const operationId = `sync:write:${randomUUID()}`;
-    const useStream = rawBytes.byteLength > INLINE_SYNC_OBJECT_SAFE_BYTES || params?.preferStream === true;
+    const useStream = rawBytes.byteLength > getSyncLimits().inlineObjectBytes || params?.preferStream === true;
     const inputStreamId = useStream ? `${operationId}:input` : undefined;
     const expectedRevision = params?.expectedRevision === undefined
       ? undefined
@@ -1341,11 +1367,11 @@ class PluginExtensionProviderService {
 module.exports = {
   DEFAULT_DEADLINE_MS,
   EXTENSION_PROVIDER_KINDS,
-  INLINE_SYNC_OBJECT_BYTES,
-  INLINE_SYNC_OBJECT_SAFE_BYTES,
-  MAX_IMPORT_BYTES,
-  MAX_IMPORT_RECORDS,
-  MAX_SYNC_OBJECT_BYTES,
+  get INLINE_SYNC_OBJECT_BYTES() { return getSyncLimits().inlineObjectBytes; },
+  get INLINE_SYNC_OBJECT_SAFE_BYTES() { return getSyncLimits().inlineObjectBytes; },
+  get MAX_IMPORT_BYTES() { return getImporterLimits().maxInputBytes; },
+  get MAX_IMPORT_RECORDS() { return getImporterLimits().maxRecords; },
+  get MAX_SYNC_OBJECT_BYTES() { return getSyncLimits().maxObjectBytes; },
   PluginExtensionProviderService,
   STREAM_WINDOW_BYTES,
   assertSyncResult,

@@ -132,6 +132,8 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
   onCreateIdentity,
   companionCredentialDrafts,
   onCompanionCredentialDraftChange,
+  resolutionDraft,
+  onResolutionDraftChange,
   effectiveTelnetPort,
   effectiveTelnetUsername,
   effectiveTelnetPassword,
@@ -395,6 +397,8 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
               identities={identities}
               availableKeys={availableKeys}
               onCreateIdentity={onCreateIdentity}
+              resolutionDraft={resolutionDraft}
+              onResolutionDraftChange={onResolutionDraftChange}
               credentialDraft={companionCredentialDrafts?.rdp}
               onCredentialDraftChange={(draft) => onCompanionCredentialDraftChange?.("rdp", draft)}
               t={t}

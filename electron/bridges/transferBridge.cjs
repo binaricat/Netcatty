@@ -9,13 +9,16 @@ const crypto = require("node:crypto");
 const { Readable } = require("node:stream");
 const tempDirBridge = require("./tempDirBridge.cjs");
 const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
-const {
-  encodePathForSession,
-  ensureRemoteDirForSession,
-  runRemoteUploadTransaction,
-  requireSftpChannel,
-  resolveEncodingForRequest,
-} = require("./sftpBridge.cjs");
+let _sftpBridge = null;
+function getSftpBridge() {
+  if (!_sftpBridge) _sftpBridge = require("./sftpBridge.cjs");
+  return _sftpBridge;
+}
+const encodePathForSession = (...args) => getSftpBridge().encodePathForSession(...args);
+const ensureRemoteDirForSession = (...args) => getSftpBridge().ensureRemoteDirForSession(...args);
+const runRemoteUploadTransaction = (...args) => getSftpBridge().runRemoteUploadTransaction(...args);
+const requireSftpChannel = (...args) => getSftpBridge().requireSftpChannel(...args);
+const resolveEncodingForRequest = (...args) => getSftpBridge().resolveEncodingForRequest(...args);
 const { isScpModeClient, getScpBackendForClient } = require("./sftpBridge/scpBackend.cjs");
 const {
   statLocal,
@@ -8499,9 +8502,23 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:transfer:cleanup",
       "netcatty:transfer:same-host-copy-dir",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    let pendingWorkerConcurrencyLimit = null;
+    terminalWorkerManager.onWorkerStarted?.(() => {
+      if (pendingWorkerConcurrencyLimit !== null) {
+        void terminalWorkerManager.request("netcatty:transfer:set-concurrency", {
+          limit: pendingWorkerConcurrencyLimit,
+        }).catch(() => {});
+      }
+    });
     ipcMain.handle("netcatty:transfer:set-concurrency", async (_event, payload) => {
       const limit = setGlobalTransferConcurrency(payload?.limit);
-      await terminalWorkerManager.request("netcatty:transfer:set-concurrency", { limit }).catch(() => {});
+      pendingWorkerConcurrencyLimit = limit;
+      const workerRunning = typeof terminalWorkerManager.isRunning === "function"
+        ? terminalWorkerManager.isRunning()
+        : true;
+      if (workerRunning) {
+        await terminalWorkerManager.request("netcatty:transfer:set-concurrency", { limit }).catch(() => {});
+      }
       return { success: true, limit };
     });
     // With skipAdmission, cancel latches pendingCancel inside the worker process.

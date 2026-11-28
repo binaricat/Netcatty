@@ -64,7 +64,7 @@ import { useI18n } from '../application/i18n/I18nProvider';
 import { SftpSidePanel } from './SftpSidePanel';
 import { ScriptsSidePanel } from './ScriptsSidePanel';
 import { HistorySidePanel } from './HistorySidePanel';
-import { NotesManager } from './notes/NotesManager';
+import { LazyNotesManager as NotesManager } from './notes/LazyNotesManager';
 import { terminalCwdStore } from '../application/state/terminalCwdStore';
 import { resolveSnippetCommand } from './SnippetExecutionProvider';
 import type { Snippet } from '../types';
@@ -448,7 +448,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const promptHostnameSignalController = useMemo(
     () => createPromptHostnameSessionSignalController({
       getSession: (sessionId) => sessionsRef.current.find((session) => session.id === sessionId),
-      onChange: (sessionId, hostname) => onUpdateSessionPromptHost?.(sessionId, hostname),
+      onChange: (sessionId, hostname, options) => {
+        onUpdateSessionPromptHost?.(sessionId, hostname, options);
+      },
     }),
     [onUpdateSessionPromptHost],
   );

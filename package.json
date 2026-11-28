@@ -19,11 +19,12 @@
     "netcatty-tool-cli": "./electron/cli/netcatty-tool-cli.cjs"
   },
   "scripts": {
-    "dev": "npm run fetch:mosh:dev && npm run fetch:et:dev && npm run lint && concurrently -k \"vite --strictPort\" \"npm:dev:electron\"",
+    "dev": "npm run fetch:mosh:dev && npm run fetch:et:dev && npm run build:preload && npm run lint && concurrently -k \"vite --strictPort\" \"npm:dev:electron\"",
     "dev:electron": "wait-on http-get://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 node electron/launch.cjs",
     "clean:vite": "node scripts/clean-vite-cache.cjs",
     "dev:clean": "npm run clean:vite && npm run dev",
-    "prebuild": "node scripts/copy-monaco.cjs",
+    "build:preload": "node scripts/build-preload.mjs",
+    "prebuild": "node scripts/copy-monaco.cjs && npm run build:preload",
     "fetch:mosh": "node scripts/fetch-mosh-binaries.cjs",
     "fetch:mosh:dev": "node scripts/fetch-mosh-binaries.cjs --host --resolve-release",
     "fetch:et": "node scripts/fetch-et-binaries.cjs",
@@ -33,7 +34,7 @@
     "build:plugin-runtime-deps": "npm run build --workspace @netcatty/plugin-contract && npm run build --workspace @netcatty/plugin-sdk && npm run build --workspace @netcatty/plugin-cli",
     "build:plugin-packages": "npm run generate:plugin-contract && npm run build:plugin-runtime-deps && npm run build --workspace @netcatty/example-hello-plugin && npm run build --workspace @netcatty/example-starter-plugin",
     "preview": "vite preview",
-    "start": "node electron/launch.cjs",
+    "start": "npm run build:preload && node electron/launch.cjs",
     "pack": "npm run build && cross-env NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --publish=never",
     "pack:dir": "npm run build && cross-env NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --dir --publish=never",
     "pack:win": "npm run build && cross-env npm_config_arch=x64 NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --win --x64 --publish=never && cross-env npm_config_arch=arm64 NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --win --arm64 --publish=never",
@@ -164,7 +165,7 @@
     "clsx": "2.1.1",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^42.11.12",
+    "electron": "^45.5.0",
     "electron-builder": "^26.15.2",
     "esbuild": "0.27.2",
     "eslint": "^9.39.1",
@@ -210,7 +211,7 @@
   "overrides": {
     "cpu-features": "npm:empty-npm-package@1.0.0",
     "axios": "1.13.5",
-    "node-abi": "4.31.0",
+    "node-abi": "4.43.0",
     "@electron/asar": "4.2.0"
   }
 }

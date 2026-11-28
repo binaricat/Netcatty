@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import { compareHostAddresses } from "../../domain/hostAddressSort";
 import { upsertKnownHost } from "../../domain/knownHosts";
@@ -9,9 +9,14 @@ import {
   isVncProtocol,
 } from "../../domain/remoteDesktop";
 import { sortByVaultOrder, sortVaultStringsByOrder } from "../../domain/vaultOrder";
-import { matchesHostSearchQuery, matchesSearchQuery } from "../../domain/searchMatcher";
+import {
+  getPinyinMatcherVersion,
+  matchesHostSearchQuery,
+  matchesSearchQuery,
+  subscribePinyinMatcherReady,
+} from "../../domain/searchMatcher";
 import type { GroupConfig, GroupNode, Host, KnownHost } from "../../types";
-import KnownHostsManager from "../KnownHostsManager";
+const KnownHostsManager = React.lazy(() => import("../KnownHostsManager"));
 import type { SortMode } from "../ui/sort-dropdown";
 
 const PROTO_TOKEN_RE = /(?:^|\s)proto:([a-z0-9:_-]+)(?=\s|$)/gi;
@@ -130,11 +135,17 @@ export function useVaultHostCollections({
     );
   }, [groupConfigs]);
 
+  const pinyinVersion = useSyncExternalStore(
+    subscribePinyinMatcherReady,
+    getPinyinMatcherVersion,
+    getPinyinMatcherVersion,
+  );
   const searchTerm = useMemo(() => search.trim(), [search]);
   const selectedTagSet = useMemo(() => new Set(selectedTags), [selectedTags]);
   const hasSelectedTags = selectedTags.length > 0;
 
   const hostMatchesSearchAndTags = useCallback((host: Host): boolean => {
+    void pinyinVersion;
     if (searchTerm && !matchesVaultHostSearch(host, searchTerm)) {
       return false;
     }
@@ -142,7 +153,7 @@ export function useVaultHostCollections({
       return false;
     }
     return true;
-  }, [hasSelectedTags, searchTerm, selectedTagSet]);
+  }, [hasSelectedTags, pinyinVersion, searchTerm, selectedTagSet]);
 
   const filteredHosts = useMemo(
     () => hosts.filter(hostMatchesSearchAndTags),

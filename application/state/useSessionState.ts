@@ -605,8 +605,12 @@ export const useSessionState = ({
     publishSessionDynamicTitle(sessionId, nextTitle);
   }, []);
 
-  const updateSessionPromptHost = useCallback((sessionId: string, hostname: string | null) => {
-    publishSessionPromptHost(sessionId, hostname?.trim() || null);
+  const updateSessionPromptHost = useCallback((
+    sessionId: string,
+    hostname: string | null,
+    options?: { fromJumpServer?: boolean },
+  ) => {
+    publishSessionPromptHost(sessionId, hostname?.trim() || null, options);
   }, []);
 
   const updateSessionCodingCliProvider = useCallback((

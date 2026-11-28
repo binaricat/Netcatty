@@ -14,6 +14,9 @@ const {
 const {
   windowsFramelessContentChromeOptions,
 } = require("./windowsWindowChrome.cjs");
+const {
+  resolvePreloadWebPreferences,
+} = require("../../preloadPath.cjs");
 const { placeTerminalPopup } = require("./terminalPopupPlacement.cjs");
 const {
   attachRemoteDesktopKeyboardGrab,
@@ -166,7 +169,7 @@ function createTerminalPopupWindowApi(ctx) {
           preload,
           contextIsolation: true,
           nodeIntegration: false,
-          sandbox: false,
+          ...resolvePreloadWebPreferences(preload),
           spellcheck: false,
           backgroundThrottling: false,
           v8CacheOptions: V8_CACHE_OPTIONS,

@@ -206,6 +206,8 @@ export function decideHiddenTabKeepCountAction(input: {
 export type TerminalHibernateWakePayload = {
   /** Full serialized terminal state -- preferred wake history (coherent ANSI). */
   snapshot: string;
+  /** Gzip-compressed full snapshot used while hibernated to minimize heap usage. */
+  compressedSnapshot?: Uint8Array | null;
   /** Visible viewport rows; used with scrollback only when snapshot is empty. */
   viewportSnapshot?: string;
   /** Older scrollback rows; used with viewport only when snapshot is empty. */

@@ -81,11 +81,9 @@ const LazyRemoteDesktopPane = lazy(() =>
   import('../remoteDesktop/RemoteDesktopPane').then((module) => ({ default: module.RemoteDesktopPane })),
 );
 
-if (typeof requestIdleCallback === 'function') {
-  requestIdleCallback(() => {
-    void import('../AIChatSidePanel');
-  });
-}
+// AIChatSidePanel (along with vendor-ai, globalAgentRuntime, and capability
+// tool specs) is loaded on demand via LazyAIChatSidePanel when the user opens
+// the AI side panel, avoiding ~15-20 MiB of V8 heap on terminal-only sessions.
 
 const AIChatSidePanelFallback = memo(function AIChatSidePanelFallback() {
   return (
@@ -845,7 +843,11 @@ export interface TerminalLayerProps {
   onUpdateSessionFontSize?: (sessionId: string, fontSize: number) => void;
   onUpdateSessionRestoreCwd?: (sessionId: string, cwd: string | null) => void;
   onUpdateSessionDynamicTitle?: (sessionId: string, title: string | null) => void;
-  onUpdateSessionPromptHost?: (sessionId: string, hostname: string | null) => void;
+  onUpdateSessionPromptHost?: (
+    sessionId: string,
+    hostname: string | null,
+    options?: { fromJumpServer?: boolean },
+  ) => void;
   onUpdateSessionCodingCliProvider?: (sessionId: string, providerId: import('../../domain/codingCliProviders').CodingCliProviderId | null) => void;
   onClearSessionFontSizeOverride?: (sessionId: string) => void;
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
@@ -1826,13 +1828,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         isVisible && "z-10",
         magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl",
       )}
-      style={{
-        ...style,
-        outline: magnifiedSurfaceBounds
-          ? `1px solid ${sessionAppearanceTheme.colors.cursor}`
-          : undefined,
-        outlineOffset: magnifiedSurfaceBounds ? -1 : undefined,
-      }}
+      style={style}
       tabIndex={-1}
       onClick={handlePaneClick}
       onFocusCapture={handlePaneClick}
@@ -1995,6 +1991,18 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         onDetachDragEnd={inActiveWorkspace ? handleDetachDragEnd : undefined}
       />
         </>
+      )}
+      {magnifiedSurfaceBounds && (
+        <div
+          aria-hidden="true"
+          data-section="pane-magnification-stroke"
+          className="pointer-events-none absolute inset-0 z-50"
+          style={{
+            boxSizing: 'border-box',
+            border: `1px solid ${sessionAppearanceTheme.colors.cursor}`,
+            borderRadius: 'inherit',
+          }}
+        />
       )}
     </div>
   );

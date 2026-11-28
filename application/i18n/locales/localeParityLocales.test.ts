@@ -134,3 +134,9 @@ test("every locale outside the pending list is at full parity with en", () => {
     );
   }
 });
+
+test("every locale explains the fixed RDP dimension limits", () => {
+  for (const messages of [en, es, ru, zhCN, zhTW]) {
+    assert.match(messages["hostDetails.rdp.dimensionHint"] ?? "", /200.*8192/);
+  }
+});

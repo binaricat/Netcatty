@@ -302,6 +302,7 @@ function createTerminalWorkerManager(options = {}) {
   const terminalInterceptorWarningListeners = new Set();
   const sessionOwnedListeners = new Set();
   const sessionClosedListeners = new Set();
+  const workerStartedListeners = new Set();
   const workerExitListeners = new Set();
   const workerRendererEventListeners = new Set();
   const externalSessions = new Map();
@@ -1744,7 +1745,11 @@ function createTerminalWorkerManager(options = {}) {
     // The worker loads the SSH pool before it can receive IPC. Seed the latest
     // value through its environment so a first request (and every replacement
     // worker) can never briefly use the product default instead of the setting.
+    const workerExecArgv = process.env.NETCATTY_DISABLE_V8_MEMORY_FLAGS === "1"
+      ? undefined
+      : ["--optimize-for-size", "--max-semi-space-size=2"];
     const worker = utilityProcess.fork(workerScriptPath, [], {
+      ...(workerExecArgv ? { execArgv: workerExecArgv } : {}),
       env: {
         ...process.env,
         [SSH_TRANSPORT_IDLE_TTL_ENV]: String(transportIdleTtlMs),
@@ -1759,6 +1764,13 @@ function createTerminalWorkerManager(options = {}) {
     worker.on?.("exit", (code) => {
       if (child === worker) handleExit(code);
     });
+    for (const listener of [...workerStartedListeners]) {
+      try {
+        listener();
+      } catch {
+        // Worker start sync listeners must never break worker boot.
+      }
+    }
     return worker;
   }
 
@@ -2063,6 +2075,12 @@ function createTerminalWorkerManager(options = {}) {
     return Object.freeze({ dispose: () => sessionClosedListeners.delete(listener) });
   }
 
+  function onWorkerStarted(listener) {
+    if (typeof listener !== "function") throw new TypeError("Worker start listener is required");
+    workerStartedListeners.add(listener);
+    return Object.freeze({ dispose: () => workerStartedListeners.delete(listener) });
+  }
+
   function onWorkerExit(listener) {
     if (typeof listener !== "function") throw new TypeError("Worker exit listener is required");
     workerExitListeners.add(listener);
@@ -2106,6 +2124,7 @@ function createTerminalWorkerManager(options = {}) {
       terminalInterceptorWarningListeners.clear();
       sessionOwnedListeners.clear();
       sessionClosedListeners.clear();
+      workerStartedListeners.clear();
       workerExitListeners.clear();
       workerRendererEventListeners.clear();
       for (const external of externalSessions.values()) {
@@ -2140,6 +2159,7 @@ function createTerminalWorkerManager(options = {}) {
     onTerminalInterceptorWarning,
     onSessionOwned,
     onSessionClosed,
+    onWorkerStarted,
     onWorkerExit,
     onWorkerRendererEvent,
     hasOpenSession(sessionId) {

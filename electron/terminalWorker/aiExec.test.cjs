@@ -13,7 +13,11 @@ const {
   registerWorkerAiExecHandlers,
 } = require("./aiExec.cjs");
 const { PROBE_OUTPUT_MARKER } = require("../bridges/ai/sessionShellKind.cjs");
-const { trackSessionIdlePrompt } = require("../bridges/ai/shellUtils.cjs");
+const {
+  trackSessionIdlePrompt,
+  getSessionReadinessGeneration,
+  bumpSessionReadinessGeneration,
+} = require("../bridges/ai/shellUtils.cjs");
 
 test("worker SSH exec waits for a slow interactive shell prompt before any PTY write", async () => {
   const pty = new FakePty();
@@ -44,9 +48,229 @@ test("worker shell readiness route reports prompt state read-only", () => {
     trackedShell: true,
     freshIdlePrompt: 'root@host:~# ',
     visibleIdlePrompt: 'root@host:~# ',
+    readiness: 'unknown',
+    generation: getSessionReadinessGeneration(session),
+    bufferedBytes: 0,
+    unackedBytes: 0,
+    outputPaused: false,
   });
   assert.deepEqual(session.stream.writes, [], "readiness probe must never write to the PTY");
   assert.deepEqual(handler(createFakeEvent(), { sessionId: 'gone' }), { ok: true, found: false });
+});
+
+test("worker can rehydrate idle readiness from the visible terminal context", () => {
+  const session = { protocol: 'ssh', stream: new FakePty(), shellKind: 'posix', _promptTrackTail: '', lastIdlePrompt: '' };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([['ssh-1', session]]) });
+  const probe = ipcMain.handlers.get('netcatty:ai:shellReadiness')(createFakeEvent(), { sessionId: 'ssh-1' });
+  const result = ipcMain.handlers.get('netcatty:ai:seedIdlePrompt')(createFakeEvent(), {
+    sessionId: 'ssh-1',
+    context: "Last login\r\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#",
+    expectedGeneration: probe.generation,
+  });
+  assert.deepEqual(result, {
+    ok: true,
+    found: true,
+    ready: true,
+    prompt: '[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#',
+    readiness: 'unknown',
+    generation: getSessionReadinessGeneration(session),
+  });
+  assert.ok(result.generation > probe.generation);
+  assert.deepEqual(session.stream.writes, [], "seeding readiness must never write to the PTY");
+});
+
+test("cancelling during live-shell probe after seeding multiline JumpServer prompt finishes on CR+EL redraw", async () => {
+  const pty = new FakePty();
+  const session = { protocol: 'ssh', stream: pty, shellKind: 'posix', _promptTrackTail: '', lastIdlePrompt: '' };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([['jump-ssh', session]]) });
+
+  const probe = ipcMain.handlers.get('netcatty:ai:shellReadiness')(createFakeEvent(), { sessionId: 'jump-ssh' });
+  const seeded = ipcMain.handlers.get('netcatty:ai:seedIdlePrompt')(createFakeEvent(), {
+    sessionId: 'jump-ssh',
+    context: "Last login\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ",
+    expectedGeneration: probe.generation,
+  });
+  assert.equal(seeded.ready, true);
+  assert.equal(seeded.prompt, "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ");
+
+  const startedAt = Date.now();
+  const execPromise = ipcMain.handlers.get('netcatty:ai:exec')(createFakeEvent(), {
+    sessionId: 'jump-ssh',
+    chatSessionId: 'chat-jump-cancel',
+    command: 'pwd',
+    commandTimeoutMs: 5000,
+  });
+
+  // Wait until the live-shell probe write hits the PTY.
+  await extractMarker(pty.writes);
+
+  // Cancel while the live-shell probe is still awaiting a reply.
+  ipcMain.listeners.get('netcatty:ai:exec:cancel')(createFakeEvent(), { chatSessionId: 'chat-jump-cancel' });
+  // Simulate the remote JumpServer target redrawing its multiline prompt with CR+EL after Ctrl+C.
+  pty.emit('data', "^C\r\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\r\n# \r\x1b[K# ");
+
+  const result = await execPromise;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Cancelled");
+  assert.ok(Date.now() - startedAt < 2000, "cancel should finish immediately on redrawn prompt, not wait for forced cancel");
+});
+
+test("worker rejects stale readiness snapshots after PTY output or user input", () => {
+  const outputSession = { protocol: 'ssh', stream: new FakePty(), shellKind: 'posix', _promptTrackTail: '', lastIdlePrompt: '' };
+  const inputSession = { protocol: 'ssh', stream: new FakePty(), shellKind: 'posix', _promptTrackTail: '', lastIdlePrompt: '' };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, {
+    sessions: new Map([['ssh-output', outputSession], ['ssh-input', inputSession]]),
+  });
+  const probeHandler = ipcMain.handlers.get('netcatty:ai:shellReadiness');
+  const seedHandler = ipcMain.handlers.get('netcatty:ai:seedIdlePrompt');
+
+  // PTY output arrives after probe (e.g., silent command started) -> seed must be rejected.
+  const probe1 = probeHandler(createFakeEvent(), { sessionId: 'ssh-output' });
+  trackSessionIdlePrompt(outputSession, 'sleep 60\r\n');
+  const tailAfterOutput = outputSession._promptTrackTail;
+  const staleOutput = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-output',
+    context: '[root@target ~]# ',
+    expectedGeneration: probe1.generation,
+  });
+  assert.equal(staleOutput.stale, true);
+  assert.equal(staleOutput.ready, false);
+  assert.equal(outputSession._promptTrackTail, tailAfterOutput);
+
+  // User input arrives after probe (even before echo) -> seed must be rejected.
+  const probe2 = probeHandler(createFakeEvent(), { sessionId: 'ssh-input' });
+  bumpSessionReadinessGeneration(inputSession);
+  const staleInput = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-input',
+    context: '[root@target ~]# ',
+    expectedGeneration: probe2.generation,
+  });
+  assert.equal(staleInput.stale, true);
+  assert.equal(staleInput.ready, false);
+  assert.equal(inputSession._promptTrackTail, '');
+
+  // Missing expectedGeneration is rejected fail-closed.
+  const missingGen = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-input',
+    context: '[root@target ~]# ',
+  });
+  assert.equal(missingGen.stale, true);
+  assert.equal(missingGen.ready, false);
+});
+
+test("worker rejects seeding while tracked output is buffered, paused, or unacked without drain", () => {
+  const session = {
+    protocol: 'ssh',
+    stream: new FakePty(),
+    shellKind: 'posix',
+    _promptTrackTail: 'cat\r\n',
+    lastIdlePrompt: '',
+    flowState: { bufferedBytes: 5, unackedBytes: 0, outputPaused: false, rendererPaused: false },
+  };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([['ssh-flow', session]]) });
+  const probeHandler = ipcMain.handlers.get('netcatty:ai:shellReadiness');
+  const seedHandler = ipcMain.handlers.get('netcatty:ai:seedIdlePrompt');
+
+  // Buffered output not yet emitted to renderer -> rejected even with matching generation.
+  const probe1 = probeHandler(createFakeEvent(), { sessionId: 'ssh-flow' });
+  assert.equal(probe1.bufferedBytes, 5);
+  const bufferedReject = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-flow',
+    context: '[root@target ~]# ',
+    expectedGeneration: probe1.generation,
+    outputDrained: true,
+  });
+  assert.equal(bufferedReject.stale, true);
+  assert.equal(bufferedReject.ready, false);
+  assert.equal(session._promptTrackTail, 'cat\r\n');
+
+  // Emitted but unacked without an ordered drain barrier -> rejected.
+  session.flowState.bufferedBytes = 0;
+  session.flowState.unackedBytes = 5;
+  const unackedReject = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-flow',
+    context: '[root@target ~]# ',
+    expectedGeneration: probe1.generation,
+    outputDrained: false,
+  });
+  assert.equal(unackedReject.stale, true);
+  assert.equal(unackedReject.ready, false);
+
+  // Renderer paused -> rejected even with outputDrained:true.
+  session.flowState.rendererPaused = true;
+  const pausedReject = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-flow',
+    context: '[root@target ~]# ',
+    expectedGeneration: probe1.generation,
+    outputDrained: true,
+  });
+  assert.equal(pausedReject.stale, true);
+  assert.equal(pausedReject.ready, false);
+
+  // Once unpaused, bufferedBytes===0, and ordered drain completed -> accepted.
+  session.flowState.rendererPaused = false;
+  const drainedAccept = seedHandler(createFakeEvent(), {
+    sessionId: 'ssh-flow',
+    context: '[root@target ~]# ',
+    expectedGeneration: probe1.generation,
+    outputDrained: true,
+  });
+  assert.equal(drainedAccept.ready, true);
+  assert.equal(drainedAccept.prompt, '[root@target ~]# ');
+});
+
+test("worker seedIdlePrompt ignores busy sessions, untracked shells, non-prompts, and spoofed OSC 133", () => {
+  const busySession = { protocol: 'ssh', stream: new FakePty(), shellKind: 'posix', _promptTrackTail: '', lastIdlePrompt: '', osc133Ready: false };
+  const untrackedSession = { protocol: 'ssh', stream: new FakePty(), shellKind: 'posix' };
+  const cleanSession = { protocol: 'ssh', stream: new FakePty(), shellKind: 'posix', _promptTrackTail: 'banner\r\n', lastIdlePrompt: '' };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, {
+    sessions: new Map([['busy', busySession], ['untracked', untrackedSession], ['clean', cleanSession]]),
+  });
+  const probeHandler = ipcMain.handlers.get('netcatty:ai:shellReadiness');
+  const seedHandler = ipcMain.handlers.get('netcatty:ai:seedIdlePrompt');
+
+  const busyProbe = probeHandler(createFakeEvent(), { sessionId: 'busy' });
+  assert.equal(busyProbe.readiness, 'busy');
+  const busySeed = seedHandler(createFakeEvent(), {
+    sessionId: 'busy',
+    context: '[root@target ~]# ',
+    expectedGeneration: busyProbe.generation,
+  });
+  assert.equal(busySeed.ready, false);
+  assert.equal(busySession._promptTrackTail, '');
+
+  const untrackedProbe = probeHandler(createFakeEvent(), { sessionId: 'untracked' });
+  assert.equal(untrackedProbe.trackedShell, false);
+  const untrackedSeed = seedHandler(createFakeEvent(), {
+    sessionId: 'untracked',
+    context: '[root@target ~]# ',
+    expectedGeneration: untrackedProbe.generation,
+  });
+  assert.equal(untrackedSeed.ready, false);
+  assert.equal(untrackedSession._promptTrackTail, undefined);
+
+  // Password prompt, JumpServer menu, plain output, and spoofed OSC 133 must not mutate _promptTrackTail.
+  for (const badContext of [
+    'Password:',
+    'Welcome\r\nOpt> ',
+    'listening on :3000',
+    '\x1b]133;A\x07custom λ \x1b]133;B\x07',
+  ]) {
+    const cleanProbe = probeHandler(createFakeEvent(), { sessionId: 'clean' });
+    const seedResult = seedHandler(createFakeEvent(), {
+      sessionId: 'clean',
+      context: badContext,
+      expectedGeneration: cleanProbe.generation,
+    });
+    assert.equal(seedResult.ready, false, JSON.stringify(badContext));
+    assert.equal(cleanSession._promptTrackTail, 'banner\r\n', JSON.stringify(badContext));
+    assert.equal(cleanSession.osc133Ready, undefined);
+  }
 });
 
 class FakePty extends EventEmitter {

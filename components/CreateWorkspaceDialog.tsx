@@ -1,6 +1,7 @@
 import { Search } from 'lucide-react';
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
+import { usePinyinMatcherVersion } from '../application/state/usePinyinMatcherVersion';
 import { matchesWorkspaceHostPickerQuery } from '../domain/searchMatcher';
 import { Host } from '../types';
 import { DistroAvatar } from './DistroAvatar';
@@ -29,12 +30,14 @@ export const CreateWorkspaceDialog: React.FC<CreateWorkspaceDialogProps> = ({
   const [name, setName] = useState('');
   const [search, setSearch] = useState('');
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
+  const pinyinMatcherVersion = usePinyinMatcherVersion();
 
   const filteredHosts = useMemo(() => {
+    void pinyinMatcherVersion;
     const term = search.trim();
     if (!term) return hosts;
     return hosts.filter((host) => matchesWorkspaceHostPickerQuery(term, host));
-  }, [hosts, search]);
+  }, [hosts, search, pinyinMatcherVersion]);
 
   const toggleHost = useCallback((hostId: string) => {
     setSelectedHostIds(prev => {

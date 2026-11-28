@@ -24,6 +24,25 @@ export const DEFAULT_RDP_COLOR_DEPTH: RdpColorDepth = 32;
 export const DEFAULT_RDP_RESOLUTION_MODE: RdpResolutionMode = 'dynamic';
 export const DEFAULT_RDP_SECURITY_MODE: RdpSecurityMode = 'auto';
 
+// Editor drafts stay separate from the sanitized config until they are valid.
+export type RdpResolutionDraft = Partial<Record<'width' | 'height', string>>;
+
+export const parseRdpDimensionDraft = (value: string): number | undefined => {
+  if (!value.trim()) return undefined;
+  const dimension = Number(value);
+  return Number.isInteger(dimension) && dimension >= 200 && dimension <= 8192
+    ? dimension
+    : undefined;
+};
+
+export const hasValidRdpFixedResolution = (
+  config: RdpConfig | undefined,
+  draft: RdpResolutionDraft = {},
+): boolean => config?.resolutionMode !== 'fixed' || (
+  parseRdpDimensionDraft(draft.width ?? String(config.width ?? DEFAULT_RDP_WIDTH)) !== undefined
+  && parseRdpDimensionDraft(draft.height ?? String(config.height ?? DEFAULT_RDP_HEIGHT)) !== undefined
+);
+
 export const DEFAULT_VNC_SCALING_MODE: VncScalingMode = 'fit';
 export const DEFAULT_VNC_QUALITY = 6;
 export const DEFAULT_VNC_COMPRESSION_LEVEL = 2;
@@ -1155,4 +1174,85 @@ export function mapViewportToVirtualDesktopCoords(
   const x = Math.max(0, Math.min(Math.round(virtualSize.width) - 1, Math.round(rawX)));
   const y = Math.max(0, Math.min(Math.round(virtualSize.height) - 1, Math.round(rawY)));
   return { x, y };
+}
+
+export type RdpAutoFallbackStage = 'none' | 'tls' | 'rdp';
+
+export interface RdpNegotiatedSecurityInfo {
+  standardRdp: boolean;
+  encrypted: boolean;
+  method: 'tls' | 'rc4-128' | 'rc4-56' | 'rc4-40' | 'fips' | 'none';
+  level: 'enhanced' | 'low' | 'client-compatible' | 'high' | 'fips' | 'none';
+}
+
+const STANDARD_RDP_ONLY_ERROR_RE =
+  /server only supports standard rdp security|ssl_not_allowed_by_server|standard rdp security is not supported/i;
+
+/**
+ * Resolve the effective RDP security mode for a connection attempt given the
+ * user's configured mode and any active `auto`-mode negotiation fallback stage.
+ */
+export function resolveEffectiveRdpSecurityMode(
+  configuredMode: RdpSecurityMode | undefined,
+  autoFallbackStage: RdpAutoFallbackStage,
+): RdpSecurityMode {
+  const mode = configuredMode ?? DEFAULT_RDP_SECURITY_MODE;
+  if (mode !== 'auto') return mode;
+  if (autoFallbackStage === 'tls') return 'tls';
+  if (autoFallbackStage === 'rdp') return 'rdp';
+  return 'auto';
+}
+
+/**
+ * Decide the next `auto`-mode negotiation fallback stage after a pre-auth
+ * `NegotiationFailure`. Explicit security modes (`nla`, `tls`, `rdp`) never
+ * auto-downgrade, and non-negotiation errors (e.g. wrong password) never retry.
+ */
+export function resolveNextRdpAutoFallback(options: {
+  configuredMode: RdpSecurityMode | undefined;
+  currentStage: RdpAutoFallbackStage;
+  isNegotiationFailure: boolean;
+  errorMessage?: string;
+}): Exclude<RdpAutoFallbackStage, 'none'> | null {
+  const mode = options.configuredMode ?? DEFAULT_RDP_SECURITY_MODE;
+  if (mode !== 'auto' || !options.isNegotiationFailure) {
+    return null;
+  }
+  if (options.currentStage === 'rdp') {
+    return null;
+  }
+  if (options.errorMessage && STANDARD_RDP_ONLY_ERROR_RE.test(options.errorMessage)) {
+    return 'rdp';
+  }
+  if (options.currentStage === 'none') {
+    return 'tls';
+  }
+  if (options.currentStage === 'tls') {
+    return 'rdp';
+  }
+  return null;
+}
+
+/**
+ * Format a compact badge label for Standard RDP Security (RC4 / FIPS / None).
+ * Returns `null` for Enhanced RDP Security (TLS / NLA).
+ */
+export function formatStandardRdpSecurityBadge(
+  info: RdpNegotiatedSecurityInfo | null | undefined,
+): string | null {
+  if (!info?.standardRdp) return null;
+  switch (info.method) {
+    case 'rc4-128':
+      return 'RC4-128';
+    case 'rc4-56':
+      return 'RC4-56';
+    case 'rc4-40':
+      return 'RC4-40';
+    case 'fips':
+      return 'FIPS';
+    case 'none':
+      return 'Unencrypted';
+    default:
+      return null;
+  }
 }

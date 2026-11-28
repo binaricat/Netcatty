@@ -5,13 +5,14 @@ import type { CodingCliProviderId } from '../../domain/codingCliProviders';
 export type SessionPresentation = {
   dynamicTitle?: string | null;
   promptHostname?: string | null;
+  promptHostnameFromJumpServer?: boolean | null;
   codingCliProviderId?: CodingCliProviderId | null;
 };
 
 type Listener = () => void;
 
 /** Encode undefined / null / present distinctly for useSyncExternalStore snapshots. */
-function encodePresentationField(value: string | null | undefined): string {
+function encodePresentationField(value: string | boolean | null | undefined): string {
   if (value === undefined) return 'u';
   if (value === null) return 'n';
   return `v:${value}`;
@@ -42,7 +43,7 @@ class SessionPresentationStore {
   getSessionSnapshot = (sessionId: string): string => {
     const presentation = this.bySession.get(sessionId);
     if (!presentation) return '';
-    return `${encodePresentationField(presentation.dynamicTitle)}\0${encodePresentationField(presentation.promptHostname)}\0${encodePresentationField(presentation.codingCliProviderId)}`;
+    return `${encodePresentationField(presentation.dynamicTitle)}\0${encodePresentationField(presentation.promptHostname)}\0${encodePresentationField(presentation.promptHostnameFromJumpServer)}\0${encodePresentationField(presentation.codingCliProviderId)}`;
   };
 
   subscribe = (listener: Listener): (() => void) => {
@@ -61,6 +62,7 @@ class SessionPresentationStore {
     if (
       prev.dynamicTitle === next.dynamicTitle
       && prev.promptHostname === next.promptHostname
+      && prev.promptHostnameFromJumpServer === next.promptHostnameFromJumpServer
       && prev.codingCliProviderId === next.codingCliProviderId
     ) {
       return;
@@ -104,14 +106,22 @@ export function publishSessionCodingCliProvider(
   sessionPresentationStore.setPresentation(sessionId, { codingCliProviderId: providerId });
 }
 
-export function publishSessionPromptHost(sessionId: string, hostname: string | null): void {
-  sessionPresentationStore.setPresentation(sessionId, { promptHostname: hostname });
+export function publishSessionPromptHost(
+  sessionId: string,
+  hostname: string | null,
+  options: { fromJumpServer?: boolean } = {},
+): void {
+  sessionPresentationStore.setPresentation(sessionId, {
+    promptHostname: hostname,
+    promptHostnameFromJumpServer: hostname && options.fromJumpServer === true ? true : null,
+  });
 }
 
 type SessionWithPresentation = {
   id: string;
   dynamicTitle?: string;
   promptHostname?: string;
+  promptHostnameFromJumpServer?: boolean;
   codingCliProviderId?: CodingCliProviderId;
 };
 
@@ -129,12 +139,16 @@ export function applySessionPresentation<T extends SessionWithPresentation>(sess
   const nextPromptHost = presentation.promptHostname === undefined
     ? session.promptHostname
     : (presentation.promptHostname ?? undefined);
+  const nextPromptHostFromJumpServer = presentation.promptHostnameFromJumpServer === undefined
+    ? session.promptHostnameFromJumpServer
+    : (presentation.promptHostnameFromJumpServer ?? undefined);
   const nextProvider = presentation.codingCliProviderId === undefined
     ? session.codingCliProviderId
     : (presentation.codingCliProviderId ?? undefined);
   if (
     nextTitle === session.dynamicTitle
     && nextPromptHost === session.promptHostname
+    && nextPromptHostFromJumpServer === session.promptHostnameFromJumpServer
     && nextProvider === session.codingCliProviderId
   ) {
     return session;
@@ -143,6 +157,7 @@ export function applySessionPresentation<T extends SessionWithPresentation>(sess
     ...session,
     dynamicTitle: nextTitle,
     promptHostname: nextPromptHost,
+    promptHostnameFromJumpServer: nextPromptHostFromJumpServer,
     codingCliProviderId: nextProvider,
   };
 }

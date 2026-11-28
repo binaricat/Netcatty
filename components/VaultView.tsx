@@ -61,7 +61,6 @@ import type {
   VaultGroupMutationState,
 } from "../domain/vaultGroupMutation";
 import type { PluginImporterCommitRequest } from "../application/state/usePluginImporterCommit";
-import { buildVaultCsvCredentialOptions } from "../application/vaultCsvExportCredentials";
 import { sanitizeCredentialValue } from "../domain/credentials";
 import {
   resolveGroupDefaults,
@@ -81,7 +80,6 @@ import {
   buildHostForProtocolOverride,
   shouldPromptHostProtocolOnConnect,
 } from "../domain/remoteDesktop";
-import { exportHostsToCsvWithStats } from "../domain/vaultImport";
 import { saveWorkSurfaceHostDraft, type WorkSurfaceHostEditorTarget } from "../application/state/useWorkSurfaceHostEditor";
 import { upsertKnownHost } from "../domain/knownHosts";
 import {
@@ -117,19 +115,13 @@ import {
 import { AppLogo } from "./AppLogo";
 import { connectHostsStaggered } from "./connectHostsStaggered";
 import { DistroAvatar } from "./DistroAvatar";
-import GroupDetailsPanel from "./GroupDetailsPanel";
 import { getVaultHostGridColumnCount } from "./vault/vaultHostGridLayout";
-import HostDetailsPanel from "./HostDetailsPanel";
 import { HostTreeView } from "./HostTreeView";
-import QuickConnectWizard from "./QuickConnectWizard";
 import {
   isQuickConnectInput,
   parseQuickConnectInputWithWarnings,
 } from "../domain/quickConnect";
-import SerialConnectModal from "./SerialConnectModal";
-import SerialHostDetailsPanel from "./SerialHostDetailsPanel";
-import { NotesManager } from "./notes/NotesManager";
-import { ImportVaultDialog } from "./vault/ImportVaultDialog";
+import { LazyNotesManager as NotesManager } from "./notes/LazyNotesManager";
 import { HostTreeGroupDeleteDialog } from "./host/HostTreeGroupDeleteDialog";
 import { useHostTreeInlineGroupActions } from "./vault/useHostTreeInlineGroupActions";
 import { useHostTreeInlineHostActions } from "./vault/useHostTreeInlineHostActions";
@@ -170,6 +162,14 @@ import { useVaultImportHandlers } from "../application/state/useVaultImportHandl
 import { useVaultGroupDragHandlers } from "./vault/useVaultGroupDragHandlers";
 import { usePluginVaultPages } from "../application/state/usePluginVaultPages";
 
+const GroupDetailsPanel = lazy(() => import("./GroupDetailsPanel"));
+const HostDetailsPanel = lazy(() => import("./HostDetailsPanel"));
+const QuickConnectWizard = lazy(() => import("./QuickConnectWizard"));
+const SerialConnectModal = lazy(() => import("./SerialConnectModal"));
+const SerialHostDetailsPanel = lazy(() => import("./SerialHostDetailsPanel"));
+const ImportVaultDialog = lazy(() =>
+  import("./vault/ImportVaultDialog").then((mod) => ({ default: mod.ImportVaultDialog })),
+);
 const LazyProtocolSelectDialog = lazy(() => import("./ProtocolSelectDialog"));
 const LazyConnectionLogsManager = lazy(() => import("./ConnectionLogsManager"));
 const KeychainManager = lazy(() => import("./KeychainManager"));
@@ -839,6 +839,10 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       return;
     }
 
+    const [{ buildVaultCsvCredentialOptions }, { exportHostsToCsvWithStats }] = await Promise.all([
+      import("../application/vaultCsvExportCredentials"),
+      import("../domain/vaultImport"),
+    ]);
     const {
       keyPathsById,
       keyPassphrasesById,

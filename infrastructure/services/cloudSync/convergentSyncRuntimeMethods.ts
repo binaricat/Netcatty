@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import packageJson from '../../../package.json';
+import { version as appVersion } from '../../../package.json';
 import {
   isProviderReadyForSync,
   type CloudProvider,
@@ -701,7 +701,7 @@ export async function syncConvergentProvidersUnlockedImpl(
           this.masterPassword,
           this.state.deviceId,
           this.state.deviceName,
-          packageJson.version,
+          appVersion,
           remoteVersion,
         );
         assertSyncSecurityGeneration(this, syncSecurityGeneration);
@@ -1241,7 +1241,7 @@ export async function downgradeConvergentSyncImpl(
           this.masterPassword,
           this.state.deviceId,
           this.state.deviceName,
-          packageJson.version,
+          appVersion,
           before?.meta.version ?? this.state.localVersion,
         );
         assertSyncSecurityGeneration(this, syncSecurityGeneration);

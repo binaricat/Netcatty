@@ -1842,9 +1842,9 @@ function createStartSessionApi(ctx) {
           });
         }
 
-        // Automatic mode intentionally mirrors OpenSSH-style discovery even
-        // when a saved password exists: agent and default keys are tried first,
-        // then the password. Password-only mode never enters this path.
+        // Automatic mode probes ssh-agent before a saved password, while
+        // discovered default ~/.ssh keys stay after any saved password so key
+        // probing cannot exhaust MaxAuthTries first (#4478).
         if (isAutomaticAuth && !connectOpts.agent && options.useSshAgent !== false) {
           const automaticAgentSocket = await getAvailableAgentSocket();
           if (automaticAgentSocket) {
@@ -1953,6 +1953,12 @@ function createStartSessionApi(ctx) {
             if (connectOpts.privateKey && !usedDefaultKeyAsPrimary) {
               authMethods.push({ type: "publickey", key: connectOpts.privateKey, passphrase: connectOpts.passphrase, id: "publickey-user" });
             }
+            if (options.requiresMfa && connectOpts.password && !options._skipPasswordMethod) {
+              authMethods.push({ type: "keyboard-interactive", id: "keyboard-interactive" });
+            }
+            if (connectOpts.password && !options._skipPasswordMethod) {
+              authMethods.push({ type: "password", id: "password" });
+            }
             for (const keyInfo of allDefaultKeys) {
               authMethods.push({
                 type: "publickey",
@@ -1960,12 +1966,6 @@ function createStartSessionApi(ctx) {
                 isDefault: true,
                 id: `publickey-default-${keyInfo.keyName}`
               });
-            }
-            if (options.requiresMfa && connectOpts.password && !options._skipPasswordMethod) {
-              authMethods.push({ type: "keyboard-interactive", id: "keyboard-interactive" });
-            }
-            if (connectOpts.password && !options._skipPasswordMethod) {
-              authMethods.push({ type: "password", id: "password" });
             }
           } else {
             // First try user-configured key if available (explicit user choice)
