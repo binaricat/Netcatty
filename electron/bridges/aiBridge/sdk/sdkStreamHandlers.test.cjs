@@ -3061,3 +3061,46 @@ test("caller-supplied builtin chat cannot downgrade cancellation of a main-owned
   assert.equal((await cancel({ sender: { id: 7 } }, { requestId: 'native-b', chatSessionId: chat })).ok, true);
   assert.equal(replacement.signal.aborted, true);
 });
+
+test("lazy SDK runtime and driver requires stay anchored to sdkStreamHandlers even when ctx supplies a foreign require", async (t) => {
+  const { createRequire } = require("node:module");
+  const path = require("node:path");
+  const { getDriver } = require("./index.cjs");
+  const foreignRequire = createRequire(path.resolve(__dirname, "../../aiBridge.cjs"));
+
+  const { handlers, ctx } = registerWithStubbedCtx({
+    require: foreignRequire,
+    getShellEnv: async () => ({}),
+    normalizeAgentEnv: (env) => ({ ...(env || {}) }),
+    withCliDiscoveryEnv: (env) => env,
+    normalizeClaudeCodeExecutableEnvForSdk: (env) => env,
+    resolveCliFromPath: () => null,
+    normalizeCliPathForPlatform: (p) => p,
+    resolveSdkBinPath: () => null,
+    resolveClaudeCodeExecutableForSdk: (p) => p,
+    resolveCodexExecutableForSdk: (p) => p,
+    resolveCodebuddyExecutableForSdk: (p) => p,
+  });
+
+  // 1. Lazy CodexAppServerRuntime must resolve ../codexAppServer/runtime.cjs
+  // relative to sdkStreamHandlers.cjs, not ctx.require (electron/bridges/).
+  const runtime = ctx.codexAppServerRuntime;
+  assert.equal(typeof runtime?.listModels, "function");
+  assert.equal(typeof runtime?.runTurn, "function");
+  t.after(() => ctx.closeCodexAppServerRuntimeIfLoaded?.());
+
+  // 2. Lazy opencodeDriver timeout constant in list-models must resolve
+  // ./opencodeDriver.cjs relative to sdkStreamHandlers.cjs, not ctx.require.
+  const opencodeDriver = getDriver("opencode");
+  t.mock.method(opencodeDriver, "listModels", async () => ({
+    currentModelId: "opencode/test-model",
+    models: [{ id: "opencode/test-model", name: "Test Model" }],
+  }));
+  const listResult = await handlers.get("netcatty:ai:sdk-agent:list-models")(
+    { sender: { id: 1 } },
+    { sdkBackend: "opencode", force: true },
+  );
+  assert.equal(listResult.ok, true);
+  assert.equal(listResult.warning, undefined);
+  assert.deepEqual(listResult.models, [{ id: "opencode/test-model", name: "Test Model" }]);
+});

@@ -1921,3 +1921,25 @@ test('custom provider headers are decrypted before HTTP and override auth case-i
     restore();
   }
 });
+
+test("handler context does not shadow sub-module require inside with(ctx) handlers", () => {
+  let capturedContext = null;
+  const { bridge, restore } = loadBridgeWithMocks({
+    registerSdkStreamHandlers: (ctx) => {
+      capturedContext = ctx;
+    },
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+  try {
+    assert.ok(capturedContext);
+    assert.equal(Object.prototype.hasOwnProperty.call(capturedContext, "require"), false);
+  } finally {
+    restore();
+  }
+});
