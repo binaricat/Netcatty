@@ -194,6 +194,7 @@ function registerProviderHandlers(ctx) {
     "api.anthropic.com",
     "generativelanguage.googleapis.com",
     "openrouter.ai",
+    "api.martllm.com",
     // Web search providers
     "api.tavily.com",
     "api.exa.ai",
