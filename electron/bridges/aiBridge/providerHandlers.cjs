@@ -1,5 +1,6 @@
 /* eslint-disable no-undef */
 const { existsSync } = require("node:fs");
+const getResolveOutboundHttpAgent = () => require("../httpNetworkProxyAgent.cjs").resolveOutboundHttpAgent;
 
 function registerProviderHandlers(ctx) {
   with (ctx) {
@@ -431,7 +432,7 @@ function registerProviderHandlers(ctx) {
     const delegated = typeof requestId === "string" && /^agent-model_([0-9a-f-]{36})_([0-9a-f-]{36})_fetch_/.exec(requestId);
     if (requestId !== undefined && !delegated) return { ok: false, status: 0, data: "", error: "Delegated request identity invalid" };
     const controller = delegated ? new AbortController() : null;
-    const delegatedBridge = delegated ? require("./mcpServerBridge.cjs") : null;
+    const delegatedBridge = delegated ? mcpServerBridge : null;
     const assertDelegation = () => {
       controller?.signal.throwIfAborted();
       if (delegated) delegatedBridge.assertPluginAgentCaller(`plugin-agent:${delegated[1]}`, event.sender.id, delegated[2]);
@@ -450,8 +451,7 @@ function registerProviderHandlers(ctx) {
     const MAX_REDIRECTS = followRedirects ? 5 : 0;
 
     async function doFetch(fetchUrl, redirectsLeft) {
-      // ctx.require is bound from aiBridge.cjs, so this path is relative to that file.
-      const { resolveOutboundHttpAgent } = require("./httpNetworkProxyAgent.cjs");
+      const resolveOutboundHttpAgent = getResolveOutboundHttpAgent();
       const skipTLS = Boolean(skipTLSVerify || shouldSkipTLSVerify(providerId));
       let proxyAgent;
       try {

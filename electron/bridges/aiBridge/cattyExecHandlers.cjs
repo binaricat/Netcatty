@@ -1,12 +1,12 @@
 /* eslint-disable no-undef */
-// Module-level require on purpose: code inside registerCattyExecHandlers
-// runs under `with (ctx)` where bare `require` resolves to ctx.require
-// (based in electron/bridges/). Requiring here keeps the path unambiguous.
+// Module-level require helpers keep relative paths anchored to this file even
+// inside registerCattyExecHandlers's `with (ctx)` block.
 const { emitTerminalSessionData } = require("../emitTerminalSessionData.cjs");
 const { formatSyntheticEcho, getVisibleIdlePrompt } = require("../ai/shellUtils.cjs");
 const { classifyShellReadiness } = require("../ai/shellReadinessState.cjs");
 const { clearSessionFlowState } = require("../terminalFlowAck.cjs");
 const { remoteDisallowsExecChannelProbe, sessionDisallowsExtraSshChannel, ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
+const getPtyExec = () => require("../ai/ptyExec.cjs");
 let _defaultAiPrivacyService = null;
 const getDefaultAiPrivacyService = () => (_defaultAiPrivacyService ??= require("../../shared/aiPrivacyService.cjs"));
 
@@ -197,7 +197,7 @@ function registerCattyExecHandlers(ctx) {
       // Network devices (switches/routers) connected via SSH: use raw execution.
       // Their vendor CLIs don't run a POSIX shell, so shell-wrapped commands fail.
       if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
-        const { execViaRawPty } = require("./ai/ptyExec.cjs");
+        const { execViaRawPty } = getPtyExec();
         const timeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
         return withLockRelease(() => execViaRawPty(ptyStream, command, {
           timeoutMs,
@@ -278,7 +278,7 @@ function registerCattyExecHandlers(ctx) {
       // Fallback: SSH exec channel (invisible to terminal)
       const sshClient = session.sshClient || session.conn;
       if (!session.singleChannelSsh && sshClient && typeof sshClient.exec === "function") {
-        const { execViaChannel } = require("./ai/ptyExec.cjs");
+        const { execViaChannel } = getPtyExec();
         const channelTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
         return withLockRelease(async () => {
           const probed = await ensureSessionShellKindForExec(session, {
@@ -308,7 +308,7 @@ function registerCattyExecHandlers(ctx) {
           releaseLock();
           return { ok: false, error: "Serial file transfer is already in progress" };
         }
-        const { execViaRawPty } = require("./ai/ptyExec.cjs");
+        const { execViaRawPty } = getPtyExec();
         const serialTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
         return withLockRelease(() => execViaRawPty(session.serialPort, command, {
           timeoutMs: serialTimeoutMs,

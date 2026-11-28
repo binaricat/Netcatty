@@ -888,7 +888,6 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
 function createHandlerContext(ipcMain) {
   return {
     ipcMain,
-    require,
     https,
     http,
     path,

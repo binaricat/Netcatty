@@ -21,6 +21,8 @@ const buildInjectedMcpServers = (...args) => require("./injectMcp.cjs").buildInj
 const buildNetcattySkillsOpenCodePathAllowlist = (...args) =>
   require("./netcattySkillsOpenCodePermissions.cjs").buildNetcattySkillsOpenCodePathAllowlist(...args);
 const probeCodexAppServer = (...args) => require("../codexAppServer/probe.cjs").probeCodexAppServer(...args);
+const getCodexAppServerRuntimeClass = () => require("../codexAppServer/runtime.cjs").CodexAppServerRuntime;
+const getOpenCodeServerStartTimeoutMs = () => require("./opencodeDriver.cjs").OPENCODE_SERVER_START_TIMEOUT_MS;
 const getCodebuddyDriver = () => require("./codebuddyDriver.cjs");
 const getCodebuddySessionManager = () => require("./codebuddySessionManager.cjs").codebuddySessionManager;
 function getCodebuddySessionManagerIfLoaded() {
@@ -745,8 +747,6 @@ function registerSdkStreamHandlers(ctx) {
   const injectCliEnv = typeof ctx.withCliDiscoveryEnv === "function"
     ? ctx.withCliDiscoveryEnv
     : (env) => env;
-  // Inside with (ctx), ctx.require resolves relative to aiBridge.cjs.
-  const requireFromSdk = require;
   with (ctx) {
     // chatSessionId -> { sessionId } for resume; controller per requestId.
     const sdkActiveStreams = new Map(); // requestId -> AbortController
@@ -760,7 +760,7 @@ function registerSdkStreamHandlers(ctx) {
     let _codexAppServerRuntime = null;
     const getCodexAppServerRuntime = () => {
       if (!_codexAppServerRuntime) {
-        const { CodexAppServerRuntime } = requireFromSdk("../codexAppServer/runtime.cjs");
+        const CodexAppServerRuntime = getCodexAppServerRuntimeClass();
         _codexAppServerRuntime = new CodexAppServerRuntime({
           appVersion: electronModule?.app?.getVersion?.() || "0.0.0",
           transformUserInputAnswers(answers, context) {
@@ -1572,7 +1572,7 @@ function registerSdkStreamHandlers(ctx) {
             // win over both the shared default and OpenCode's budget.
             const catalogBudgetMs = MODEL_LIST_TIMEOUT_OVERRIDES_MS[backendKey]
               ?? (backendKey === "opencode"
-                ? requireFromSdk("./opencodeDriver.cjs").OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
+                ? getOpenCodeServerStartTimeoutMs() + MODEL_LIST_TIMEOUT_MS
                 : MODEL_LIST_TIMEOUT_MS);
             const raw = await withTimeout(
               fetchSdkModelCatalog({
