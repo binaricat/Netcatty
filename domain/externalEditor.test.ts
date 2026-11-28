@@ -92,6 +92,17 @@ test('buildSshBridgeHostname generates deterministic DNS-safe .netcatty hostname
     username: 'deploy',
   });
   assert.notEqual(h1, differentHost);
+
+  // Same saved profile with a per-session port override must get a distinct bridge alias.
+  const sameProfileDifferentPort = buildSshBridgeHostname({
+    hostId: 'host-123',
+    label: 'Prod API (us-east) / ; rm -rf /',
+    hostname: '10.0.0.5',
+    port: 2200,
+    username: 'deploy',
+  });
+  assert.notEqual(h1, sameProfileDifferentPort);
+  assert.ok(isSshBridgeHostname(sameProfileDifferentPort));
 });
 
 test('validateAndNormalizeRemotePath resolves relative paths and rejects control characters', () => {

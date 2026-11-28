@@ -238,10 +238,18 @@ function fnv1aHex(input: string): string {
 /**
  * Produce a DNS-safe, OpenSSH-safe `*.netcatty` hostname for a Netcatty host.
  * Strictly `[a-z0-9-]{1,50}.netcatty` — zero shell metacharacters or whitespace.
+ *
+ * Includes both the vault profile `hostId` (when present) and the effective
+ * connect-time endpoint (`username@hostname:port`) so sessions sharing a saved
+ * profile with per-session port/user overrides never collide on the same alias.
  */
 export function buildSshBridgeHostname(host: ExternalEditorHostIdentity): string {
-  const stableKey = getHostKeyForExternalEditor(host)
-    || `${host.username || ''}@${host.hostname || 'session'}:${host.port || 22}`;
+  const hostId = typeof host.hostId === 'string' ? host.hostId.trim() : '';
+  const hostname = typeof host.hostname === 'string' ? host.hostname.trim().toLowerCase() : '';
+  const username = typeof host.username === 'string' ? host.username.trim() : '';
+  const port = Number.isInteger(host.port) && (host.port as number) > 0 ? (host.port as number) : 22;
+  const endpointKey = `${username}@${hostname || 'session'}:${port}`;
+  const stableKey = hostId ? `host:${hostId}|${endpointKey}` : endpointKey;
   const rawBase = (host.label || host.hostname || 'host').toLowerCase();
   const slug = rawBase
     .replace(/[^a-z0-9]+/g, '-')

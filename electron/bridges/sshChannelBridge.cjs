@@ -36,6 +36,7 @@ const {
   LEASE_KINDS,
 } = require("./sshConnectionPool.cjs");
 const {
+  LOOPBACK_TCP_AUTO_ENDPOINT,
   getSshBridgeStateDir,
   getSshBridgeDiscoveryFilePath,
   getSshBridgeHostKeyPath,
@@ -205,58 +206,9 @@ function resolveRemoteTransportForTarget(target, { sessions, sftpClients }) {
     }
   }
 
-  // 3. Fall back to any live terminal session matching hostId or (when profile
-  //    identity does not conflict) hostname+port+username.
-  if (sessions?.values) {
-    let endpointFallback = null;
-    for (const session of sessions.values()) {
-      if (!session?.conn || !isConnHealthy(session.conn)) continue;
-      const ep = session._reuseEndpoint || session.connRef?.endpoint;
-      if (!ep) continue;
-      if (target.hostId && ep.hostId && ep.hostId !== target.hostId) {
-        continue;
-      }
-      if (target.hostId && ep.hostId && ep.hostId === target.hostId) {
-        return {
-          conn: session.conn,
-          transport: getLiveTransport(session.connRef),
-        };
-      }
-      if (!endpointFallback && matchesTargetEndpointTuple(target, ep)) {
-        endpointFallback = {
-          conn: session.conn,
-          transport: getLiveTransport(session.connRef),
-        };
-      }
-    }
-    if (endpointFallback) return endpointFallback;
-  }
-
-  // 4. Fall back to any live SFTP client matching hostId or (when profile
-  //    identity does not conflict) hostname+port+username.
-  if (sftpClients?.values) {
-    let endpointFallback = null;
-    for (const sftpClient of sftpClients.values()) {
-      const conn = getSftpClientConn(sftpClient, sftpClients);
-      if (!isConnHealthy(conn)) continue;
-      const ep = getSftpClientEndpoint(sftpClient, sftpClients);
-      if (!ep) continue;
-      if (target.hostId && ep.hostId && ep.hostId !== target.hostId) {
-        continue;
-      }
-      const transport = getLiveTransport(getSftpClientTransport(sftpClient, sftpClients));
-      if (target.hostId && ep.hostId && ep.hostId === target.hostId) {
-        return { conn, transport };
-      }
-      if (!endpointFallback && matchesTargetEndpointTuple(target, ep)) {
-        endpointFallback = { conn, transport };
-      }
-    }
-    if (endpointFallback) return endpointFallback;
-  }
-
-  // 5. Reuse the exact registered pool transport by ID if still live or idle-parked
-  //    (e.g., an editor lease keeps it alive after originating terminal/SFTP close).
+  // 3. Reuse the exact registered pool transport by ID if still live or idle-parked
+  //    (e.g., an editor lease keeps it alive after originating terminal/SFTP close)
+  //    before scanning looser session/SFTP fallbacks.
   if (target.transportId) {
     try {
       const transport = findTransportById(target.transportId);
@@ -272,19 +224,83 @@ function resolveRemoteTransportForTarget(target, { sessions, sftpClients }) {
     }
   }
 
-  // 6. Wake an idle-parked transport in sshConnectionPool if one exists for the endpoint.
-  const poolEndpoint = target.endpoint || (target.hostname
-    ? {
+  // 4. Reuse a healthy live/idle transport in sshConnectionPool matching the complete
+  //    retained endpoint (preserving auth/jump/proxy/port identity) before profile fallbacks.
+  if (target.endpoint) {
+    try {
+      const transport = findTransportByEndpoint(target.endpoint, { kind: "channel" });
+      if (transport?.conn && isConnHealthy(transport.conn)) {
+        return { conn: transport.conn, transport };
+      }
+    } catch {
+      // ignore lookup errors
+    }
+  }
+
+  // 5. Fall back to any live terminal session matching both profile identity (no
+  //    conflicting hostId) and effective endpoint (hostname+port+username).
+  if (sessions?.values) {
+    let endpointFallback = null;
+    for (const session of sessions.values()) {
+      if (!session?.conn || !isConnHealthy(session.conn)) continue;
+      const ep = session._reuseEndpoint || session.connRef?.endpoint;
+      if (!ep) continue;
+      if (target.hostId && ep.hostId && ep.hostId !== target.hostId) {
+        continue;
+      }
+      const endpointMatches = target.hostname ? matchesTargetEndpointTuple(target, ep) : true;
+      if (!endpointMatches) continue;
+      if (target.hostId && ep.hostId && ep.hostId === target.hostId) {
+        return {
+          conn: session.conn,
+          transport: getLiveTransport(session.connRef),
+        };
+      }
+      if (!endpointFallback && target.hostname) {
+        endpointFallback = {
+          conn: session.conn,
+          transport: getLiveTransport(session.connRef),
+        };
+      }
+    }
+    if (endpointFallback) return endpointFallback;
+  }
+
+  // 6. Fall back to any live SFTP client matching both profile identity and effective endpoint.
+  if (sftpClients?.values) {
+    let endpointFallback = null;
+    for (const sftpClient of sftpClients.values()) {
+      const conn = getSftpClientConn(sftpClient, sftpClients);
+      if (!isConnHealthy(conn)) continue;
+      const ep = getSftpClientEndpoint(sftpClient, sftpClients);
+      if (!ep) continue;
+      if (target.hostId && ep.hostId && ep.hostId !== target.hostId) {
+        continue;
+      }
+      const endpointMatches = target.hostname ? matchesTargetEndpointTuple(target, ep) : true;
+      if (!endpointMatches) continue;
+      const transport = getLiveTransport(getSftpClientTransport(sftpClient, sftpClients));
+      if (target.hostId && ep.hostId && ep.hostId === target.hostId) {
+        return { conn, transport };
+      }
+      if (!endpointFallback && target.hostname) {
+        endpointFallback = { conn, transport };
+      }
+    }
+    if (endpointFallback) return endpointFallback;
+  }
+
+  // 7. Wake an idle-parked transport in sshConnectionPool using minimal endpoint fields
+  //    when no full endpoint was retained.
+  if (!target.endpoint && target.hostname) {
+    try {
+      const transport = findTransportByEndpoint({
         hostId: target.hostId,
         hostname: target.hostname,
         port: target.port || 22,
         username: target.username || "",
         protocol: "ssh",
-      }
-    : null);
-  if (poolEndpoint) {
-    try {
-      const transport = findTransportByEndpoint(poolEndpoint, { kind: "channel" });
+      }, { kind: "channel" });
       if (transport?.conn && isConnHealthy(transport.conn)) {
         return { conn: transport.conn, transport };
       }
@@ -921,6 +937,7 @@ function createSshChannelBridge(options = {}) {
   let sftpClients = options.sftpClients || null;
   let userDataDir = options.userDataDir || null;
   let stateDir = options.stateDir || null;
+  let tempDirBridge = options.tempDirBridge || null;
 
   /** @type {Map<string, object>} bridgeHost -> target descriptor */
   const targets = new Map();
@@ -1108,10 +1125,15 @@ function createSshChannelBridge(options = {}) {
       hostKeyInfo = ensureHostKeyAndKnownHosts(pathOpts);
       authToken = crypto.randomBytes(32).toString("hex");
       const nonce = crypto.randomBytes(6).toString("hex");
-      socketEndpoint = getSshBridgeSocketPath({ ...pathOpts, nonce });
+      socketEndpoint = getSshBridgeSocketPath({
+        ...pathOpts,
+        nonce,
+        ...(tempDirBridge ? { tempDirBridge } : {}),
+      });
       discoveryPath = getSshBridgeDiscoveryFilePath(pathOpts);
 
-      if (process.platform !== "win32") {
+      const useLoopbackTcp = socketEndpoint === LOOPBACK_TCP_AUTO_ENDPOINT;
+      if (!useLoopbackTcp && process.platform !== "win32") {
         try {
           if (fs.existsSync(socketEndpoint)) fs.unlinkSync(socketEndpoint);
         } catch {
@@ -1122,13 +1144,21 @@ function createSshChannelBridge(options = {}) {
       const server = net.createServer(handleIncomingSocket);
       await new Promise((resolve, reject) => {
         server.once("error", reject);
-        server.listen(socketEndpoint, () => {
+        const onListening = () => {
           server.removeListener("error", reject);
           resolve();
-        });
+        };
+        if (useLoopbackTcp) {
+          server.listen(0, "127.0.0.1", onListening);
+        } else {
+          server.listen(socketEndpoint, onListening);
+        }
       });
 
-      if (process.platform !== "win32") {
+      if (useLoopbackTcp) {
+        const addr = server.address();
+        socketEndpoint = `tcp://127.0.0.1:${addr.port}`;
+      } else if (process.platform !== "win32") {
         try {
           fs.chmodSync(socketEndpoint, 0o600);
         } catch {
@@ -1255,7 +1285,7 @@ function createSshChannelBridge(options = {}) {
       });
     }
 
-    if (process.platform !== "win32" && socketEndpoint) {
+    if (process.platform !== "win32" && socketEndpoint && !socketEndpoint.startsWith("tcp://")) {
       try {
         if (fs.existsSync(socketEndpoint)) fs.unlinkSync(socketEndpoint);
       } catch {

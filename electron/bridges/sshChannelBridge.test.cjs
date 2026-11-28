@@ -27,8 +27,10 @@ const {
 } = require("./sshConnectionPool.cjs");
 const { buildSshBridgeConfigBlock } = require("./externalEditorBridge.cjs");
 const {
+  LOOPBACK_TCP_AUTO_ENDPOINT,
   getSshProxyLauncherPath,
   getSshBridgeSocketPath,
+  parseSshBridgeEndpoint,
   SSH_BRIDGE_DISCOVERY_ENV_VAR,
 } = require("../cli/sshBridgeDiscoveryPath.cjs");
 
@@ -139,7 +141,7 @@ test("sshChannelBridge rejects unauthorized handshake token and unknown host", a
     assert.ok(fs.existsSync(status.knownHostsPath));
 
     const sendHandshake = (payload) => new Promise((resolve, reject) => {
-      const sock = net.createConnection(status.endpoint);
+      const sock = net.createConnection(parseSshBridgeEndpoint(status.endpoint));
       let buf = "";
       sock.on("connect", () => sock.write(JSON.stringify(payload) + "\n"));
       sock.on("data", (d) => {
@@ -831,7 +833,7 @@ test("sshChannelBridge retains transport identity for later SSH connections afte
     // A second SSH connection from the editor must STILL succeed on the surviving transport.
     const discovery = JSON.parse(fs.readFileSync(status.discoveryPath, "utf8"));
     const handshakeReply = await new Promise((resolve, reject) => {
-      const sock = net.createConnection(status.endpoint);
+      const sock = net.createConnection(parseSshBridgeEndpoint(status.endpoint));
       let buf = "";
       sock.on("connect", () => {
         sock.write(JSON.stringify({ token: discovery.token, host: "pw-1234abcd.netcatty" }) + "\n");
@@ -864,6 +866,138 @@ test("sshChannelBridge retains transport identity for later SSH connections afte
   } finally {
     await bridge.stop();
     resetSshTransportRegistryForTests();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveRemoteTransportForTarget prefers retained transport over same-hostId session on a different port", () => {
+  resetSshTransportRegistryForTests();
+  try {
+    const conn2222 = makeFakeConn("port-2222");
+    const transport2222 = createTransport({
+      conn: conn2222,
+      endpoint: {
+        hostId: "host-shared-profile",
+        hostname: "10.0.0.5",
+        port: 2222,
+        username: "deploy",
+        protocol: "ssh",
+      },
+      idleTtlMs: 60_000,
+    });
+    const editorLease = { id: "ssh-bridge:port-2222" };
+    borrowTransport(transport2222, { kind: "forward", holder: editorLease });
+
+    // Another live terminal and SFTP client share the same hostId but connect to port 2200.
+    const conn2200 = makeFakeConn("port-2200");
+    const sessions = new Map([
+      ["sess-2200", {
+        conn: conn2200,
+        _reuseEndpoint: {
+          hostId: "host-shared-profile",
+          hostname: "10.0.0.5",
+          port: 2200,
+          username: "deploy",
+        },
+      }],
+    ]);
+    const sftpClients = new Map([
+      ["sftp-2200", {
+        client: conn2200,
+        __netcattyRefHolder: {
+          connRef: {
+            conn: conn2200,
+            state: "live",
+            endpoint: {
+              hostId: "host-shared-profile",
+              hostname: "10.0.0.5",
+              port: 2200,
+              username: "deploy",
+            },
+          },
+        },
+      }],
+    ]);
+
+    const target = {
+      sessionId: "sess-2222-closed",
+      hostId: "host-shared-profile",
+      hostname: "10.0.0.5",
+      port: 2222,
+      username: "deploy",
+      transportId: transport2222.id,
+      endpoint: transport2222.endpoint,
+    };
+
+    const resolved = resolveRemoteTransportForTarget(target, { sessions, sftpClients });
+    assert.equal(resolved?.conn, conn2222);
+    assert.equal(resolved?.transport, transport2222);
+
+    // Even if the port-2222 transport is gone, neither same-hostId port-2200 fallback may match.
+    returnTransport(editorLease);
+    transport2222.state = "dead";
+    const resolvedAfterDead = resolveRemoteTransportForTarget(
+      { ...target, transportId: null, endpoint: null },
+      { sessions, sftpClients },
+    );
+    assert.equal(resolvedAfterDead, null);
+  } finally {
+    resetSshTransportRegistryForTests();
+  }
+});
+
+test("sshChannelBridge falls back to authenticated 127.0.0.1 loopback TCP when both stateDir and managed tempDir exceed Unix socket limits", async () => {
+  const longStateDir = "/home/user/" + "very-long-profile-segment/".repeat(5) + "ssh-bridge";
+  const overLimitTempBridge = {
+    getTempFilePath(fileName) {
+      return "/home/user/" + "very-long-custom-temp-dir/".repeat(6) + `12345_1_${fileName}`;
+    },
+  };
+  const endpointSpec = getSshBridgeSocketPath({
+    platform: "linux",
+    stateDir: longStateDir,
+    nonce: "abc123",
+    tempDirBridge: overLimitTempBridge,
+  });
+  assert.equal(endpointSpec, LOOPBACK_TCP_AUTO_ENDPOINT);
+
+  // Verify a real bridge instance starts cleanly without EINVAL and accepts handshake over 127.0.0.1.
+  const tmpDir = makeTempDir("nc-ssh-bridge-long-");
+  const deepStateDir = path.join(tmpDir, "a".repeat(50), "b".repeat(50), "ssh-bridge");
+  const bridge = createSshChannelBridge({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    stateDir: deepStateDir,
+    tempDirBridge: overLimitTempBridge,
+  });
+  try {
+    const status = await bridge.ensureStarted();
+    assert.equal(status.running, true);
+    assert.match(status.endpoint, /^tcp:\/\/127\.0\.0\.1:\d+$/);
+    const connectTarget = parseSshBridgeEndpoint(status.endpoint);
+    assert.equal(connectTarget.host, "127.0.0.1");
+    assert.ok(connectTarget.port > 0);
+
+    const discovery = JSON.parse(fs.readFileSync(status.discoveryPath, "utf8"));
+    const reply = await new Promise((resolve, reject) => {
+      const sock = net.createConnection(connectTarget);
+      let buf = "";
+      sock.on("connect", () => {
+        sock.write(JSON.stringify({ token: discovery.token, host: "missing-12345678.netcatty" }) + "\n");
+      });
+      sock.on("data", (d) => {
+        buf += d.toString("utf8");
+        if (buf.includes("\n")) {
+          sock.destroy();
+          resolve(JSON.parse(buf.split("\n")[0]));
+        }
+      });
+      sock.on("error", reject);
+    });
+    assert.equal(reply.ok, false);
+    assert.match(reply.error, /No active Netcatty session/i);
+  } finally {
+    await bridge.stop();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

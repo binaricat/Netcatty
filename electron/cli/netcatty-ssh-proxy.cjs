@@ -12,7 +12,10 @@
 
 const fs = require("node:fs");
 const net = require("node:net");
-const { getSshBridgeDiscoveryFilePath } = require("./sshBridgeDiscoveryPath.cjs");
+const {
+  getSshBridgeDiscoveryFilePath,
+  parseSshBridgeEndpoint,
+} = require("./sshBridgeDiscoveryPath.cjs");
 
 const BRIDGE_HOST_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.netcatty$/;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
@@ -49,11 +52,12 @@ function runProxy(argv = process.argv.slice(2)) {
 
   const endpoint = typeof discovery?.endpoint === "string" ? discovery.endpoint : "";
   const token = typeof discovery?.token === "string" ? discovery.token : "";
-  if (!endpoint || !token) {
+  const connectTarget = parseSshBridgeEndpoint(endpoint);
+  if (!connectTarget || !token) {
     fail("Netcatty SSH bridge discovery file is incomplete.");
   }
 
-  const socket = net.createConnection(endpoint);
+  const socket = net.createConnection(connectTarget);
   let handshakeDone = false;
   let handshakeBuf = Buffer.alloc(0);
 
