@@ -26,7 +26,11 @@ const {
   resetSshTransportRegistryForTests,
 } = require("./sshConnectionPool.cjs");
 const { buildSshBridgeConfigBlock } = require("./externalEditorBridge.cjs");
-const { getSshProxyLauncherPath, SSH_BRIDGE_DISCOVERY_ENV_VAR } = require("../cli/sshBridgeDiscoveryPath.cjs");
+const {
+  getSshProxyLauncherPath,
+  getSshBridgeSocketPath,
+  SSH_BRIDGE_DISCOVERY_ENV_VAR,
+} = require("../cli/sshBridgeDiscoveryPath.cjs");
 
 function makeTempDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -752,4 +756,114 @@ test("attachClientChannelMultiplexer cancels late reverse-forward listens that c
   assert.equal(accepted, false);
   assert.equal(rejected, true);
   assert.deepEqual(unforwarded, [{ bindAddr: "127.0.0.1", bindPort: 43210 }]);
+});
+
+test("getSshBridgeSocketPath allocates long Unix fallback sockets via managed tempDirBridge", () => {
+  const longStateDir = "/home/user/" + "very-long-profile-segment/".repeat(5) + "ssh-bridge";
+  const calls = [];
+  const fakeTempDirBridge = {
+    getTempFilePath(fileName) {
+      calls.push(fileName);
+      return `/tmp/Netcatty/12345_1_${fileName}`;
+    },
+  };
+  const sockPath = getSshBridgeSocketPath({
+    platform: "linux",
+    stateDir: longStateDir,
+    nonce: "abc123",
+    tempDirBridge: fakeTempDirBridge,
+  });
+  assert.deepEqual(calls, ["nc.sock"]);
+  assert.equal(sockPath, "/tmp/Netcatty/12345_1_nc.sock");
+  assert.ok(Buffer.byteLength(sockPath, "utf8") <= 96);
+});
+
+test("sshChannelBridge retains transport identity for later SSH connections after originating session closes", async () => {
+  resetSshTransportRegistryForTests();
+  const tmpDir = makeTempDir("nc-ssh-bridge-retain-");
+  const sessions = new Map();
+  const bridge = createSshChannelBridge({
+    sessions,
+    sftpClients: new Map(),
+    stateDir: tmpDir,
+  });
+
+  try {
+    const conn = makeFakeConn("password-authed");
+    // Password-authenticated transport has a non-empty authFingerprint in its endpoint key.
+    const transport = createTransport({
+      conn,
+      endpoint: {
+        hostId: "host-pw-1",
+        hostname: "10.20.30.40",
+        port: 22,
+        username: "admin",
+        protocol: "ssh",
+        password: "secret-password",
+      },
+      idleTtlMs: 60_000,
+    });
+    const shellHolder = { id: "sess-pw-1" };
+    borrowTransport(transport, { kind: "shell", holder: shellHolder });
+    sessions.set("sess-pw-1", {
+      id: "sess-pw-1",
+      conn,
+      connRef: transport,
+      _reuseEndpoint: transport.endpoint,
+    });
+
+    const status = await bridge.registerTarget({
+      bridgeHost: "pw-1234abcd.netcatty",
+      sessionId: "sess-pw-1",
+      hostId: "host-pw-1",
+      hostname: "10.20.30.40",
+      port: 22,
+      username: "admin",
+    });
+    assert.equal(status.connected, true);
+
+    // Editor holds an active lease; originating terminal closes and leaves `sessions`.
+    const editorLeaseHolder = { id: "ssh-bridge:editor-1" };
+    borrowTransport(transport, { kind: "forward", holder: editorLeaseHolder });
+    sessions.delete("sess-pw-1");
+    returnTransport(shellHolder);
+
+    // A second SSH connection from the editor must STILL succeed on the surviving transport.
+    const discovery = JSON.parse(fs.readFileSync(status.discoveryPath, "utf8"));
+    const handshakeReply = await new Promise((resolve, reject) => {
+      const sock = net.createConnection(status.endpoint);
+      let buf = "";
+      sock.on("connect", () => {
+        sock.write(JSON.stringify({ token: discovery.token, host: "pw-1234abcd.netcatty" }) + "\n");
+      });
+      sock.on("data", (d) => {
+        buf += d.toString("utf8");
+        if (buf.includes("\n")) {
+          sock.destroy();
+          resolve(JSON.parse(buf.split("\n")[0]));
+        }
+      });
+      sock.on("error", reject);
+    });
+    assert.equal(handshakeReply.ok, true);
+
+    // Also verify direct endpoint-based fallback works with retained authFingerprint.
+    const resolvedByEndpoint = resolveRemoteTransportForTarget(
+      {
+        hostId: "host-pw-1",
+        hostname: "10.20.30.40",
+        port: 22,
+        username: "admin",
+        endpoint: transport.endpoint,
+      },
+      { sessions: new Map(), sftpClients: new Map() },
+    );
+    assert.equal(resolvedByEndpoint?.transport, transport);
+
+    returnTransport(editorLeaseHolder);
+  } finally {
+    await bridge.stop();
+    resetSshTransportRegistryForTests();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });

@@ -102,10 +102,10 @@ test("buildSshBridgeConfigBlock normalizes Windows paths with forward slashes fo
   assert.equal(removeSshBridgeConfigContent(upserted), "");
 });
 
-test("detectInstalledEditors finds Windows Zed and VS Code binaries cleanly", () => {
+test("detectInstalledEditors finds Windows Zed and VS Code native .exe binaries cleanly", () => {
   const existing = new Set([
     path.join("C:\\Users\\dev\\AppData\\Local", "Programs", "Zed", "Zed.exe"),
-    path.join("C:\\Users\\dev\\AppData\\Local", "Programs", "Microsoft VS Code", "bin", "code.cmd"),
+    path.join("C:\\Users\\dev\\AppData\\Local", "Programs", "Microsoft VS Code", "Code.exe"),
   ]);
   const detected = detectInstalledEditors({
     platform: "win32",
@@ -120,6 +120,7 @@ test("detectInstalledEditors finds Windows Zed and VS Code binaries cleanly", ()
   assert.equal(detected.zed.available, true);
   assert.ok(detected.zed.detectedPath.endsWith("Zed.exe"));
   assert.equal(detected.vscode.available, true);
+  assert.ok(detected.vscode.detectedPath.endsWith("Code.exe"));
   assert.equal(detected.cursor.available, false);
 });
 
@@ -159,6 +160,31 @@ test("buildLaunchSpec uses structured argv and never injects shell strings", () 
     remotePath: "/tmp",
     platform: "linux",
   }));
+
+  // Windows .cmd/.bat launchers must be rejected so remote filenames never enter cmd.exe.
+  assert.throws(
+    () => buildLaunchSpec({
+      editorId: "custom",
+      executablePath: "C:\\Tools\\editor.cmd",
+      customArgs: ["{remotePath}"],
+      sshTarget: "prod-1234abcd.netcatty",
+      remotePath: "/tmp/report&calc.exe&report",
+      kind: "file",
+      platform: "win32",
+    }),
+    /\.cmd\/\.bat/i,
+  );
+  assert.throws(
+    () => buildLaunchSpec({
+      editorId: "vscode",
+      executablePath: "C:\\Users\\dev\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\code.cmd",
+      sshTarget: "prod-1234abcd.netcatty",
+      remotePath: "/tmp/report.txt",
+      kind: "file",
+      platform: "win32",
+    }),
+    /\.cmd\/\.bat/i,
+  );
 });
 
 test("openRemoteInExternalEditor registers bridge target and spawns with shell: false", async () => {

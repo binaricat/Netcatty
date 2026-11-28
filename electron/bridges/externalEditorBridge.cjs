@@ -421,7 +421,7 @@ function getEditorCandidatePaths(editorId, { platform = process.platform, env = 
     switch (editorId) {
       case "zed":
         return {
-          pathNames: ["zed.exe", "zed"],
+          pathNames: ["zed.exe"],
           explicitPaths: [
             path.join(localAppData, "Programs", "Zed", "bin", "zed.exe"),
             path.join(localAppData, "Programs", "Zed", "Zed.exe"),
@@ -431,28 +431,26 @@ function getEditorCandidatePaths(editorId, { platform = process.platform, env = 
         };
       case "vscode":
         return {
-          pathNames: ["code.cmd", "code.exe", "code"],
+          pathNames: ["Code.exe"],
           explicitPaths: [
-            path.join(localAppData, "Programs", "Microsoft VS Code", "bin", "code.cmd"),
             path.join(localAppData, "Programs", "Microsoft VS Code", "Code.exe"),
-            path.join(programFiles, "Microsoft VS Code", "bin", "code.cmd"),
             path.join(programFiles, "Microsoft VS Code", "Code.exe"),
           ],
         };
       case "cursor":
         return {
-          pathNames: ["cursor.cmd", "cursor.exe", "cursor"],
+          pathNames: ["Cursor.exe"],
           explicitPaths: [
-            path.join(localAppData, "Programs", "cursor", "resources", "app", "bin", "cursor.cmd"),
             path.join(localAppData, "Programs", "cursor", "Cursor.exe"),
+            path.join(programFiles, "cursor", "Cursor.exe"),
           ],
         };
       case "windsurf":
         return {
-          pathNames: ["windsurf.cmd", "windsurf.exe", "windsurf"],
+          pathNames: ["Windsurf.exe"],
           explicitPaths: [
-            path.join(localAppData, "Programs", "Windsurf", "bin", "windsurf.cmd"),
             path.join(localAppData, "Programs", "Windsurf", "Windsurf.exe"),
+            path.join(programFiles, "Windsurf", "Windsurf.exe"),
           ],
         };
       default:
@@ -686,16 +684,13 @@ function buildLaunchSpec({
     };
   }
 
-  // On Windows, `.cmd` / `.bat` shims (e.g. VS Code's `code.cmd`) cannot be
-  // executed directly with `shell: false` by CreateProcess; invoke cmd.exe /d /s /c
-  // ONLY for verified `.cmd`/`.bat` files, or prefer the `.exe` binary directly.
+  // Never pass remote paths through cmd.exe to invoke .cmd/.bat batch launchers
+  // on Windows; cmd.exe interprets shell metacharacters (&, |, %, ^, etc.) even
+  // when spawned with shell: false. Require a native executable instead.
   if (platform === "win32" && /\.(cmd|bat)$/i.test(cleanExe)) {
-    const comspec = process.env.ComSpec || "cmd.exe";
-    return {
-      command: comspec,
-      args: ["/d", "/c", cleanExe, ...editorArgs],
-      displayUri,
-    };
+    throw new Error(
+      "Windows batch launchers (.cmd/.bat) are not supported for remote editor launches. Configure the native .exe executable instead.",
+    );
   }
 
   return {

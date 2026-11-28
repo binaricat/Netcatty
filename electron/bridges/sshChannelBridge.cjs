@@ -31,6 +31,7 @@ const path = require("node:path");
 const {
   borrowTransport,
   returnTransport,
+  findTransportById,
   findTransportByEndpoint,
   LEASE_KINDS,
 } = require("./sshConnectionPool.cjs");
@@ -254,16 +255,36 @@ function resolveRemoteTransportForTarget(target, { sessions, sftpClients }) {
     if (endpointFallback) return endpointFallback;
   }
 
-  // 5. Wake an idle-parked transport in sshConnectionPool if one exists for the endpoint.
-  if (target.hostname) {
+  // 5. Reuse the exact registered pool transport by ID if still live or idle-parked
+  //    (e.g., an editor lease keeps it alive after originating terminal/SFTP close).
+  if (target.transportId) {
     try {
-      const transport = findTransportByEndpoint({
+      const transport = findTransportById(target.transportId);
+      if (
+        transport?.conn
+        && isConnHealthy(transport.conn)
+        && !(target.hostId && transport.endpoint?.hostId && transport.endpoint.hostId !== target.hostId)
+      ) {
+        return { conn: transport.conn, transport };
+      }
+    } catch {
+      // ignore lookup errors
+    }
+  }
+
+  // 6. Wake an idle-parked transport in sshConnectionPool if one exists for the endpoint.
+  const poolEndpoint = target.endpoint || (target.hostname
+    ? {
         hostId: target.hostId,
         hostname: target.hostname,
         port: target.port || 22,
         username: target.username || "",
         protocol: "ssh",
-      }, { kind: "channel" });
+      }
+    : null);
+  if (poolEndpoint) {
+    try {
+      const transport = findTransportByEndpoint(poolEndpoint, { kind: "channel" });
       if (transport?.conn && isConnHealthy(transport.conn)) {
         return { conn: transport.conn, transport };
       }
@@ -1011,6 +1032,13 @@ function createSshChannelBridge(options = {}) {
         return;
       }
 
+      if (resolved.transport?.id) {
+        target.transportId = resolved.transport.id;
+      }
+      if (resolved.transport?.endpoint) {
+        target.endpoint = { ...resolved.transport.endpoint };
+      }
+
       // Borrow a lease on the shared SSH transport while this external SSH client is connected.
       const leaseHolder = { id: `ssh-bridge:${bridgeHost}:${crypto.randomUUID()}` };
       let leased = false;
@@ -1162,6 +1190,19 @@ function createSshChannelBridge(options = {}) {
     const resolved = resolveRemoteTransportForTarget(record, { sessions, sftpClients });
     if (!resolved?.conn) {
       throw new Error("No active SSH connection is available for this host.");
+    }
+
+    if (resolved.transport?.id) {
+      record.transportId = resolved.transport.id;
+    }
+    if (resolved.transport?.endpoint) {
+      record.endpoint = { ...resolved.transport.endpoint };
+    } else if (record.sessionId && sessions?.get) {
+      const sessionEp = sessions.get(record.sessionId)?._reuseEndpoint;
+      if (sessionEp) record.endpoint = { ...sessionEp };
+    } else if (record.sftpId && sftpClients?.get) {
+      const sftpEp = getSftpClientEndpoint(sftpClients.get(record.sftpId), sftpClients);
+      if (sftpEp) record.endpoint = { ...sftpEp };
     }
 
     targets.set(bridgeHost, record);

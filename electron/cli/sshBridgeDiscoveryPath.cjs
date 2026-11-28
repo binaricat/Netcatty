@@ -1,6 +1,5 @@
 "use strict";
 
-const os = require("node:os");
 const path = require("node:path");
 const { getToolCliStateDir } = require("./discoveryPath.cjs");
 
@@ -40,18 +39,20 @@ function getSshBridgeKnownHostsPath(options = {}) {
 }
 
 function getSshBridgeSocketPath(options = {}) {
+  const platform = options.platform || process.platform;
   const suffix = `${process.pid}-${options.nonce || "default"}`;
-  if (process.platform === "win32") {
+  if (platform === "win32") {
     return `\\\\.\\pipe\\netcatty-ssh-bridge-${suffix}`;
   }
   // Unix domain socket paths are capped around 104-108 bytes on macOS/Linux.
-  // Use os.tmpdir() when userDataDir path is long.
+  // Fall back to Netcatty's managed private temp directory when userDataDir is long.
   const stateDir = getSshBridgeStateDir(options);
   const candidate = path.join(stateDir, `bridge-${suffix}.sock`);
   if (Buffer.byteLength(candidate, "utf8") <= 96) {
     return candidate;
   }
-  return path.join(os.tmpdir(), `nc-ssh-${suffix}.sock`);
+  const tempBridge = options.tempDirBridge || require("../bridges/tempDirBridge.cjs");
+  return tempBridge.getTempFilePath("nc.sock");
 }
 
 function getSshProxyLauncherPath(platform = process.platform) {
