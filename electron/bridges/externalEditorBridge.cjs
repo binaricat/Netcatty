@@ -324,11 +324,11 @@ function installSshBridgeConfig(options = {}) {
 
   let existing = "";
   try {
-    if (fs.existsSync(sshConfigPath)) {
-      existing = fs.readFileSync(sshConfigPath, "utf8");
+    existing = fs.readFileSync(sshConfigPath, "utf8");
+  } catch (err) {
+    if (err?.code !== "ENOENT") {
+      throw err;
     }
-  } catch {
-    // ignore
   }
 
   const block = buildSshBridgeConfigBlock({
@@ -340,8 +340,17 @@ function installSshBridgeConfig(options = {}) {
   const next = upsertSshBridgeConfigContent(existing, block);
 
   const tmpPath = `${sshConfigPath}.netcatty-${process.pid}.tmp`;
-  fs.writeFileSync(tmpPath, next, { encoding: "utf8", mode: 0o600 });
-  fs.renameSync(tmpPath, sshConfigPath);
+  try {
+    fs.writeFileSync(tmpPath, next, { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, sshConfigPath);
+  } catch (err) {
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      // ignore temp cleanup failure
+    }
+    throw err;
+  }
   if (platform !== "win32") {
     try {
       fs.chmodSync(sshConfigPath, 0o600);
@@ -363,15 +372,29 @@ function installSshBridgeConfig(options = {}) {
 function removeSshBridgeConfig(options = {}) {
   const platform = options.platform || process.platform;
   const sshConfigPath = options.sshConfigPath || getDefaultSshConfigPath(options.homedir);
-  if (!fs.existsSync(sshConfigPath)) {
-    return getSshBridgeConfigStatus({ ...options, sshConfigPath, platform });
+  let existing;
+  try {
+    existing = fs.readFileSync(sshConfigPath, "utf8");
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      return getSshBridgeConfigStatus({ ...options, sshConfigPath, platform });
+    }
+    throw err;
   }
-  const existing = fs.readFileSync(sshConfigPath, "utf8");
   const next = removeSshBridgeConfigContent(existing);
   if (next !== existing) {
     const tmpPath = `${sshConfigPath}.netcatty-${process.pid}.tmp`;
-    fs.writeFileSync(tmpPath, next, { encoding: "utf8", mode: 0o600 });
-    fs.renameSync(tmpPath, sshConfigPath);
+    try {
+      fs.writeFileSync(tmpPath, next, { encoding: "utf8", mode: 0o600 });
+      fs.renameSync(tmpPath, sshConfigPath);
+    } catch (err) {
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch {
+        // ignore temp cleanup failure
+      }
+      throw err;
+    }
     if (platform !== "win32") {
       try {
         fs.chmodSync(sshConfigPath, 0o600);

@@ -406,3 +406,42 @@ test("installSshBridgeConfig inserts before wildcard Host */Match rules and relo
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("installSshBridgeConfig aborts and preserves existing ~/.ssh/config when reading fails", (t) => {
+  if (process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0)) {
+    t.skip("POSIX file-permission read failure test requires non-root POSIX environment");
+    return;
+  }
+
+  const tmpDir = makeTempDir("nc-ext-editor-unreadable-");
+  const sshConfigPath = path.join(tmpDir, ".ssh", "config");
+  const stateDir = path.join(tmpDir, "state");
+  fs.mkdirSync(path.dirname(sshConfigPath), { recursive: true, mode: 0o700 });
+
+  const originalContent = "Host important.internal\n    User alice\n";
+  fs.writeFileSync(sshConfigPath, originalContent, { encoding: "utf8", mode: 0o600 });
+  fs.chmodSync(sshConfigPath, 0o000);
+
+  try {
+    assert.throws(
+      () =>
+        installSshBridgeConfig({
+          sshConfigPath,
+          stateDir,
+          proxyLauncherPath: "/opt/netcatty/netcatty-ssh-proxy",
+          platform: "linux",
+        }),
+      (err) => err?.code === "EACCES",
+    );
+
+    fs.chmodSync(sshConfigPath, 0o600);
+    assert.equal(fs.readFileSync(sshConfigPath, "utf8"), originalContent);
+  } finally {
+    try {
+      fs.chmodSync(sshConfigPath, 0o600);
+    } catch {
+      // ignore
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
