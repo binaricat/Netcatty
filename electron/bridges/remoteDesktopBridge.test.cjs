@@ -305,6 +305,7 @@ describe("remoteDesktopBridge system client helpers", () => {
       loadBalanceInfo: "tsv://MS Terminal Services Plugin.1.Desktop",
     });
     assert.match(content, /^full address:s:10\.1\.2\.3:33890/m);
+    assert.ok(content.includes("\r\nuse redirection server name:i:1\r\n"));
     assert.match(content, /^username:s:alice\|token-uuid/m);
     assert.match(content, /^domain:s:CORP/m);
     assert.match(content, /^loadbalanceinfo:s:tsv:\/\//m);
@@ -312,6 +313,7 @@ describe("remoteDesktopBridge system client helpers", () => {
 
     const rewritten = rewriteRdpFullAddress(content, "127.0.0.1", 54321);
     assert.match(rewritten, /^full address:s:127\.0\.0\.1:54321/m);
+    assert.equal(rewritten, content.replace("full address:s:10.1.2.3:33890", "full address:s:127.0.0.1:54321"));
   });
 
   it("builds vnc:// URL safely without embedding passwords", () => {

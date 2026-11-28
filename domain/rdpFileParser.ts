@@ -400,6 +400,7 @@ export const generateRdpFileContent = (spec: GenerateRdpFileSpec): string => {
     `full address:s:${formatRdpFullAddress(spec.hostname, port)}`,
     `server port:i:${port}`,
     'prompt for credentials:i:1',
+    'use redirection server name:i:1',
     'screen mode id:i:2',
   ];
 

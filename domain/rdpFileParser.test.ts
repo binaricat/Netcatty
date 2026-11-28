@@ -159,11 +159,13 @@ test('generateRdpFileContent round-trips cleanly through parseRdpFile and strips
   });
 
   assert.ok(generated.includes('full address:s:[2001:db8::10]:33890\r\n'));
+  assert.ok(generated.includes('\r\nuse redirection server name:i:1\r\n'));
   assert.ok(!generated.includes('\r\nfull address:s:evil.example'));
   const reparsed = parseRdpFile(generated);
   assert.equal(reparsed.hostname, '2001:db8::10');
   assert.equal(reparsed.port, 33890);
   assert.equal(reparsed.username, 'alice|token-123');
+  assert.equal(reparsed.useRedirectionServerName, true);
   assert.equal(reparsed.resolutionMode, 'dynamic');
   assert.equal(reparsed.audioEnabled, true);
   assert.equal(reparsed.clipboardSync, true);
