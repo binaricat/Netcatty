@@ -69,8 +69,19 @@ module.exports = {
         'dist/**/*',
         'electron/**/*',
         // The Windows Hello helper is shipped once through win.extraResources.
-        // Exclude local per-arch build output from app.asar on every platform.
+        // Exclude both its C++ source and local per-arch build output from app.asar.
         '!electron/bridges/windowsHelloHelper/build/**/*',
+        '!electron/bridges/windowsHelloHelper/NetcattyWindowsHello.cpp',
+        // Packaged builds always run `prebuild` -> `build:preload`, producing
+        // `electron/preload.bundle.cjs` (preferred by preloadPath.cjs). Keep
+        // the unbundled preload sources out of app.asar.
+        '!electron/preload.cjs',
+        '!electron/preload/**/*',
+        // Build-time macOS entitlements plist, dev launcher, and internal docs
+        // are not runtime app files.
+        '!electron/entitlements.mac.plist',
+        '!electron/launch.cjs',
+        '!electron/plugins/distribution/README.md',
         // Test fixtures, test-only helpers, and dev/CI schema snapshots are not
         // runtime resources. Keep them out of production ASARs (including plugin
         // smoke fixtures so no example plugin can be mistaken for an installed package).
@@ -178,6 +189,15 @@ module.exports = {
         // web-streams-polyfill is only a Node < 16.5 fallback inside fetch-blob;
         // Netcatty requires Node >= 22 / Electron 42 with native Web Streams.
         '!node_modules/web-streams-polyfill/**/*',
+        // tar-stream and events-universal declare bare-* packages only for the
+        // Holepunch/Bare runtime ("bare" import/export condition). Node/Electron
+        // always resolves default Node.js built-ins and never loads bare-* or
+        // their cross-platform iOS/Android/desktop .bare prebuilds.
+        '!node_modules/bare-fs/**/*',
+        '!node_modules/bare-url/**/*',
+        '!node_modules/bare-path/**/*',
+        '!node_modules/bare-events/**/*',
+        '!node_modules/bare-stream/**/*',
         // Main process only CJS-requires css-tree (cjs/index.cjs) and mdn-data's
         // css/{at-rules,properties,syntaxes}.json; skip browser/ESM/l10n/schema copies.
         '!node_modules/css-tree/dist/**/*',
@@ -229,6 +249,15 @@ module.exports = {
         // per-platform prebuilds); netcatty uses the user's copilot via cliPath,
         // so it is excluded entirely.
         '!**/@anthropic-ai/claude-agent-sdk-*/**/*',
+        // claudeDriver.cjs only imports the default "@anthropic-ai/claude-agent-sdk"
+        // entrypoint (sdk.mjs). Exclude unused sibling entrypoints and manifests
+        // while keeping sdk.mjs, LICENSE.md, and README.md.
+        '!node_modules/@anthropic-ai/claude-agent-sdk/assistant.mjs',
+        '!node_modules/@anthropic-ai/claude-agent-sdk/bridge.mjs',
+        '!node_modules/@anthropic-ai/claude-agent-sdk/browser-sdk.js',
+        '!node_modules/@anthropic-ai/claude-agent-sdk/extractFromBunfs.js',
+        '!node_modules/@anthropic-ai/claude-agent-sdk/manifest.json',
+        '!node_modules/@anthropic-ai/claude-agent-sdk/manifest.zst.json',
         '!node_modules/@anthropic-ai/claude-code-*/**/*',
         '!node_modules/@openai/codex-{darwin,linux,linuxmusl,win32}-*/**/*',
         '!node_modules/@github/copilot-{darwin,linux,linuxmusl,win32}-*/**/*',
@@ -246,8 +275,22 @@ module.exports = {
         '!node_modules/@cursor/sdk/dist/**/*.d.ts',
         '!node_modules/@cursor/sdk/dist/**/*.d.ts.map',
         // sqlite3 rebuilds a native module for Electron; its upstream source
-        // tarball is build-time payload only.
+        // tarball, C++ sources, and install-only prebuild-install/tar helpers
+        // are not needed at runtime (sqlite3-binding.js only requires bindings).
         '!node_modules/sqlite3/deps/**/*',
+        '!node_modules/sqlite3/src/**/*',
+        '!node_modules/prebuild-install/**/*',
+        '!node_modules/tar/**/*',
+        // Native module C/C++ sources, build scripts, and node-pty's third_party
+        // ConPTY staging copies are build-time only; runtime loads compiled
+        // binaries from build/Release or prebuilds.
+        '!node_modules/node-pty/third_party/**/*',
+        '!node_modules/node-pty/deps/**/*',
+        '!node_modules/node-pty/src/**/*',
+        '!node_modules/node-pty/scripts/**/*',
+        '!node_modules/node-pty/node-addon-api/**/*',
+        '!node_modules/node-pty/typings/**/*',
+        '!node_modules/@serialport/bindings-cpp/src/**/*',
         // Native compilation helpers are needed during install/rebuild only.
         // Match nested copies too; keep the actual native loaders and binaries.
         '!node_modules/**/node-gyp/**/*',

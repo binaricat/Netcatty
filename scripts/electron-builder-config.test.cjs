@@ -529,8 +529,31 @@ test("node_modules packaging exclusions prune unused payloads while preserving l
     "node_modules/foo/CHANGELOG.md",
     "node_modules/foo/HISTORY.md",
     "node_modules/@anthropic-ai/sdk/README.md",
+    "node_modules/bare-url/prebuilds/ios-arm64/bare-url.bare",
+    "node_modules/bare-fs/index.js",
+    "node_modules/bare-path/index.js",
+    "node_modules/bare-events/index.js",
+    "node_modules/bare-stream/index.js",
+    "node_modules/@anthropic-ai/claude-agent-sdk/assistant.mjs",
+    "node_modules/@anthropic-ai/claude-agent-sdk/bridge.mjs",
+    "node_modules/@anthropic-ai/claude-agent-sdk/browser-sdk.js",
+    "node_modules/@anthropic-ai/claude-agent-sdk/extractFromBunfs.js",
+    "node_modules/@anthropic-ai/claude-agent-sdk/manifest.json",
+    "node_modules/@anthropic-ai/claude-agent-sdk/manifest.zst.json",
+    "node_modules/node-pty/third_party/conpty/1.23.251008001/win10-x64/OpenConsole.exe",
+    "node_modules/node-pty/deps/winpty/src/include/winpty.h",
+    "node_modules/node-pty/src/unix/pty.cc",
+    "node_modules/node-pty/scripts/post-install.js",
+    "node_modules/node-pty/node-addon-api/napi.h",
+    "node_modules/node-pty/typings/node-pty.d.ts",
+    "node_modules/@serialport/bindings-cpp/src/serialport.cpp",
+    "node_modules/sqlite3/src/database.cc",
+    "node_modules/prebuild-install/index.js",
+    "node_modules/tar/index.js",
   ]) {
-    assert.equal(nmMac(path.join(root, dropped), stat), false, `expected excluded: ${dropped}`);
+    for (const [label, filter] of [["mac", nmMac], ["win", nmWin], ["linux", nmLinux]]) {
+      assert.equal(filter(path.join(root, dropped), stat), false, `expected excluded (${label}): ${dropped}`);
+    }
   }
 
   for (const kept of [
@@ -548,9 +571,20 @@ test("node_modules packaging exclusions prune unused payloads while preserving l
     "node_modules/foo/NOTICE.md",
     // @anthropic-ai/claude-agent-sdk declares "license": "SEE LICENSE IN README.md"
     "node_modules/@anthropic-ai/claude-agent-sdk/README.md",
+    "node_modules/@anthropic-ai/claude-agent-sdk/LICENSE.md",
     "node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
+    "node_modules/tar-stream/index.js",
+    "node_modules/node-pty/lib/index.js",
+    "node_modules/node-pty/build/Release/pty.node",
+    "node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe",
+    "node_modules/@serialport/bindings-cpp/dist/index.js",
+    "node_modules/@serialport/bindings-cpp/build/Release/bindings.node",
+    "node_modules/sqlite3/lib/sqlite3.js",
+    "node_modules/sqlite3/build/Release/node_sqlite3.node",
   ]) {
-    assert.equal(nmMac(path.join(root, kept), stat), true, `expected preserved: ${kept}`);
+    for (const [label, filter] of [["mac", nmMac], ["win", nmWin], ["linux", nmLinux]]) {
+      assert.equal(filter(path.join(root, kept), stat), true, `expected preserved (${label}): ${kept}`);
+    }
   }
 
   // Platform-scoped @vscode/windows-process-tree exclusion
@@ -591,6 +625,12 @@ test("app file exclusions prune dev schemas, test helpers/fixtures, svg sources,
     "electron/bridges/cliDiscoveryTestIsolation.cjs",
     "electron/bridges/sshBridge/serverStatsTestHelpers.cjs",
     "electron/bridges/terminalBridge.moshConpty.integration.cjs",
+    "electron/bridges/windowsHelloHelper/NetcattyWindowsHello.cpp",
+    "electron/preload.cjs",
+    "electron/preload/api.cjs",
+    "electron/entitlements.mac.plist",
+    "electron/launch.cjs",
+    "electron/plugins/distribution/README.md",
     "dist/icon.svg",
     "dist/tray-iconTemplate.svg",
   ]) {
@@ -599,6 +639,7 @@ test("app file exclusions prune dev schemas, test helpers/fixtures, svg sources,
 
   assert.equal(macFilter(path.join(root, "dist/index.html"), stat), true);
   assert.equal(macFilter(path.join(root, "electron/main.cjs"), stat), true);
+  assert.equal(macFilter(path.join(root, "electron/preload.bundle.cjs"), stat), true);
 
   const macosVariantIcon = path.join(root, "dist/icons/variants/macos/icon.png");
   assert.equal(macFilter(macosVariantIcon, stat), true);
