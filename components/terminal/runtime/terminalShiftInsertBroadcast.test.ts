@@ -24,6 +24,7 @@ test("Shift+Insert uses onPaste and broadcasts clipboard bytes once across keybo
         export { DEFAULT_KEY_BINDINGS } from "./domain/models/keyBindings";
         export { pasteTextIntoTerminal } from "./components/terminal/runtime/terminalUserPaste";
         export { resolveTerminalBroadcastTargetIds } from "./domain/terminalBroadcast";
+        export { isRemoteDesktopProtocol } from "./domain/remoteDesktop";
         export { dispatchKittyKeyboardBroadcastInput } from "./components/terminal/runtime/kittyKeyboardBroadcast";
         export * from "./components/terminal/runtime/terminalPacedBroadcast";
       `,
@@ -53,7 +54,7 @@ test("Shift+Insert uses onPaste and broadcasts clipboard bytes once across keybo
     dom.window.eval(bundle);
     const results = await dom.window.eval(`(async () => {
       const {createXTermRuntime, DEFAULT_TERMINAL_SETTINGS, DEFAULT_KEY_BINDINGS,
-        pasteTextIntoTerminal, resolveTerminalBroadcastTargetIds,
+        pasteTextIntoTerminal, resolveTerminalBroadcastTargetIds, isRemoteDesktopProtocol,
         dispatchKittyKeyboardBroadcastInput, markTerminalBroadcastUserInput,
         captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent} = runtimeTest;
       const ref = current => ({current});

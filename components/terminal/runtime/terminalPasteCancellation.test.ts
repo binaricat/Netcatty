@@ -5,6 +5,7 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import { resolveTerminalBroadcastTargetIds } from "../../../domain/terminalBroadcast";
+import { isRemoteDesktopProtocol } from "../../../domain/remoteDesktop";
 import * as pacedHelpers from "./terminalPacedBroadcast";
 import { setTerminalBootEpoch } from "../../../domain/terminalBootEpoch";
 
@@ -41,7 +42,7 @@ for (const path of ["source", "broadcast"] as const) {
       };
       const env = { ...pacedHelpers,
         ctx: { host: { protocol: "plugin:test" }, terminalBackend }, id: "s", interruptTrace: {},
-        terminalBackend, isPluginHostProtocol: () => true,
+        terminalBackend, isPluginHostProtocol: () => true, isRemoteDesktopProtocol,
         useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds: () => ["s"],
         sessionsRef: { current: [{ id: "s", protocol: "plugin:test" }] }, isGlobalBroadcastEnabled: true,
         canUseDirectSessionWriteFallback: () => true, broadcastPasswordBypassRef: { current: false }, broadcastInterruptPrioritizersRef: { current: new Map() },
@@ -67,7 +68,7 @@ test("ordinary broadcast typing supersedes the recipient's paced paste", t => {
   bridge.init({ sessions: new Map([["s", { stream: { write: (data: string) => writes.push(data) } }]]), electronModule: {} });
   const env = { ...pacedHelpers,
     terminalBackend: { writeToSession: (sessionId: string, data: string, options: object) => bridge.writeToSession(null, { sessionId, data, ...options }) },
-    useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds: () => ["s"],
+    useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds: () => ["s"], isRemoteDesktopProtocol,
     sessionsRef: { current: [{ id: "s", protocol: "ssh" }] }, isGlobalBroadcastEnabled: true,
     canUseDirectSessionWriteFallback: () => true, broadcastPasswordBypassRef: { current: false }, isTerminalSensitiveInputActive: () => false,
     invoke: undefined as unknown as (data: string, source: string, options?: object) => void,
@@ -101,7 +102,7 @@ for (const change of ["source-sensitive", "peer-sensitive", "peer-typing", "peer
     const batch: pacedHelpers.TerminalPacedBroadcast = {};
     setTerminalBootEpoch("peer", 1);
     const env = {
-      ...pacedHelpers, useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds,
+      ...pacedHelpers, useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds, isRemoteDesktopProtocol,
       sessionsRef: { current: [{ id: "source", protocol: "ssh" }, { id: "peer", protocol: "ssh" }] as Array<{ id: string; protocol: string; workspaceId?: string }> },
       isGlobalBroadcastEnabled: true, canUseDirectSessionWriteFallback: () => true, broadcastPasswordBypassRef: { current: false },
       isTerminalSensitiveInputActive: (id: string) => sensitive.has(id),

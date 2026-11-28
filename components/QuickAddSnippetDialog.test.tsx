@@ -61,12 +61,23 @@ test("QuickAddSnippetDialog blocks shortkey recording while app lock overlay is 
   Object.defineProperty(globalThis, "DocumentFragment", { value: dom.window.DocumentFragment, configurable: true });
   Object.defineProperty(globalThis, "MutationObserver", { value: dom.window.MutationObserver, configurable: true });
   Object.defineProperty(globalThis, "getComputedStyle", { value: dom.window.getComputedStyle.bind(dom.window), configurable: true });
+  const pendingRafIds = new Set<ReturnType<typeof setTimeout>>();
   Object.defineProperty(globalThis, "requestAnimationFrame", {
-    value: (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 0),
+    value: (cb: FrameRequestCallback) => {
+      const id = setTimeout(() => {
+        pendingRafIds.delete(id);
+        cb(Date.now());
+      }, 0);
+      pendingRafIds.add(id);
+      return id;
+    },
     configurable: true,
   });
   Object.defineProperty(globalThis, "cancelAnimationFrame", {
-    value: (id: number) => clearTimeout(id),
+    value: (id: ReturnType<typeof setTimeout>) => {
+      pendingRafIds.delete(id);
+      clearTimeout(id);
+    },
     configurable: true,
   });
 
@@ -142,6 +153,13 @@ test("QuickAddSnippetDialog blocks shortkey recording while app lock overlay is 
     await act(async () => {
       root?.unmount();
     });
+    // Radix FocusScope dispatches its unmount autofocus CustomEvent in a 0ms setTimeout;
+    // flush it before restoring globalThis.CustomEvent and closing the JSDOM window.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (const id of pendingRafIds) {
+      clearTimeout(id);
+    }
+    pendingRafIds.clear();
     env.IS_REACT_ACT_ENVIRONMENT = prevAct;
     Object.defineProperty(globalThis, "window", { value: prevWindow, configurable: true });
     Object.defineProperty(globalThis, "document", { value: prevDocument, configurable: true });

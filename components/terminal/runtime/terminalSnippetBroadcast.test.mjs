@@ -16,6 +16,7 @@ const { normalizeLineEndings } = await load('lib/utils.ts');
 const { shouldDelayAutoRunSnippetInput, AUTO_RUN_SNIPPET_LINE_DELAY_MS } = await load('components/terminal/terminalHelpers.ts');
 const pacedHelpers = await load('components/terminal/runtime/terminalPacedBroadcast.ts');
 const { resolveTerminalBroadcastTargetIds, shouldBroadcastDuringSensitivePrompt } = await load('domain/terminalBroadcast.ts');
+const { isRemoteDesktopProtocol } = await load('domain/remoteDesktop.ts');
 const { canUseDirectSessionWriteFallback } = await load('components/terminalLayer/terminalLayerSessionRouting.ts');
 const sourceAt = file => readFileSync(path.join(root, file), 'utf8');
 const compile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -78,7 +79,7 @@ for (const mode of ['paste', 'lineDelay']) {
       const layerSource = sourceAt('components/TerminalLayer.tsx');
       const layerEnv = { ...pacedHelpers,
         useCallback: callback => callback, terminalBackend,
-        resolveTerminalBroadcastTargetIds, canUseDirectSessionWriteFallback,
+        resolveTerminalBroadcastTargetIds, isRemoteDesktopProtocol, canUseDirectSessionWriteFallback,
         sessionsRef: { current: ['source', 'peer'].map(id => ({ id, protocol: 'telnet', status: 'connected' })) },
         isGlobalBroadcastEnabled: true,
         broadcastPasswordBypassRef: { current: false },

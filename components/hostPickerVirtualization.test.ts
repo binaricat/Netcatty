@@ -64,7 +64,8 @@ test('QuickSwitcher virtualizes categorized rows and clamps empty-list keyboard'
   assert.match(source, /QS_PLUGIN_ROW_HEIGHT/);
   // Fixed-height slots must clip/truncate so long titles never overlap the next row.
   assert.match(source, /overflow-hidden/);
-  assert.match(source, /max-w-\[12rem\] shrink-0 truncate/);
+  assert.match(source, /ml-3 flex shrink-0 items-center gap-2/);
+  assert.match(source, /max-w-\[12rem\] truncate text-\[11px\] text-muted-foreground/);
   // List scroller needs a definite max height under max-h-only popup chrome.
   assert.match(source, /max-h-\[min\(360px,calc\(100vh-14rem\)\)\]/);
   assert.doesNotMatch(source, /results\.map\(\(host\) =>/);
