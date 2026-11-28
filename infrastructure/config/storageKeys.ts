@@ -66,6 +66,8 @@ export const STORAGE_KEY_VAULT_HOSTS_SORT_MODE = 'netcatty_vault_hosts_sort_mode
 export const STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED = 'netcatty_vault_hosts_tree_expanded_v1';
 export const STORAGE_KEY_VAULT_SIDEBAR_COLLAPSED = 'netcatty_vault_sidebar_collapsed_v1';
 export const STORAGE_KEY_VAULT_SIDEBAR_WIDTH = 'netcatty_vault_sidebar_width_v1';
+/** Vault left sidebar navigation item order and visibility (built-in + plugin pages). */
+export const STORAGE_KEY_VAULT_NAV_CONFIG = 'netcatty_vault_nav_config_v1';
 export const STORAGE_KEY_VAULT_KEYS_VIEW_MODE = 'netcatty_vault_keys_view_mode_v1';
 export const STORAGE_KEY_VAULT_PROXY_PROFILES_VIEW_MODE = 'netcatty_vault_proxy_profiles_view_mode_v1';
 export const STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE = 'netcatty_vault_snippets_view_mode_v1';

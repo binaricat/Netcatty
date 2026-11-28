@@ -1,3 +1,5 @@
+import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
+
 type CloseablePluginViewSessions = {
   closeView(viewId: string): void;
 };
@@ -15,4 +17,8 @@ export function registerLoadedPluginViewSessions(sessions: CloseablePluginViewSe
 
 export function closePluginViewSessionIfLoaded(viewId: string): void {
   loadedSessions?.closeView(viewId);
+}
+
+export function prewarmHostDrawnPluginView(viewId: string): void {
+  void netcattyBridge.get()?.prewarmHostDrawnPluginView?.(viewId)?.catch?.(() => {});
 }

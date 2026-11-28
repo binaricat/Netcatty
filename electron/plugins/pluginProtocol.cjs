@@ -60,7 +60,17 @@ function escapeHtmlAttr(value) {
   return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function htmlForRuntime(token, moduleResources, entryUrl) {
+function escapeInlineJson(value) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function htmlForRuntime(token, moduleResources, config) {
+  const entryUrl = config?.entryUrl;
   const imports = Object.fromEntries(moduleResources.map((resource) => [
     resource.specifier,
     `${PLUGIN_PROTOCOL_SCHEME}://${token}/__host/modules/${resource.route}/${resource.entry}`,
@@ -71,10 +81,13 @@ function htmlForRuntime(token, moduleResources, entryUrl) {
   const preloadEntry = typeof entryUrl === "string" && entryUrl.startsWith(expectedPrefix)
     ? `<link rel="modulepreload" href="${escapeHtmlAttr(entryUrl)}">`
     : "";
+  const inlineConfig = config && typeof config === "object"
+    ? `<script id="netcatty-plugin-config" type="application/json" nonce="${token}">${escapeInlineJson(config)}</script>`
+    : "";
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Netcatty plugin runtime</title>
 <script type="importmap" nonce="${token}">${JSON.stringify({ imports })}</script>
-<link rel="modulepreload" href="${peer}">${preloadEntry}</head><body><script type="module" src="${runtime}"></script></body></html>`;
+${inlineConfig}<link rel="modulepreload" href="${peer}">${preloadEntry}</head><body><script type="module" src="${runtime}"></script></body></html>`;
 }
 
 class PluginProtocol {
@@ -154,7 +167,7 @@ class PluginProtocol {
       const segments = decodeRequestPath(url.pathname);
       const csp = `default-src 'none'; script-src 'self' ${PLUGIN_PROTOCOL_SCHEME}: 'nonce-${registration.token}'; connect-src 'self' ${PLUGIN_PROTOCOL_SCHEME}:; img-src 'self' ${PLUGIN_PROTOCOL_SCHEME}:; style-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; child-src 'none'; base-uri 'none'; form-action 'none'`;
       if (segments.length === 1 && segments[0] === "index.html") {
-        return respond(htmlForRuntime(registration.token, this.moduleResources, registration.config?.entryUrl), 200, "text/html; charset=utf-8", {
+        return respond(htmlForRuntime(registration.token, this.moduleResources, registration.config), 200, "text/html; charset=utf-8", {
           "Content-Security-Policy": csp,
           "Permissions-Policy": "camera=(), microphone=(), geolocation=(), display-capture=(), usb=(), serial=(), hid=(), payment=(), fullscreen=(), clipboard-read=(), clipboard-write=()",
         });

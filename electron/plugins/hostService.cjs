@@ -6,6 +6,7 @@ const { createPluginLogProvenanceResolver } = require("./pluginLogProvenance.cjs
 const NETWORK_CREDENTIAL_LEASE_FEATURE = require("./generated/plugin-contract.schema.json").$defs.NetworkCredentialLeaseFeature.const;
 const VAULT_PAGES_FEATURE = require("./generated/plugin-contract.schema.json").$defs.VaultPagesFeature.const;
 const TERMINAL_SIDEBAR_FEATURE = require("./generated/plugin-contract.schema.json").$defs.TerminalSidebarFeature.const;
+const VIEW_BADGES_FEATURE = require("./generated/plugin-contract.schema.json").$defs.ViewBadgesFeature.const;
 const INTERACTIVE_COMMAND_FEATURE = require("./generated/plugin-contract.schema.json").$defs.InteractiveCommandFeature.const;
 
 const { assertBrowserOnlyPlugin } = require("../../domain/pluginRuntimePolicy.cjs");
@@ -15,6 +16,7 @@ const { PluginCompanionSupervisor } = require("./companionSupervisor.cjs");
 const { PluginCredentialBroker, assertLeaseParams } = require("./credentialBroker.cjs");
 const { PluginCredentialCatalog } = require("./credentialCatalog.cjs");
 const { PluginContributionService } = require("./contributionService.cjs");
+const { PluginViewBadgeService } = require("./viewBadgeService.cjs");
 const { PluginViewResources } = require("./viewResourceService.cjs");
 const { HostDrawnViewHost } = require("./hostDrawnViewHost.cjs");
 const { createPooledContributionIconRasterizer } = require("./contributionIconRasterizer.cjs");
@@ -39,11 +41,23 @@ const { PluginAgentService, PLUGIN_AGENT_FEATURE } = require("./agent/agentServi
 const { PluginAgentConversationStore } = require("./agent/conversationStore.cjs");
 const { HOST_INTERACTION_FEATURE, PluginHostInteractionService } = require("./hostInteractionService.cjs");
 const { PluginHostVaultService } = require("./hostVaultService.cjs");
+const { PluginHostVaultDataBridge } = require("./hostVaultDataBridge.cjs");
+const { PluginHostSshExecTransport } = require("./hostSshExecTransport.cjs");
+const { PluginHostSshSftpTransport } = require("./hostSshSftpTransport.cjs");
+const { PluginHostCapabilitiesService } = require("./hostCapabilitiesService.cjs");
 const { PluginAISourceBinding } = require("./ai/sourceBinding.cjs");
 const HOST_VAULT_FEATURE = require("./generated/plugin-contract.schema.json").$defs.HostVaultFeature.const;
+const HOST_VAULT_EXEC_FEATURE = require("./generated/plugin-contract.schema.json").$defs.HostVaultExecFeature.const;
+const HOST_VAULT_PROBE_FEATURE = require("./generated/plugin-contract.schema.json").$defs.HostVaultProbeFeature.const;
+const HOST_VAULT_SFTP_FEATURE = require("./generated/plugin-contract.schema.json").$defs.HostVaultSftpFeature.const;
+const HOST_PORT_FORWARD_FEATURE = require("./generated/plugin-contract.schema.json").$defs.HostPortForwardFeature.const;
+const HOST_SNIPPETS_FEATURE = require("./generated/plugin-contract.schema.json").$defs.HostSnippetsFeature.const;
+const TERMINAL_SESSION_CONTROL_FEATURE = require("./generated/plugin-contract.schema.json").$defs.TerminalSessionControlFeature.const;
+const WORKSPACE_TABS_FEATURE = require("./generated/plugin-contract.schema.json").$defs.WorkspaceTabsFeature.const;
 const DIRECTORY_ENUMERATION_FEATURE = require("./generated/plugin-contract.schema.json").$defs.FilesystemDirectoryEnumerationFeature.const;
 const { PluginPermissionEngine } = require("./permissionEngine.cjs");
 const { PluginProtocol } = require("./pluginProtocol.cjs");
+const { BrowserRuntimePool } = require("./browserRuntimePool.cjs");
 const {
   RuntimeSupervisor,
   assertStorageParams,
@@ -104,18 +118,24 @@ function createPluginHostService(options) {
   const paths = createPluginPaths(options.app.getPath("userData"));
   const appRoot = options.appRoot ?? options.app.getAppPath();
   const runtimeDirectory = options.runtimeDirectory ?? path.join(__dirname, "runtime");
-  const supportedFeatures = [...new Set(["network.host-byte-streams", "terminal.input-drafts", "terminal.selection-sharing", "appearance.theme-packs", "metadata.brand-icon", BYTE_STREAM_FEATURE, ...PLUGIN_AI_CONTEXT_FEATURES, PLUGIN_AGENT_FEATURE, NETWORK_CREDENTIAL_LEASE_FEATURE, HOST_INTERACTION_FEATURE, HOST_VAULT_FEATURE, VAULT_PAGES_FEATURE, TERMINAL_SIDEBAR_FEATURE, INTERACTIVE_COMMAND_FEATURE, ...(options.supportedFeatures ?? [])])]
+  const supportedFeatures = [...new Set(["network.host-byte-streams", "terminal.input-drafts", "terminal.selection-sharing", "appearance.theme-packs", "metadata.brand-icon", BYTE_STREAM_FEATURE, ...PLUGIN_AI_CONTEXT_FEATURES, PLUGIN_AGENT_FEATURE, NETWORK_CREDENTIAL_LEASE_FEATURE, HOST_INTERACTION_FEATURE, HOST_VAULT_FEATURE, HOST_VAULT_EXEC_FEATURE, HOST_VAULT_PROBE_FEATURE, HOST_VAULT_SFTP_FEATURE, HOST_PORT_FORWARD_FEATURE, HOST_SNIPPETS_FEATURE, TERMINAL_SESSION_CONTROL_FEATURE, WORKSPACE_TABS_FEATURE, VAULT_PAGES_FEATURE, TERMINAL_SIDEBAR_FEATURE, VIEW_BADGES_FEATURE, INTERACTIVE_COMMAND_FEATURE, ...(options.supportedFeatures ?? [])])]
     .filter((feature) => feature !== DIRECTORY_ENUMERATION_FEATURE);
   if (!supportedFeatures.includes("views.host-drawn")) supportedFeatures.push("views.host-drawn");
   if (typeof options.openPluginDirectoryHandle === "function") supportedFeatures.push(DIRECTORY_ENUMERATION_FEATURE);
   const database = new PluginDatabase(paths.database);
   let interactionService;
+  let hostVaultService;
+  let vaultDataBridge;
+  let sshExecTransport;
+  let capabilitiesService;
   let byteStreamService;
   let aiContextService;
   let aiHostAdapter;
   let agentService;
   let agentHostAdapter;
   let permissionDecisionHost;
+  let browserRuntimePool;
+  let viewBadgeService;
   let manager;
   const logService = new PluginLogService({ paths, electron: options.electron, resolveProvenance: options.resolvePluginProvenance ?? createPluginLogProvenanceResolver(database) });
   try {
@@ -145,6 +165,13 @@ function createPluginHostService(options) {
       runtimeDirectory,
       moduleResources,
     });
+    browserRuntimePool = new BrowserRuntimePool({
+      electron: options.electron,
+      protocol,
+      preloadPath: path.join(runtimeDirectory, "browserPreload.cjs"),
+      isLocked: options.isAppLocked,
+      subscribeLock: options.subscribeAppLock,
+    });
     const { PluginPermissionDecisionHost } = require("./permissionDecisionHost.cjs");
     permissionDecisionHost = new PluginPermissionDecisionHost({ getWindows: options.getPermissionWindows, getWindow: options.getInteractionWindow,
       isLocked: options.isAppLocked, subscribeLock: options.subscribeAppLock });
@@ -153,8 +180,13 @@ function createPluginHostService(options) {
       requestDecision: options.requestPermissionDecision ?? ((...args) => permissionDecisionHost.request(...args)),
       // Ambient Node authority cannot be revoked by broker guards. Stop the
       // privileged development activation through the existing manager queue.
-      onPolicyChanged: (plugin, permission, mode) => permission === "runtime.advanced" && mode !== "allow"
-        ? manager.setEnabled(plugin.id, false, { expectedSourceOwner: database.privateOwner(plugin.id) }) : undefined,
+      onPolicyChanged: (plugin, permission, mode) => {
+        if ((permission === "vault.hostExec" || permission === "sftp.read" || permission === "sftp.write") && mode !== "allow") {
+          sshExecTransport?.releasePlugin(plugin.id);
+        }
+        return permission === "runtime.advanced" && mode !== "allow"
+          ? manager.setEnabled(plugin.id, false, { expectedSourceOwner: database.privateOwner(plugin.id) }) : undefined;
+      },
     });
     const quotaManager = new PluginQuotaManager({
       getProcessMetrics: options.getProcessMetrics
@@ -215,6 +247,12 @@ function createPluginHostService(options) {
       onCommandFinished: (runtimeId) => interactionService?.cancelRuntimeRequests(runtimeId),
     });
     contributionService.registerRpcCapabilities(rpcRegistry);
+    viewBadgeService = new PluginViewBadgeService({
+      contributionService,
+      isLocked: options.isAppLocked,
+      subscribeLock: options.subscribeAppLock,
+    });
+    viewBadgeService.registerRpcCapabilities(rpcRegistry);
     registerSecurePluginCapabilities(rpcRegistry, {
       assertLeaseParams,
       companionSupervisor,
@@ -229,14 +267,27 @@ function createPluginHostService(options) {
       database, permissionEngine, quotaManager,
       clipboard: options.electron.clipboard,
       dialog: options.electron.dialog,
+      shell: options.electron.shell,
       getWindow: options.getInteractionWindow,
       isLocked: options.isAppLocked,
       subscribeLock: options.subscribeAppLock,
       getTerminalWorkerManager: options.getTerminalWorkerManager,
     });
     interactionService.registerRpcCapabilities(rpcRegistry);
-    const hostVaultService = new PluginHostVaultService({
+    vaultDataBridge = options.vaultDataBridge ?? new PluginHostVaultDataBridge({
+      getWindow: options.getInteractionWindow,
+      isLocked: options.isAppLocked,
+      subscribeLock: options.subscribeAppLock,
+    });
+    sshExecTransport = options.sshExecTransport ?? new PluginHostSshExecTransport({
+      isLocked: options.isAppLocked,
+      subscribeLock: options.subscribeAppLock,
+      getSender: () => options.getInteractionWindow?.()?.webContents ?? null,
+    });
+    hostVaultService = new PluginHostVaultService({
       interactionService,
+      vaultDataBridge,
+      sshExecTransport,
       openStream: async (endpoint, caller, sender, connectionOptions) => {
         const context = await byteStreamService.authenticate(caller);
         const descriptor = await byteStreamService.connect(endpoint, context, {
@@ -256,6 +307,16 @@ function createPluginHostService(options) {
       sourceBinding: new PluginAISourceBinding({ database, getRuntimeIdentity: (pluginId) => runtimeSupervisor.getRuntimeIdentity(pluginId) }),
     });
     hostVaultService.registerRpcCapabilities(rpcRegistry);
+    const sshSftpTransport = options.sshSftpTransport ?? new PluginHostSshSftpTransport({ sshExecTransport });
+    capabilitiesService = new PluginHostCapabilitiesService({
+      hostVaultService,
+      vaultDataBridge,
+      sshSftpTransport,
+      database,
+      isLocked: options.isAppLocked,
+      subscribeLock: options.subscribeAppLock,
+    });
+    capabilitiesService.registerRpcCapabilities(rpcRegistry);
     const configuredRegistry = options.configureRpcRegistry?.(rpcRegistry);
     if (configuredRegistry && typeof configuredRegistry.then === "function") {
       throw new TypeError("Plugin host RPC registry configuration must be synchronous");
@@ -312,6 +373,7 @@ function createPluginHostService(options) {
       database,
       packageStore,
       protocol,
+      browserRuntimePool,
       paths,
       netcattyVersion: options.app.getVersion(),
       apiVersion: PLUGIN_API_VERSION,
@@ -325,9 +387,12 @@ function createPluginHostService(options) {
       getInitialEnvironment: () => contributionService.getEnvironment(),
       runtimeResourceMonitor: quotaManager,
       runtimeCleanup: async (identity) => {
+        viewBadgeService?.releaseRuntime(identity.runtimeId);
         byteStreamService?.releaseRuntime(identity.runtimeId);
         aiContextService?.releaseRuntime(identity.runtimeId);
         agentService?.releaseRuntime(identity.runtimeId);
+        capabilitiesService?.releaseRuntime(identity.runtimeId);
+        hostVaultService?.releaseRuntime(identity.runtimeId);
         interactionService?.releaseRuntime(identity.runtimeId);
         leaseStore.revokeRuntime(identity.runtimeId);
         await companionSupervisor.releaseRuntime(identity.runtimeId);
@@ -380,8 +445,11 @@ function createPluginHostService(options) {
     agentService.registerRpcCapabilities(rpcRegistry);
     const originalOnPluginDisabled = contributionService.onPluginDisabled.bind(contributionService);
     contributionService.onPluginDisabled = (pluginId) => {
+      viewBadgeService?.clearPlugin(pluginId);
       aiContextService.releasePlugin(pluginId);
       agentService.releasePlugin(pluginId);
+      capabilitiesService?.releasePlugin(pluginId);
+      hostVaultService.releasePlugin(pluginId);
       return originalOnPluginDisabled(pluginId);
     };
     runtimeSupervisor.onDidChangeRuntime((event) => contributionService.onRuntimeStateChanged(event));
@@ -421,6 +489,9 @@ function createPluginHostService(options) {
         // Hydration is best-effort; enable must still succeed.
       }
       const enabled = await originalOnPluginEnabled(pluginId);
+      if (enabled?.manifest?.main?.browser && !enabled.manifest?.main?.data) {
+        browserRuntimePool?.scheduleWarm(200);
+      }
       try {
         // Use the same installed-manifest catalog as startup so cross-plugin /
         // inactive-version ambiguity checks still apply when only this plugin
@@ -484,7 +555,12 @@ function createPluginHostService(options) {
       } catch {
         // Best-effort; startup must continue.
       }
-      return originalInitialize();
+      const initialized = await originalInitialize();
+      const hasEnabledBrowserPlugin = database.listPlugins().some((plugin) => (
+        plugin?.enabled && plugin.runtime?.quarantinedAt == null && plugin.manifest?.main?.browser && !plugin.manifest?.main?.data
+      ));
+      if (hasEnabledBrowserPlugin) browserRuntimePool?.scheduleWarm(200);
+      return initialized;
     };
     const terminalDataPipelineService = options.electron.MessageChannelMain
       ? new PluginTerminalDataPipelineService({
@@ -503,6 +579,9 @@ function createPluginHostService(options) {
       ? new HostDrawnViewHost({
           electron: options.electron,
           contributionService,
+          packageStore,
+          permissionEngine,
+          runtimePool: browserRuntimePool,
           resources: new PluginViewResources({
             electron: options.electron,
             packageStore,
@@ -523,7 +602,10 @@ function createPluginHostService(options) {
       contributionService,
       beforeClose: async () => {
         try {
+          viewBadgeService?.shutdown();
           themeService.shutdown();
+          capabilitiesService?.shutdown();
+          hostVaultService.shutdown();
           interactionService.shutdown();
           byteStreamService.shutdown();
           aiContextService.shutdown();
@@ -532,6 +614,7 @@ function createPluginHostService(options) {
           extensionProviderService.shutdown();
           credentialResolver.shutdown?.();
           await hostDrawnViewHost?.shutdown();
+          browserRuntimePool?.dispose();
           contributionIconService.dispose?.();
           sharedIconRasterizer?.dispose?.();
           await companionSupervisor.shutdown();
@@ -549,6 +632,9 @@ function createPluginHostService(options) {
       themeService,
       interactionService,
       hostVaultService,
+      vaultDataBridge,
+      sshExecTransport,
+      capabilitiesService,
       catalogService: new MarketSourcesService({ database, manager, fetch: options.electron.net?.fetch?.bind(options.electron.net),
         resolveAvatar: (request) => contributionIconService.resolveCatalogAvatar(request),
         resolveReadmeImage: require("./readmeImageService.cjs").createReadmeImageResolver({ BrowserWindow: options.electron.BrowserWindow }) }),
@@ -567,6 +653,7 @@ function createPluginHostService(options) {
       packageStore,
       paths,
       protocol,
+      browserRuntimePool,
       networkBroker,
       byteStreamService,
       aiContextService,
@@ -580,8 +667,11 @@ function createPluginHostService(options) {
       terminalProviderService,
       terminalDataPipelineService,
       hostDrawnViewHost,
+      viewBadgeService,
     };
   } catch (error) {
+    try { viewBadgeService?.shutdown(); } catch {}
+    try { browserRuntimePool?.dispose(); } catch {}
     try { permissionDecisionHost?.shutdown(); } catch {}
     try { interactionService?.shutdown(); } catch {}
     try { byteStreamService?.shutdown(); } catch {}

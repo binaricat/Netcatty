@@ -1,11 +1,10 @@
 "use strict";
 
-const { isPluginDevelopmentEnabled } = require("./constants.cjs");
-
 function startPluginHost(options) {
-  // The plugin platform is not shipping in this release. Keep its data
-  // untouched and allow existing developer workflows to opt in as before.
-  if (!isPluginDevelopmentEnabled(options.env)) return null;
+  // Normal builds run the browser-only plugin platform (advanced Node/utility
+  // packages remain gated behind NETCATTY_PLUGIN_DEV=1 in hostService.cjs).
+  // Allow an explicit NETCATTY_PLUGIN_DEV=0 kill switch to leave plugin data untouched.
+  if (options.env?.NETCATTY_PLUGIN_DEV === "0") return null;
 
   const reportFailure = (message, error) => {
     try { options.logger?.error?.(message, error); } catch {}

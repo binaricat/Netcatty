@@ -42,6 +42,12 @@ test("declarative plugin widget markers and JSON props are strictly validated", 
     "data-plugin-widget-props": JSON.stringify({ value: "SELECT 1;", language: "sql" }),
   });
   assert.equal(validatePluginRemoteTree({ children: [validWidget] }), true);
+  const validChart = element("w-chart", "div", {
+    "data-plugin-widget": "metric-chart",
+    "data-plugin-widget-props": JSON.stringify({ variant: "sparkline", series: [{ id: "cpu", label: "CPU", points: [{ at: 1000, value: 42 }] }] }),
+  });
+  assert.equal(validatePluginRemoteTree({ children: [validChart] }), true);
+  assert.throws(() => validatePluginRemoteTree({ children: [element("svg-attack", "svg")] }), /Forbidden view element/);
   assert.throws(() => validatePluginRemoteTree({ children: [element("w2", "div", { "data-plugin-widget": "iframe-hack" })] }), /widget/);
   assert.throws(() => validatePluginRemoteTree({ children: [element("w3", "div", { "data-plugin-widget": "data-grid", "data-plugin-widget-props": "{bad json" })] }), /JSON/);
   assert.throws(() => validatePluginRemoteTree({ children: [element("w4", "div", { "data-plugin-widget": "data-grid", "data-plugin-widget-props": "[]" })] }), /JSON object/);

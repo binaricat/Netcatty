@@ -1,3 +1,4 @@
+import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { createElement, useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react';
 import type { Disposable, PluginViews } from './index.js';
@@ -6,7 +7,9 @@ import { registerHostDomView } from './hostDom.js';
 /** Author ordinary React while Netcatty owns the visible DOM. */
 export function registerHostReactView(views: PluginViews, viewId: string, render: () => ReactNode, css = ''): Disposable {
   return registerHostDomView(views, viewId, (container) => {
-    const root = createRoot(container); root.render(render()); return () => root.unmount();
+    const root = createRoot(container);
+    flushSync(() => { root.render(render()); });
+    return () => root.unmount();
   }, css);
 }
 
@@ -440,6 +443,108 @@ export function PluginErCanvas({
     className,
     style,
     'data-plugin-widget': 'er-canvas',
+    'data-plugin-widget-props': serialized,
+  });
+}
+
+export type PluginMetricChartColor =
+  | 'primary'
+  | 'sky'
+  | 'emerald'
+  | 'amber'
+  | 'violet'
+  | 'rose'
+  | 'cyan'
+  | 'muted';
+
+export type PluginMetricChartUnit = '%' | 'bytes/s' | 'ms' | 'count' | 'temp' | 'bytes' | '';
+
+export interface PluginMetricChartPoint {
+  at: number;
+  value: number | null;
+}
+
+export interface PluginMetricChartSeries {
+  id: string;
+  label: string;
+  color?: PluginMetricChartColor;
+  unit?: PluginMetricChartUnit;
+  points: PluginMetricChartPoint[];
+}
+
+export interface PluginMetricChartThreshold {
+  value: number;
+  tone: 'warning' | 'critical';
+  label?: string;
+}
+
+export interface PluginMetricChartProps {
+  variant?: 'area' | 'line' | 'sparkline' | 'bar';
+  series: PluginMetricChartSeries[];
+  rangeMs?: number;
+  intervalMs?: number;
+  endAt?: number;
+  min?: number;
+  max?: number | 'auto';
+  height?: number;
+  thresholds?: PluginMetricChartThreshold[];
+  showGrid?: boolean;
+  showLegend?: boolean;
+  showAxes?: boolean;
+  interactive?: boolean;
+  emptyText?: string;
+  ariaLabel?: string;
+  className?: string;
+  style?: CSSProperties;
+}
+
+/** Host-rendered responsive real-time time-series chart and sparkline widget. */
+export function PluginMetricChart({
+  variant,
+  series,
+  rangeMs,
+  intervalMs,
+  endAt,
+  min,
+  max,
+  height,
+  thresholds,
+  showGrid,
+  showLegend,
+  showAxes,
+  interactive,
+  emptyText,
+  ariaLabel,
+  className,
+  style,
+}: PluginMetricChartProps) {
+  const serialized = useMemo(
+    () => JSON.stringify({
+      ...(variant !== undefined ? { variant } : {}),
+      series,
+      ...(rangeMs !== undefined ? { rangeMs } : {}),
+      ...(intervalMs !== undefined ? { intervalMs } : {}),
+      ...(endAt !== undefined ? { endAt } : {}),
+      ...(min !== undefined ? { min } : {}),
+      ...(max !== undefined ? { max } : {}),
+      ...(height !== undefined ? { height } : {}),
+      ...(thresholds !== undefined ? { thresholds } : {}),
+      ...(showGrid !== undefined ? { showGrid } : {}),
+      ...(showLegend !== undefined ? { showLegend } : {}),
+      ...(showAxes !== undefined ? { showAxes } : {}),
+      ...(interactive !== undefined ? { interactive } : {}),
+      ...(emptyText !== undefined ? { emptyText } : {}),
+      ...(ariaLabel !== undefined ? { ariaLabel } : {}),
+    }),
+    [variant, series, rangeMs, intervalMs, endAt, min, max, height, thresholds, showGrid, showLegend, showAxes, interactive, emptyText, ariaLabel],
+  );
+  const resolvedStyle: CSSProperties | undefined = height !== undefined
+    ? { height: `${height}px`, ...style }
+    : style;
+  return createElement('div', {
+    className,
+    style: resolvedStyle,
+    'data-plugin-widget': 'metric-chart',
     'data-plugin-widget-props': serialized,
   });
 }

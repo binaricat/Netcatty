@@ -34,9 +34,11 @@ test('ordinary React view renders data updates and responds to its own forwarded
   const registration = registerHostReactView(views, 'com.example.view', () => <Example />, '.my-button{display:grid}');
   try {
     await act(async () => { receive({ kind: 'host-ui.open', instanceId: 'i1' }); await new Promise((resolve) => setTimeout(resolve, 20)); });
-    assert.equal(messages[0].sequence, 1); assert.deepEqual(messages[0].mutations, []);
-    const first = messages.at(-1)!; assert.equal(first.kind, 'host-ui.update'); assert.ok(first.sequence >= 2);
-    const container = (first.mutations[0] as unknown[])[2] as { children: Array<{ id: string; element: string; attributes: Record<string, string> }> }; const input = container.children[0]; const button = container.children[1]; assert.equal(button.element, 'button');
+    assert.equal(messages[0].sequence, 1);
+    assert.ok(messages[0].mutations.length > 0, 'first update must contain the atomic initial React tree without a blank frame');
+    const first = messages[0]; assert.equal(first.kind, 'host-ui.update');
+    const mountRootNode = (first.mutations[0] as unknown[])[2] as { children: Array<{ children: Array<{ id: string; element: string; attributes: Record<string, string> }> }> };
+    const container = mountRootNode.children[0]; const input = container.children[0]; const button = container.children[1]; assert.equal(button.element, 'button');
     await act(async () => { receive({ kind: 'host-ui.event', instanceId: 'i1', event: { type: 'input', nodeId: input.id, value: 'Catty' } }); await new Promise((resolve) => setTimeout(resolve, 20)); });
     assert.match(JSON.stringify(messages.at(-1)), /Catty/); assert.equal(button.attributes.class, 'my-button');
     await act(async () => { receive({ kind: 'host-ui.event', instanceId: 'i1', event: { type: 'click', nodeId: button.id } }); await new Promise((resolve) => setTimeout(resolve, 20)); });
@@ -545,6 +547,39 @@ test('hostReact widgets and extended surface events round-trip cleanly through h
     assert.deepEqual(received.tableDoubleClick, { table: 'users' });
     assert.deepEqual(received.exportSvg, { svg: '<svg/>' });
     await act(async () => { receive({ kind: 'host-ui.close', instanceId: 'ide-1' }); });
+  } finally {
+    await act(async () => { registration.dispose(); });
+    for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key); }
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+    dom.window.close();
+  }
+});
+
+test('registerHostReactView still completes initial loading for components that render null', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost', pretendToBeVisual: true });
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLFormElement', 'Node', 'MutationObserver', 'Event', 'MouseEvent']) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: key === 'window' ? dom.window : dom.window[key as keyof typeof dom.window] });
+  }
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, writable: true, value: true });
+  const { act } = await import('react');
+  const { registerHostReactView } = await import('./hostReact.js');
+  let receive: (value: JsonValue) => void = () => {};
+  const messages: Array<Extract<HostDrawnViewMessage, { kind: 'host-ui.update' }>> = [];
+  const views = {
+    onDidReceiveMessage(_id: string, listener: (value: JsonValue) => void) { receive = listener; return { dispose() {} }; },
+    postMessage(_id: string, value: JsonValue) { messages.push(value as unknown as Extract<HostDrawnViewMessage, { kind: 'host-ui.update' }>); },
+    getState: async () => undefined,
+    setState: async () => {},
+  };
+  const registration = registerHostReactView(views, 'com.example.empty', () => null, '.x{display:block}');
+  try {
+    await act(async () => { receive({ kind: 'host-ui.open', instanceId: 'empty-1' }); await new Promise((resolve) => setTimeout(resolve, 20)); });
+    assert.ok(messages.length >= 1, 'empty component must still publish an initial update');
+    assert.equal(messages[0].sequence, 1);
+    assert.equal(messages[0].css, '.x{display:block}');
+    await act(async () => { receive({ kind: 'host-ui.close', instanceId: 'empty-1' }); });
   } finally {
     await act(async () => { registration.dispose(); });
     for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key); }

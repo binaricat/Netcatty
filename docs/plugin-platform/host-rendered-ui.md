@@ -52,10 +52,15 @@ UI interface; a normal paste into the plugin's own input is user-provided data.
 installed plugin's verified package. The host checks path containment, size and
 format, rejects SVG resource references, and converts the image to PNG in an
 isolated decoder. Raw SVG never enters the host document. Source limit: 512 KiB;
-output edge: 2048 pixels; output size: 4 MiB. Per instance: 32 resource paths and
-8 MiB of returned data. Network URLs, arbitrary data URLs and CSS URL loads are
+output edge: 2048 pixels; output size: 4 MiB. Per instance: 256 resource paths and
+24 MiB of returned data. Network URLs, arbitrary data URLs and CSS URL loads are
 rejected. Use installed system fonts; packaged font files and canvas are not
 part of the current supported surface.
+
+Host-rendered IDE widget primitives (`PluginCodeEditor`, `PluginDataGrid`,
+`PluginSplitPane`, `PluginErCanvas`) and `usePluginShortcuts` are exported from
+`@netcatty/plugin-sdk/host-react` for data-heavy workbenches while keeping all
+DOM ownership and event validation in the host.
 
 For a menu that extends beyond a pane, use `PluginPopover` with an anchor element
 ID, `open`, and `onClose`. Its children are freely authored UI. Netcatty positions
@@ -100,8 +105,8 @@ host, terminal, file, network, secret or model access.
 
 Incoming updates pass schema, sequencing, rate, mutation and CSS checks in the
 main process, then a complete data-tree validation before rendering. Limits:
-1024 nodes, depth 24, 128 KiB text/attributes, 2048 mutations and 256 KiB per
-batch, 64 KiB CSS, 120 updates per second. Invalid data closes the view.
+4096 nodes, depth 32, 1 MiB text/attributes, 4096 mutations and 1 MiB per
+batch, 128 KiB CSS, 120 updates per second. Invalid data closes the view.
 Scripts, handlers, executable/custom elements, unsafe attributes, URL loads,
 imports, host selectors and escaping positioning are denied. Closed Shadow DOM
 separates styling; clipping and stacking contain output. Neither is relied on

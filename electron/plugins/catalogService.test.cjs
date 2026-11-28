@@ -7,10 +7,14 @@ const os = require("node:os");
 const path = require("node:path");
 const { PluginCatalogService, validateCatalog, fetchBounded } = require("./catalogService.cjs");
 const { assertCatalogManifest } = require("./catalogPolicy.cjs");
+const { OFFICIAL_SOURCE, isOfficialMaintained } = require("./sourceIdentity.cjs");
 const entries = require("./catalog.json");
 
 test("curated catalog uses pinned public first-party source and rejects advanced manifests", () => {
-  assert.equal(validateCatalog(entries).length, 2);
+  assert.equal(validateCatalog(entries).length, 3);
+  const monitor = entries.find((item) => item.id === "com.binaricat.netcatty-monitor");
+  assert.ok(monitor, "catalog should include official com.binaricat.netcatty-monitor");
+  assert.equal(isOfficialMaintained(monitor, OFFICIAL_SOURCE), true);
   for (const main of [{ node: "index.js" }, { browser: "index.js", node: "node.js" }]) {
     const entry = structuredClone(entries[0]); entry.manifest.main = main;
     assert.throws(() => validateCatalog([entry]), /browser-only packages/);

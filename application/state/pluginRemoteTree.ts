@@ -6,10 +6,17 @@ type WireNode = { id: string; type: 3 | 8; data: string } | {
 };
 type WireTree = { children: WireNode[] };
 
+const validatedTrees = new WeakSet<object>();
+
+export function isValidatedPluginRemoteTree(tree: unknown): boolean {
+  return Boolean(tree && typeof tree === 'object' && validatedTrees.has(tree));
+}
+
 /** Data-only staging area: untrusted changes are never applied directly to the host DOM. */
 export function createPluginRemoteTree() {
   const receiver = new RemoteReceiver();
   let current: WireTree = { children: [] };
+  validatedTrees.add(current);
   let failed = false;
   const project = (node: unknown): WireNode => {
     const value = node as { id: string; type: number; data?: string; element?: string; attributes?: Record<string, string>; children?: unknown[] };
@@ -27,11 +34,13 @@ export function createPluginRemoteTree() {
         receiver.connection.mutate(batch as unknown as Parameters<typeof receiver.connection.mutate>[0]);
         const next = { children: receiver.root.children.map(project) };
         validatePluginRemoteTree(next);
+        validatedTrees.add(next);
         current = next;
         return next;
       } catch (error) {
         failed = true;
         current = { children: [] };
+        validatedTrees.add(current);
         throw error;
       }
     },

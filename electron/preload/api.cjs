@@ -27,6 +27,7 @@ function createPreloadApi(ctx) {
   const closedTerminalDataSessions = ctx.closedTerminalDataSessions || null;
   const globalSftpTransferListeners = ctx.globalSftpTransferListeners || new Set();
   const pluginContributionsChangedListeners = ctx.pluginContributionsChangedListeners || new Set();
+  const pluginViewBadgesChangedListeners = ctx.pluginViewBadgesChangedListeners || new Set();
   const uploadStageControllers = new Map();
   const hostBrowserPanelListeners = new Set();
   const pendingHostBrowserPanels = [];
@@ -151,6 +152,13 @@ function createPreloadApi(ctx) {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("netcatty:plugins:host-interaction", listener);
     return () => ipcRenderer.removeListener("netcatty:plugins:host-interaction", listener);
+  },
+  setPluginVaultDataReady: (ready) => ipcRenderer.invoke("netcatty:plugins:vault-data-ready", { ready }),
+  respondPluginVaultData: (response) => ipcRenderer.invoke("netcatty:plugins:vault-data-response", response),
+  onPluginVaultDataRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("netcatty:plugins:vault-data-request", listener);
+    return () => ipcRenderer.removeListener("netcatty:plugins:vault-data-request", listener);
   },
   listPlugins: () => ipcRenderer.invoke("netcatty:plugins:list"),
   setPluginPermissionMode: (pluginId, permission, mode, policyRevision) => ipcRenderer.invoke("netcatty:plugins:set-permission-mode", { pluginId, permission, mode, policyRevision }),
@@ -344,6 +352,7 @@ function createPreloadApi(ctx) {
   },
   getPluginViewResource: (payload) => ipcRenderer.invoke("netcatty:plugins:host-ui-resource", payload),
   openHostDrawnPluginView: (payload) => ipcRenderer.invoke("netcatty:plugins:host-ui-open", payload),
+  prewarmHostDrawnPluginView: (viewId) => ipcRenderer.invoke("netcatty:plugins:host-ui-prewarm", { viewId }),
   closeHostDrawnPluginView: (instanceId) => ipcRenderer.invoke("netcatty:plugins:host-ui-close", { instanceId }),
   sendHostDrawnPluginViewEvent: (instanceId, event) => ipcRenderer.invoke("netcatty:plugins:host-ui-event", { instanceId, event }),
   onHostDrawnPluginViewUpdate: (callback) => {
@@ -354,6 +363,11 @@ function createPreloadApi(ctx) {
   onPluginContributionsChanged: (callback) => {
     pluginContributionsChangedListeners.add(callback);
     return () => pluginContributionsChangedListeners.delete(callback);
+  },
+  listPluginViewBadges: () => ipcRenderer.invoke("netcatty:plugins:view-badges"),
+  onPluginViewBadgesChanged: (callback) => {
+    pluginViewBadgesChangedListeners.add(callback);
+    return () => pluginViewBadgesChangedListeners.delete(callback);
   },
   onPluginViewClosed: (callback) => {
     const listener = (_event, payload) => callback(payload);

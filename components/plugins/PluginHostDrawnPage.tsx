@@ -1,4 +1,5 @@
 import { useHostDrawnPluginView } from '../../application/state/useHostDrawnPluginView';
+import { PluginViewLoadingSurface } from './LazyPluginHostDrawnPage';
 import { PluginSettingsEntry } from './PluginSettingsEntry';
 import { PluginRemoteSurface } from './PluginRemoteSurface';
 
@@ -32,7 +33,7 @@ function hasFullBleedChrome(tree: unknown): boolean {
 export function PluginHostDrawnPage(props: PluginHostDrawnPageProps) {
   const view = useHostDrawnPluginView(props);
   if (!view.visible) return null;
-  if (view.loading) return <p data-plugin-view-slot={props.slot.split(':')[0]} role="status" className="p-4 text-sm text-muted-foreground">{props.loadingLabel}</p>;
+  if (view.loading) return <PluginViewLoadingSurface slot={props.slot.split(':')[0]} loadingLabel={props.loadingLabel} />;
   const fullBleed = hasFullBleedChrome(view.tree);
   return <div className="relative isolate h-full min-h-0 w-full flex-1" data-plugin-view-slot={props.slot.split(':')[0]} data-plugin-chrome={fullBleed ? 'full-bleed' : undefined}>
     <PluginRemoteSurface key={`${props.viewId}:${props.version}:${props.slot}`} tree={view.tree} css={view.css} settled={view.settled} loadImage={view.loadImage} onEvent={view.sendEvent} />

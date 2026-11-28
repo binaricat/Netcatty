@@ -339,7 +339,15 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
         for (const nodeId of view.controls.keys()) if (!live.has(nodeId)) view.controls.delete(nodeId);
         if (!records.length && view.sentAck === view.acknowledgedEvent) return;
         view.sentAck = view.acknowledgedEvent;
-        views.postMessage(viewId, JSON.parse(JSON.stringify({ kind: 'host-ui.update', instanceId: id, sequence: ++view.sequence, acknowledgedEvent: view.acknowledgedEvent, css, mutations: records })) as JsonValue);
+        const safeMutations = JSON.parse(JSON.stringify(records)) as JsonValue;
+        views.postMessage(viewId, {
+          kind: 'host-ui.update',
+          instanceId: id,
+          sequence: ++view.sequence,
+          acknowledgedEvent: view.acknowledgedEvent,
+          css,
+          mutations: safeMutations,
+        } as JsonValue);
       };
       const observer = new RemoteMutationObserver({
         mutate(mutations) { send(mutations); },
@@ -388,14 +396,21 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
       domObserver.observe(container, { childList: true, subtree: true });
       observer.observe(container);
       flushObserver.observe(flushNode, { characterData: true });
-      // A valid component may render nothing; complete initial loading even when
-      // React makes no DOM mutations.
-      views.postMessage(viewId, { kind: 'host-ui.update', instanceId: id, sequence: ++view.sequence, css, mutations: [] });
       const mountRoot = document.createElement('div');
       mountRoot.setAttribute('style', 'min-height:100%;height:100%');
-      container.appendChild(mountRoot);
+      // Mount into mountRoot before attaching it to container so synchronous DOM
+      // or flushSync React commits arrive in a single atomic first-paint batch
+      // instead of flashing an empty container or empty mountRoot frame.
       const cleanup = mount(mountRoot, typeof message.stateScope === 'string' ? message.stateScope : viewId);
       if (typeof cleanup === 'function') view.unmount = cleanup;
+      container.appendChild(mountRoot);
+      // A valid component may render nothing; complete initial loading on the
+      // next microtask if mount produced no DOM mutations.
+      void Promise.resolve().then(() => {
+        if (instances.get(id) === view && view.sequence === 0) {
+          views.postMessage(viewId, { kind: 'host-ui.update', instanceId: id, sequence: ++view.sequence, css, mutations: [] });
+        }
+      });
     } else if (message.kind === 'host-ui.close') close(id);
     else if (message.kind === 'host-ui.event') {
       const view = instances.get(id);

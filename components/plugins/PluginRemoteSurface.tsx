@@ -6,6 +6,7 @@ import { parseWidgetPropsJson, PluginSlottedWidget, type SlottedWidgetKind } fro
 import { matchWorkbenchShortcut } from './primitives/shortcuts';
 import type { PluginSplitPaneWidgetProps } from './primitives/types';
 import { createPortal } from 'react-dom';
+import { isValidatedPluginRemoteTree } from '../../application/state/pluginRemoteTree';
 import { validatePluginRemoteTree } from '@/domain/pluginRemoteTreePolicy.cjs';
 import { validatePluginStylesheet } from '@/domain/pluginViewStylePolicy.cjs';
 
@@ -28,7 +29,7 @@ const SURFACE_EVENTS = [
   'scroll',
 ] as const;
 const SURFACE_EVENT_SET = new Set<string>(SURFACE_EVENTS);
-const SLOTTED_WIDGET_KINDS = new Set<string>(['code-editor', 'data-grid', 'er-canvas']);
+const SLOTTED_WIDGET_KINDS = new Set<string>(['code-editor', 'data-grid', 'er-canvas', 'metric-chart']);
 
 const ATTRIBUTE_NAMES: Record<string, string> = { class: 'className', for: 'htmlFor', readonly: 'readOnly', tabindex: 'tabIndex', maxlength: 'maxLength', minlength: 'minLength', colspan: 'colSpan', rowspan: 'rowSpan', autocomplete: 'autoComplete' };
 const BOOLEAN_ATTRIBUTES = new Set(['checked', 'disabled', 'readonly', 'required', 'multiple', 'selected', 'open']);
@@ -339,6 +340,7 @@ function readSelectionRange(
 /** Host-owned DOM, kept inside a closed shadow root and a clipped stacking context. */
 export function PluginRemoteSurface({ tree, css, onEvent, settled = true, loadImage, depth = 0 }: { depth?: number; tree: unknown; css: string; settled?: boolean; loadImage?(path: string): Promise<string>; onEvent(event: PluginSurfaceEvent): void }) {
   const checkedTree = useMemo(() => {
+    if (isValidatedPluginRemoteTree(tree)) return tree as { children: RemoteNode[] };
     try {
       validatePluginRemoteTree(tree);
       return tree as { children: RemoteNode[] };
@@ -537,11 +539,14 @@ function ValidatedPluginRemoteSurface({ tree, css, onEvent, settled, depth }: { 
     };
   }, [shadow, depth]);
 
+  const baseStyleElement = useMemo(() => <style>{SHADOW_BASE_SCROLLBAR_CSS}</style>, []);
+  const pluginStyleElement = useMemo(() => <style>{css}</style>, [css]);
+
   return (
     <SurfaceContext.Provider value={surfaceContextValue}>
       <div ref={surfaceRef} className="h-full w-full min-h-0 min-w-0 overflow-hidden [contain:paint] isolate relative" data-plugin-remote-surface>
         <div ref={hostRef} className="h-full min-h-0 overflow-auto [container-type:inline-size] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-corner]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/25" />
-        {shadow && createPortal(<><style>{SHADOW_BASE_SCROLLBAR_CSS}</style><style>{css}</style>{tree.children.map((node) => renderRemoteNode(node, settled))}</>, shadow)}
+        {shadow && createPortal(<>{baseStyleElement}{pluginStyleElement}{tree.children.map((node) => renderRemoteNode(node, settled))}</>, shadow)}
       </div>
     </SurfaceContext.Provider>
   );

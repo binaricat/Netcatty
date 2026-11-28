@@ -10,6 +10,8 @@ const LOCAL_SOURCE = Object.freeze({ id: "local", kind: "local", name: "Local im
 const FIRST_PARTY_PLUGINS = Object.freeze([
   Object.freeze({ id: "com.netcatty.starter", repository: "binaricat/Netcatty" }),
   Object.freeze({ id: "com.netcatty.hello", repository: "binaricat/Netcatty" }),
+  Object.freeze({ id: "com.binaricat.netcatty-database", repository: "binaricat/netcatty-database-plugin" }),
+  Object.freeze({ id: "com.binaricat.netcatty-monitor", repository: "binaricat/netcatty-monitor-plugin" }),
 ]);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const { parsePluginGitHubRepository } = require("../../domain/pluginGitHubRepository.cjs");

@@ -5,10 +5,28 @@ const test = require("node:test");
 
 const { startPluginHost } = require("./hostBootstrap.cjs");
 
-test("default startup leaves the plugin host and stored plugin data untouched", () => {
-  const effects = [];
+test("normal release constructs the browser plugin host without a developer flag", async () => {
+  let initialized = 0;
+  const service = {
+    manager: {
+      async initialize() { initialized += 1; },
+      async shutdown() {},
+    },
+  };
   assert.equal(startPluginHost({
     env: {},
+    createService: () => service,
+    registerShutdown() {},
+    logger: { error() {} },
+  }), service);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(initialized, 1);
+});
+
+test("explicitly disabling NETCATTY_PLUGIN_DEV=0 leaves the plugin host and stored plugin data untouched", () => {
+  const effects = [];
+  assert.equal(startPluginHost({
+    env: { NETCATTY_PLUGIN_DEV: "0" },
     createService() { effects.push("create"); },
     registerShutdown() { effects.push("register"); },
     logger: { error() { effects.push("error"); } },

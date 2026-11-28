@@ -2,6 +2,7 @@
 
 const { createHash } = require("node:crypto");
 const { createDefinitionValidator } = require("./contractValidator.cjs");
+const { describePluginRuntime } = require("../../domain/pluginRuntimePolicy.cjs");
 const { validatePluginMutationBatch } = require("../../domain/pluginRemoteTreePolicy.cjs");
 const { validatePluginStylesheet } = require("../../domain/pluginViewStylePolicy.cjs");
 const validateMessage = createDefinitionValidator("HostDrawnViewMessage");
@@ -10,8 +11,11 @@ const validateEvent = createDefinitionValidator("HostDrawnViewEvent");
 
 /** Owns logical views only: never creates a native view or exposes plugin code to the host. */
 class HostDrawnViewHost {
-  constructor({ electron, contributionService, resources, isLocked = () => false, subscribeLock }) {
+  constructor({ electron, contributionService, resources, packageStore, permissionEngine, runtimePool, isLocked = () => false, subscribeLock }) {
     this.resources = resources;
+    this.packageStore = packageStore ?? null;
+    this.permissionEngine = permissionEngine ?? null;
+    this.runtimePool = runtimePool ?? null;
     this.electron = electron; this.contributions = contributionService; this.isLocked = isLocked;
     this.instances = new Map(); this.opening = new Map(); this.closed = false;
     this.messageSubscription = contributionService.onDidPostViewMessage((event) => this.receive(event));
@@ -64,7 +68,7 @@ class HostDrawnViewHost {
       const activation = { pluginId: plugin.id, pluginVersion: plugin.activeVersion, viewId: view.id, runtimeId: identity.runtimeId };
       this.contributions.assertViewActivationCurrent(activation, { context: payload.context });
       const instance = { id, sender, owner, pluginId: plugin.id, viewId: view.id, activation,
-        context: structuredClone(payload.context ?? {}), identity, sequence: 0, rateStart: Date.now(), rateCount: 0, ownerClosed: () => { void this.close(id, undefined, "owner-closed"); },
+        context: structuredClone(payload.context ?? {}), identity, sequence: 0, lastRawCss: null, lastCanonicalCss: "", rateStart: Date.now(), rateCount: 0, ownerClosed: () => { void this.close(id, undefined, "owner-closed"); },
         rendererGone: () => { void this.close(id, undefined, "renderer-gone"); }, navigating: null };
       instance.navigating = (details, _url, isInPlace, isMainFrame) => {
         if ((details?.isMainFrame ?? isMainFrame) !== false && (details?.isSameDocument ?? isInPlace) !== true) instance.rendererGone();
@@ -96,10 +100,56 @@ class HostDrawnViewHost {
       const now = Date.now();
       if (now - instance.rateStart >= 1000) { instance.rateStart = now; instance.rateCount = 0; }
       if (++instance.rateCount > 120) throw new Error("Plugin view update rate exceeded");
-      validatePluginMutationBatch(message.mutations); validatePluginStylesheet(message.css);
+      validatePluginMutationBatch(message.mutations);
+      const cssUnchanged = instance.lastRawCss !== null && message.css === instance.lastRawCss;
+      let canonicalCss = instance.lastCanonicalCss;
+      if (!cssUnchanged) {
+        canonicalCss = validatePluginStylesheet(message.css);
+        instance.lastRawCss = message.css;
+        instance.lastCanonicalCss = canonicalCss;
+      }
       instance.sequence = message.sequence;
-      if (!instance.sender.isDestroyed?.()) instance.sender.send("netcatty:plugins:host-ui-update", { viewId: instance.viewId, ...message });
+      if (!instance.sender.isDestroyed?.()) {
+        const outgoing = cssUnchanged
+          ? { viewId: instance.viewId, ...message, css: "", cssUnchanged: true }
+          : { viewId: instance.viewId, ...message, css: canonicalCss };
+        instance.sender.send("netcatty:plugins:host-ui-update", outgoing);
+      }
     } catch { void this.close(instance.id, undefined, "invalid-update"); }
+  }
+  prewarm(viewId, sender) {
+    if (this.closed || this.isLocked()) return false;
+    const owner = this.electron?.BrowserWindow?.fromWebContents?.(sender);
+    if (!owner || owner.isDestroyed?.() || owner.webContents !== sender) return false;
+    // Warm a blank, single-use sandboxed BrowserWindow shell first.
+    void this.runtimePool?.warm?.();
+    if (typeof viewId === "string" && viewId.length > 0 && viewId.length <= 256) {
+      const plugins = this.contributions?.database?.listPlugins?.() ?? [];
+      const plugin = plugins.find((item) => item?.enabled && item.runtime?.quarantinedAt == null
+        && describePluginRuntime(item.manifest).browserOnly
+        && (item.manifest?.contributes?.views ?? []).some((view) => view.id === viewId));
+      if (plugin && !this.contributions.runtimeSupervisor?.getRuntimeIdentity?.(plugin.id)) {
+        const events = new Set(plugin.manifest?.activationEvents ?? []);
+        const declaredForView = events.has(`onView:${viewId}`) || events.has("onStartupFinished");
+        let hasAskPermission = false;
+        if (typeof this.permissionEngine?.describePolicies === "function") {
+          try {
+            hasAskPermission = this.permissionEngine.describePolicies(plugin).some((policy) => policy.mode === "ask");
+          } catch {
+            hasAskPermission = true;
+          }
+        }
+        if (declaredForView && !hasAskPermission && typeof this.contributions.runtimeSupervisor?.start === "function") {
+          // Only activate on hover when the view explicitly declares activation
+          // and no permission is in Ask mode (so hover can never pop an unsolicited prompt).
+          void this.contributions.runtimeSupervisor.start(plugin.id).catch(() => {});
+        } else {
+          // Otherwise stay strictly passive: pre-verify package integrity without running plugin code.
+          void this.packageStore?.preparePackageRoot?.(plugin)?.catch?.(() => {});
+        }
+      }
+    }
+    return true;
   }
   async resource(id, resource, sender) {
     const instance = this.owned(id, sender);
@@ -107,7 +157,7 @@ class HostDrawnViewHost {
     const { plugin } = this.contributions.assertViewActivationCurrent(instance.activation, { context: instance.context });
     instance.resources ??= new Map();
     if (instance.resources.has(resource)) return instance.resources.get(resource);
-    if (instance.resources.size >= 128) throw new Error("Plugin image limit exceeded");
+    if (instance.resources.size >= 256) throw new Error("Plugin image limit exceeded");
     const pending = this.resources.image(plugin, resource).then((result) => {
       if (this.isLocked() || this.instances.get(id) !== instance) throw new Error("Plugin view closed");
       this.contributions.assertViewActivationCurrent(instance.activation, { context: instance.context });

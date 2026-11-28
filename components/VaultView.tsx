@@ -16,7 +16,6 @@ import {
   Key,
   LayoutGrid,
   List,
-  Monitor,
   Network,
   NotebookText,
   Pin,
@@ -127,7 +126,6 @@ import { useHostTreeInlineGroupActions } from "./vault/useHostTreeInlineGroupAct
 import { useHostTreeInlineHostActions } from "./vault/useHostTreeInlineHostActions";
 import { useRegisterVaultHostTreeActions } from "./vault/useRegisterVaultHostTreeActions";
 import { Button } from "./ui/button";
-import { RippleButton } from "./ui/ripple";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -161,6 +159,12 @@ import { useVaultHostCollections } from "./vault/useVaultHostCollections";
 import { useVaultImportHandlers } from "../application/state/useVaultImportHandlers";
 import { useVaultGroupDragHandlers } from "./vault/useVaultGroupDragHandlers";
 import { usePluginVaultPages } from "../application/state/usePluginVaultPages";
+import { useVaultNavConfig } from "../application/state/useVaultNavConfig";
+import {
+  getVisibleVaultNavIds,
+  resolveFallbackVaultSection,
+  type VaultNavItemId,
+} from "../domain/vaultNavConfig";
 
 const GroupDetailsPanel = lazy(() => import("./GroupDetailsPanel"));
 const HostDetailsPanel = lazy(() => import("./HostDetailsPanel"));
@@ -179,7 +183,6 @@ const SnippetsManager = lazy(() => import("./SnippetsManager"));
 
 export type VaultSection =
   | "hosts"
-  | "monitor"
   | "keys"
   | "proxies"
   | "snippets"
@@ -384,6 +387,59 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   hostsRef.current = hosts;
   const [currentSection, setCurrentSection] = useState<VaultSection>("hosts");
   const pluginVault = usePluginVaultPages({ locale, section: currentSection, select: setCurrentSection });
+  const activePluginNavIds = useMemo(
+    () => pluginVault.pages.map((page) => page.key),
+    [pluginVault.pages],
+  );
+  const vaultNavConfig = useVaultNavConfig({
+    activePluginIds: activePluginNavIds,
+    pluginsLoading: pluginVault.contributions.loading,
+  });
+  const previousHiddenNavRef = useRef<ReadonlySet<VaultNavItemId>>(vaultNavConfig.hiddenSet);
+  useEffect(() => {
+    const previousHidden = previousHiddenNavRef.current;
+    previousHiddenNavRef.current = vaultNavConfig.hiddenSet;
+    if (
+      !previousHidden.has(currentSection)
+      && vaultNavConfig.hiddenSet.has(currentSection)
+    ) {
+      setCurrentSection(
+        resolveFallbackVaultSection(currentSection, vaultNavConfig.visibleIds),
+      );
+    }
+  }, [currentSection, vaultNavConfig.hiddenSet, vaultNavConfig.visibleIds]);
+
+  const handleSelectVaultNavItem = useCallback(
+    (id: VaultNavItemId) => {
+      setCurrentSection(id);
+      if (id === "hosts") {
+        setSelectedGroupPath(null);
+      }
+    },
+    [],
+  );
+
+  const handleHideVaultNavItem = useCallback(
+    (id: VaultNavItemId) => {
+      const next = vaultNavConfig.setVisible(id, false);
+      if (currentSection === id) {
+        const nextVisible = getVisibleVaultNavIds(next, activePluginNavIds);
+        setCurrentSection(resolveFallbackVaultSection(currentSection, nextVisible));
+      }
+    },
+    [activePluginNavIds, currentSection, vaultNavConfig],
+  );
+
+  const handleToggleVaultNavItemVisible = useCallback(
+    (id: VaultNavItemId) => {
+      const next = vaultNavConfig.toggleVisible(id);
+      if (currentSection === id && next.hidden.includes(id)) {
+        const nextVisible = getVisibleVaultNavIds(next, activePluginNavIds);
+        setCurrentSection(resolveFallbackVaultSection(currentSection, nextVisible));
+      }
+    },
+    [activePluginNavIds, currentSection, vaultNavConfig],
+  );
   const [search, setSearch] = useState("");
   const [selectedGroupPath, setSelectedGroupPath] = useState<string | null>(
     null,
@@ -1577,6 +1633,10 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           Copy,
           currentSection,
           pluginVault,
+          vaultNavConfig,
+          handleSelectVaultNavItem,
+          handleHideVaultNavItem,
+          handleToggleVaultNavItemVisible,
           customGroups,
           deleteGroupPath,
           deleteGroupPaths,
@@ -1671,7 +1731,6 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           List,
           managedGroupPaths,
           managedSources,
-          Monitor,
           moveGroup,
           moveHostToGroup,
           moveHostsToGroup,
@@ -1724,7 +1783,6 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           reorderGroup,
           reorderHost,
           resetImportProgress,
-          RippleButton,
           rootRef,
           sanitizeHost,
           ScreenShare,

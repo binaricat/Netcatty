@@ -84,6 +84,9 @@ function updateCrc32(current: number, chunk: Buffer): number {
   return crc >>> 0;
 }
 
+const SMALL_FILE_READ_LIMIT = 256 * 1024;
+const DIRECTORY_HASH_CONCURRENCY = 16;
+
 async function readRegularFile(
   filePath: string,
   maxBytes: number,
@@ -96,6 +99,17 @@ async function readRegularFile(
   try {
     const fileStats = await handle.stat();
     if (!fileStats.isFile()) throw new Error(`Package source is not a regular file: ${filePath}`);
+    if (fileStats.size > maxBytes) {
+      throw new Error(`Package source exceeds ${maxBytes} bytes while reading: ${filePath}`);
+    }
+    if (fileStats.size <= SMALL_FILE_READ_LIMIT) {
+      const buffer = await handle.readFile();
+      if (buffer.byteLength > maxBytes) {
+        throw new Error(`Package source exceeds ${maxBytes} bytes while reading: ${filePath}`);
+      }
+      if (buffer.byteLength > 0) onChunk(buffer);
+      return { size: buffer.byteLength, mode: fileStats.mode };
+    }
     let size = 0;
     const stream = createReadStream(filePath, { fd: handle.fd, autoClose: false });
     for await (const chunk of stream) {
@@ -115,15 +129,17 @@ async function readRegularFile(
 export async function hashFile(
   filePath: string,
   maxBytes: number,
+  options: { computeCrc32?: boolean } = {},
 ): Promise<{ crc32: number; sha256: string; size: number; mode: number }> {
+  const computeCrc32 = options.computeCrc32 !== false;
   const sha256 = createHash("sha256");
   let crc = 0xffffffff;
   const file = await readRegularFile(filePath, maxBytes, (buffer) => {
     sha256.update(buffer);
-    crc = updateCrc32(crc, buffer);
+    if (computeCrc32) crc = updateCrc32(crc, buffer);
   });
   return {
-    crc32: (crc ^ 0xffffffff) >>> 0,
+    crc32: computeCrc32 ? (crc ^ 0xffffffff) >>> 0 : 0,
     sha256: sha256.digest("hex"),
     size: file.size,
     mode: file.mode,
@@ -208,16 +224,22 @@ async function resolveThroughExistingAncestor(targetPath: string): Promise<strin
 async function scanPackageDirectory(
   pluginDirectory: string,
   manifestSource: ValidatedManifestSource,
-  options: { allowIgnoredRootEntries?: boolean } = {},
+  options: { allowIgnoredRootEntries?: boolean; computeCrc32?: boolean } = {},
 ): Promise<ScannedFile[]> {
   const { manifest } = manifestSource;
+  const computeCrc32 = options.computeCrc32 !== false;
   const registry = new PackagePathRegistry();
   const companionPaths = new Map(
     (manifest.companionExecutables ?? []).flatMap((companion) => (
       companion.variants.map((variant) => [variant.path, variant] as const)
     )),
   );
-  const files: ScannedFile[] = [];
+  const discovered: Array<{
+    readonly absolutePath: string;
+    readonly packagePath: string;
+    readonly size: number;
+    readonly mode: number;
+  }> = [];
   let totalBytes = 0;
 
   async function visit(directory: string, relativeDirectory: string): Promise<void> {
@@ -251,7 +273,7 @@ async function scanPackageDirectory(
         throw new Error(`Only regular files are allowed in plugin packages: ${packagePath}`);
       }
       registry.add(packagePath);
-      if (files.length + 1 > PACKAGE_LIMITS.fileCount) {
+      if (discovered.length + 1 > PACKAGE_LIMITS.fileCount) {
         throw new Error(`Plugin package exceeds ${PACKAGE_LIMITS.fileCount} files`);
       }
       if (fileStats.size > PACKAGE_LIMITS.singleFileBytes) {
@@ -263,30 +285,50 @@ async function scanPackageDirectory(
           `Plugin package exceeds ${PACKAGE_LIMITS.uncompressedBytes} uncompressed bytes`,
         );
       }
-      const hashes = await hashFile(absolutePath, PACKAGE_LIMITS.singleFileBytes);
-      if (hashes.size !== fileStats.size || hashes.mode !== fileStats.mode) {
-        throw new Error(`Package source changed while it was being scanned: ${packagePath}`);
-      }
-      const isExecutable = isExecutablePackageFile(packagePath, hashes.mode);
-      if (isExecutable && !companionPaths.has(packagePath)) {
-        throw new Error(`Executable file is not declared as a companion: ${packagePath}`);
-      }
-      const companion = companionPaths.get(packagePath);
-      if (companion && companion.sha256 !== hashes.sha256) {
-        throw new Error(`Companion SHA-256 mismatch: ${packagePath}`);
-      }
-      files.push({
+      discovered.push({
         absolutePath,
         packagePath,
         size: fileStats.size,
-        executable: Boolean(companion),
-        crc32: hashes.crc32,
-        sha256: hashes.sha256,
+        mode: fileStats.mode,
       });
     }
   }
 
   await visit(pluginDirectory, "");
+
+  const files: ScannedFile[] = new Array(discovered.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(DIRECTORY_HASH_CONCURRENCY, Math.max(1, discovered.length));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const current = nextIndex;
+      nextIndex += 1;
+      if (current >= discovered.length) return;
+      const entry = discovered[current];
+      const hashes = await hashFile(entry.absolutePath, PACKAGE_LIMITS.singleFileBytes, {
+        computeCrc32,
+      });
+      if (hashes.size !== entry.size || hashes.mode !== entry.mode) {
+        throw new Error(`Package source changed while it was being scanned: ${entry.packagePath}`);
+      }
+      const isExecutable = isExecutablePackageFile(entry.packagePath, hashes.mode);
+      if (isExecutable && !companionPaths.has(entry.packagePath)) {
+        throw new Error(`Executable file is not declared as a companion: ${entry.packagePath}`);
+      }
+      const companion = companionPaths.get(entry.packagePath);
+      if (companion && companion.sha256 !== hashes.sha256) {
+        throw new Error(`Companion SHA-256 mismatch: ${entry.packagePath}`);
+      }
+      files[current] = {
+        absolutePath: entry.absolutePath,
+        packagePath: entry.packagePath,
+        size: entry.size,
+        executable: Boolean(companion),
+        crc32: hashes.crc32,
+        sha256: hashes.sha256,
+      };
+    }
+  }));
   assertManifestSnapshotMatches(
     manifestSource,
     files.find(({ packagePath }) => packagePath === "netcatty.plugin.json"),
@@ -496,7 +538,10 @@ export async function validatePluginDirectory(
 ): Promise<PluginDirectoryValidationResult> {
   const sourceDirectory = path.resolve(pluginDirectory);
   const manifestSource = await readValidatedManifestSource(sourceDirectory);
-  const files = await scanPackageDirectory(sourceDirectory, manifestSource, options);
+  const files = await scanPackageDirectory(sourceDirectory, manifestSource, {
+    ...options,
+    computeCrc32: false,
+  });
   return {
     manifest: manifestSource.manifest,
     fileCount: files.length,

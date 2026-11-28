@@ -1,0 +1,18 @@
+{
+  "name": "netcatty-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "lint": "tsc --noEmit && node scripts/check-assets.mjs && node scripts/check-host-policy.mjs",
+    "test": "node --test --import tsx tests/*.test.ts tests/*.test.tsx",
+    "build": "node scripts/build.mjs",
+    "pack": "npm run build && node scripts/pack.mjs",
+    "validate": "node scripts/validate.mjs",
+    "test:electron": "../../node_modules/.bin/electron scripts/smoke-electron.cjs"
+  }
+}

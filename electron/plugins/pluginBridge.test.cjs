@@ -1806,3 +1806,41 @@ test("GitHub management IPC rejects untrusted senders before initialization or r
   }
   assert.equal(initialized, 0);
 });
+
+test("plugin view badges IPC lists current badges passively, rejects untrusted senders, and broadcasts updates", async () => {
+  const { PluginViewBadgeService } = require("./viewBadgeService.cjs");
+  const ipcMain = createIpcMain();
+  const broadcasts = [];
+  const viewBadgeService = new PluginViewBadgeService();
+  registerPluginBridge(ipcMain, {
+    manager: { initialize: async () => {} },
+    isTrustedSender: (event) => event?.trusted === true,
+    viewBadgeService,
+    broadcast: (channel, payload) => broadcasts.push([channel, payload]),
+  });
+
+  const listHandler = ipcMain.handlers.get(CHANNELS.viewBadges);
+  assert.equal(typeof listHandler, "function");
+  await assert.rejects(listHandler({ trusted: false }), /Untrusted/);
+  assert.deepEqual(await listHandler({ trusted: true }), []);
+
+  viewBadgeService.setBadge(
+    { viewId: "com.example.monitor.workbench", count: 3, tone: "warning", tooltip: "3 alerts" },
+    {
+      pluginId: "com.example.monitor",
+      runtimeId: "rt-1",
+      manifest: {
+        id: "com.example.monitor",
+        contributes: {
+          views: [{ id: "com.example.monitor.workbench", title: "Monitor", location: "vault-page" }],
+        },
+      },
+    },
+  );
+  assert.equal(broadcasts.length, 1);
+  assert.equal(broadcasts[0][0], CHANNELS.viewBadgesChanged);
+  assert.equal(broadcasts[0][1].length, 1);
+  assert.equal(broadcasts[0][1][0].count, 3);
+  assert.equal((await listHandler({ trusted: true }))[0].tone, "warning");
+  viewBadgeService.shutdown();
+});

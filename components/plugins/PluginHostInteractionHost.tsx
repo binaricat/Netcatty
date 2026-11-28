@@ -21,18 +21,30 @@ function HostInteractionDialog({ state, prompt }: {
   const request = prompt.request;
   const terminalShare = request.kind === 'terminal.selection.read';
   const inputDraft = request.kind === 'terminal.input.propose';
+  const isConfirm = request.kind === 'confirm';
+  const isOpenExternalUrl = request.kind === 'openExternalUrl';
   const previewClipboard = request.kind === 'clipboard.read' && prompt.phase === 'request';
   const needsPreview = previewClipboard || (terminalShare && prompt.phase === 'request');
   const textBytes = new TextEncoder().encode(state.value).length;
-  const canSubmit = request.kind === 'quickPick' ? request.items.some((item) => item.id === state.value) : textBytes <= PLUGIN_HOST_INTERACTION_LIMITS.textBytes;
+  const canSubmit = request.kind === 'quickPick'
+    ? request.items.some((item) => item.id === state.value)
+    : (isConfirm || isOpenExternalUrl || textBytes <= PLUGIN_HOST_INTERACTION_LIMITS.textBytes);
+  const displayTitle = isOpenExternalUrl
+    ? (request.title ?? t('plugins.interaction.openUrlTitle'))
+    : request.title;
   return <Dialog open onOpenChange={(open) => { if (!open) void state.respond('cancel'); }}>
     <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[520px]" hideCloseButton>
       <DialogHeader>
         <DialogTitle>{t('plugins.interaction.title')}</DialogTitle>
         <DialogDescription className="break-all">{prompt.pluginId} · {prompt.pluginVersion}</DialogDescription>
       </DialogHeader>
-      <p className="break-words text-sm font-medium">{request.title}</p>
-      <p className="text-xs text-muted-foreground">{t(inputDraft ? 'plugins.interaction.draftNote' : terminalShare ? 'plugins.interaction.terminalDisclosure' : 'plugins.interaction.sharing')}</p>
+      <p className="break-words text-sm font-medium">{displayTitle}</p>
+      {isConfirm && request.message && <p className="break-words text-sm text-muted-foreground whitespace-pre-wrap">{request.message}</p>}
+      {isOpenExternalUrl && <>
+        <p className="text-xs text-muted-foreground">{t('plugins.interaction.openUrlNote')}</p>
+        <code className="block rounded-md border bg-muted/40 p-2.5 font-mono text-xs break-all">{request.url}</code>
+      </>}
+      {!isConfirm && !isOpenExternalUrl && <p className="text-xs text-muted-foreground">{t(inputDraft ? 'plugins.interaction.draftNote' : terminalShare ? 'plugins.interaction.terminalDisclosure' : 'plugins.interaction.sharing')}</p>}
       {(terminalShare || inputDraft) && <p className="break-all text-sm">{t('plugins.interaction.terminalTarget')}: {prompt.terminalLabel} ({prompt.terminalSessionId})</p>}
       {inputDraft && <textarea aria-label={t('plugins.interaction.draft')} className="min-h-28 max-h-64 w-full rounded-md border bg-muted/30 p-3 font-mono text-xs" value={state.value} maxLength={PLUGIN_HOST_INTERACTION_LIMITS.textBytes} disabled={state.busy} onChange={(event) => state.setValue(event.target.value)} />}
       {(inputDraft || (terminalShare && prompt.phase === 'preview')) && <pre aria-label={t('plugins.interaction.exactText')} className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md border p-2 font-mono text-xs">{JSON.stringify(inputDraft ? state.value : prompt.previewText)}</pre>}
@@ -50,9 +62,19 @@ function HostInteractionDialog({ state, prompt }: {
       {(request.kind === 'clipboard.write' || prompt.phase === 'preview') && <textarea aria-label={t('plugins.interaction.preview')} readOnly className="min-h-28 max-h-64 w-full resize-none rounded-md border bg-muted/30 p-3 font-mono text-xs" value={request.kind === 'clipboard.write' ? request.text : prompt.previewText ?? ''} />}
       {state.error && <p role="alert" className="text-sm text-destructive">{t('plugins.interaction.failed')}</p>}
       <DialogFooter>
-        <Button variant="outline" disabled={state.busy} onClick={() => void state.respond('cancel')}>{t('common.cancel')}</Button>
-        <Button disabled={state.busy || !canSubmit} onClick={() => void state.respond(needsPreview ? 'preview' : 'submit')}>
-          {t(needsPreview ? terminalShare ? 'plugins.interaction.terminalPreview' : 'plugins.interaction.previewAction' : inputDraft ? 'plugins.interaction.closeDraft' : request.kind === 'clipboard.read' || terminalShare ? 'plugins.interaction.share' : request.kind === 'clipboard.write' ? 'plugins.interaction.copy' : 'common.continue')}
+        <Button variant="outline" disabled={state.busy} onClick={() => void state.respond('cancel')}>
+          {isConfirm && request.cancelLabel ? request.cancelLabel : t('common.cancel')}
+        </Button>
+        <Button
+          variant={isConfirm && request.destructive ? 'destructive' : 'default'}
+          disabled={state.busy || !canSubmit}
+          onClick={() => void state.respond(needsPreview ? 'preview' : 'submit')}
+        >
+          {isConfirm && request.confirmLabel
+            ? request.confirmLabel
+            : isOpenExternalUrl
+              ? t('plugins.interaction.openUrlAction')
+              : t(needsPreview ? terminalShare ? 'plugins.interaction.terminalPreview' : 'plugins.interaction.previewAction' : inputDraft ? 'plugins.interaction.closeDraft' : request.kind === 'clipboard.read' || terminalShare ? 'plugins.interaction.share' : request.kind === 'clipboard.write' ? 'plugins.interaction.copy' : 'common.continue')}
         </Button>
       </DialogFooter>
     </DialogContent>
