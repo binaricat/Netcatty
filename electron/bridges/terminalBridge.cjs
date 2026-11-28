@@ -2663,13 +2663,16 @@ function registerWorkerSend(ipcMain, terminalWorkerManager, channel) {
   });
 }
 
-async function readWslSessionDirectory(event, { sessionId, operation, path } = {}) {
+const WSL_DIRECTORY_CHANNEL = "netcatty:local:wslDirectory";
+const wslDirectoryUnavailable = Object.freeze({ success: false, error: "unavailable" });
+
+async function readWslSessionDirectory(event, { sessionId, operation, path } = {}, workerRuntime = false) {
   const session = sessions.get(sessionId);
-  const ownsSession = () => session && !session.closed && sessions.get(sessionId) === session
-    && session.webContentsId === event.sender.id;
-  if (!ownsSession() || !session.directoryIntegration?.readPath) return { success: false, error: 'unavailable' };
+  const canRead = () => session && !session.closed && sessions.get(sessionId) === session
+    && (workerRuntime || session.webContentsId === event.sender.id);
+  if (!canRead() || !session.directoryIntegration?.readPath) return wslDirectoryUnavailable;
   const result = await session.directoryIntegration.readPath(operation, path);
-  return ownsSession() ? result : { success: false, error: 'unavailable' };
+  return canRead() ? result : wslDirectoryUnavailable;
 }
 
 function registerHandlers(ipcMain, options = {}) {
@@ -2825,9 +2828,16 @@ function registerHandlers(ipcMain, options = {}) {
     terminalWorkerManager.onSessionClosed?.(({ sessionId }) => {
       terminalFlowPauseArbiter.clearSession(sessionId);
     });
+    // Output routing lives in main. Only the current routed window can read WSL paths.
+    ipcMain.handle(WSL_DIRECTORY_CHANNEL, async (event, { sessionId, operation, path } = {}) => {
+      const webContentsId = event.sender.id;
+      const ownsOutput = () => terminalWorkerManager.getSessionOwnerWebContentsId(sessionId) === webContentsId;
+      if (!ownsOutput()) return wslDirectoryUnavailable;
+      const result = await terminalWorkerManager.request(WSL_DIRECTORY_CHANNEL, { sessionId, operation, path }, { webContentsId });
+      return ownsOutput() ? result : wslDirectoryUnavailable;
+    });
     [
       "netcatty:local:start",
-      "netcatty:local:wslDirectory",
       "netcatty:telnet:start",
       "netcatty:mosh:start",
       "netcatty:et:start",
@@ -2906,7 +2916,9 @@ function registerHandlers(ipcMain, options = {}) {
     ? sessionLogStreamManager.withSessionLogRestart
     : (handler) => handler;
   ipcMain.handle("netcatty:local:start", wrapSessionStart(startLocalSession));
-  ipcMain.handle("netcatty:local:wslDirectory", readWslSessionDirectory);
+  // The worker endpoint is reachable only through main's authorized proxy.
+  ipcMain.handle(WSL_DIRECTORY_CHANNEL, (event, payload) =>
+    readWslSessionDirectory(event, payload, options.workerRuntime === true));
   ipcMain.handle("netcatty:telnet:start", wrapSessionStart(startTelnetSession));
   ipcMain.handle("netcatty:mosh:start", wrapSessionStart(startMoshSession));
   ipcMain.handle("netcatty:et:start", wrapSessionStart(startEtSession));

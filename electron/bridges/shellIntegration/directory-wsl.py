@@ -79,7 +79,7 @@ def directory_result(operation, encoded_path, cwd):
                 entry.name.encode('utf-8')
                 if entry.is_dir():
                     files.append({'name': entry.name, 'type': 'directory'})
-            except (FileNotFoundError, UnicodeError):
+            except (OSError, UnicodeError):
                 continue
             if len(files) > 4096:
                 raise ValueError('Directory listing exceeds limit')
