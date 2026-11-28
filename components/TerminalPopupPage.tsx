@@ -592,6 +592,7 @@ function TerminalPopupPageInner({
               accentMode={settings.accentMode}
               customAccent={settings.customAccent}
               terminalSettings={settings.terminalSettings}
+              shellType={config.sourceSession.shellType}
               vaultInitializedOverride={vaultInitialized}
               disableTerminalFontZoom={settings.disableTerminalFontZoom}
               sessionId={sessionId}

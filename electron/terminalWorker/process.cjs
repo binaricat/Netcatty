@@ -341,7 +341,7 @@ function main() {
         transferBridge,
       });
       sshBridge.registerHandlers(ipcMain);
-      terminalBridge.registerHandlers(ipcMain);
+      terminalBridge.registerHandlers(ipcMain, { workerRuntime: true });
       sftpBridge.registerHandlers(ipcMain);
       registerPortForwardingWorkerBridge(ipcMain);
       registerRemoteDesktopWorkerBridge(ipcMain);

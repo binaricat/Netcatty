@@ -395,6 +395,52 @@ test("fallback log restart guard wraps all six starts only when main explicitly 
   assert.equal(wrappers.size, 0, "worker proxies must not also apply the main fallback guard");
 });
 
+test("WSL directory requests follow the active output window and discard results after a handoff", async () => {
+  const channel = "netcatty:local:wslDirectory";
+  const unavailable = { success: false, error: "unavailable" };
+  const listing = { success: true, files: [{ name: "child", type: "directory" }] };
+  const home = { sender: { id: 42 } };
+  const popup = { sender: { id: 43 } };
+  const payload = { sessionId: "wsl", operation: "list", path: "/home/example" };
+  let outputOwner = home.sender.id;
+  let finish;
+  const sessions = new Map([["wsl", {
+    webContentsId: home.sender.id,
+    directoryIntegration: {
+      readPath: () => new Promise(resolve => { finish = resolve; }),
+    },
+  }]]);
+  const main = createFakeIpcMain();
+  const worker = createFakeIpcMain();
+  const fallback = createFakeIpcMain();
+  terminalBridge.init({ sessions });
+  terminalBridge.registerHandlers(worker, { workerRuntime: true });
+  terminalBridge.registerHandlers(fallback);
+  terminalBridge.registerHandlers(main, {
+    terminalWorkerManager: {
+      getSessionOwnerWebContentsId: id => id === "wsl" ? outputOwner : null,
+      request: (name, data, { webContentsId }) =>
+        worker.handlers.get(name)({ sender: { id: webContentsId } }, data),
+    },
+  });
+  const read = main.handlers.get(channel);
+  const beforeHandoff = read(home, payload);
+  outputOwner = popup.sender.id;
+  finish(listing);
+  assert.deepEqual(await beforeHandoff, unavailable);
+  assert.deepEqual(await read(home, payload), unavailable);
+  assert.deepEqual(await fallback.handlers.get(channel)(popup, payload), unavailable);
+
+  const afterHandoff = read(popup, payload);
+  finish(listing);
+  assert.deepEqual(await afterHandoff, listing);
+
+  const beforeClose = read(popup, payload);
+  sessions.delete("wsl");
+  finish(listing);
+  assert.deepEqual(await beforeClose, unavailable);
+});
+
 test("terminal worker mode handles stateless local shell and path queries in main without waking worker", async () => {
   const ipcMain = createFakeIpcMain();
   const terminalWorkerManager = createFakeWorkerManager();
