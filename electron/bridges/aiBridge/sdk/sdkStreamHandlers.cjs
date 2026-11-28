@@ -745,6 +745,8 @@ function registerSdkStreamHandlers(ctx) {
   const injectCliEnv = typeof ctx.withCliDiscoveryEnv === "function"
     ? ctx.withCliDiscoveryEnv
     : (env) => env;
+  // Inside with (ctx), ctx.require resolves relative to aiBridge.cjs.
+  const requireFromSdk = require;
   with (ctx) {
     // chatSessionId -> { sessionId } for resume; controller per requestId.
     const sdkActiveStreams = new Map(); // requestId -> AbortController
@@ -758,7 +760,7 @@ function registerSdkStreamHandlers(ctx) {
     let _codexAppServerRuntime = null;
     const getCodexAppServerRuntime = () => {
       if (!_codexAppServerRuntime) {
-        const { CodexAppServerRuntime } = require("../codexAppServer/runtime.cjs");
+        const { CodexAppServerRuntime } = requireFromSdk("../codexAppServer/runtime.cjs");
         _codexAppServerRuntime = new CodexAppServerRuntime({
           appVersion: electronModule?.app?.getVersion?.() || "0.0.0",
           transformUserInputAnswers(answers, context) {
@@ -1570,7 +1572,7 @@ function registerSdkStreamHandlers(ctx) {
             // win over both the shared default and OpenCode's budget.
             const catalogBudgetMs = MODEL_LIST_TIMEOUT_OVERRIDES_MS[backendKey]
               ?? (backendKey === "opencode"
-                ? require("./opencodeDriver.cjs").OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
+                ? requireFromSdk("./opencodeDriver.cjs").OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
                 : MODEL_LIST_TIMEOUT_MS);
             const raw = await withTimeout(
               fetchSdkModelCatalog({
