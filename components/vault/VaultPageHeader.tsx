@@ -40,7 +40,7 @@ export function VaultPageHeader({
 }
 
 interface VaultHeaderSearchProps
-  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "className"> {
+  extends Omit<React.ComponentPropsWithRef<typeof Input>, "className"> {
   className?: string;
   inputClassName?: string;
   rightAdornment?: React.ReactNode;
