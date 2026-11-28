@@ -55,6 +55,7 @@ export { inspectPluginBrandIcon, PLUGIN_BRAND_ICON_FEATURE, PLUGIN_BRAND_ICON_MA
 export const PLUGIN_NETWORK_CREDENTIAL_LEASE_FEATURE = "network.credential-lease" as const satisfies import("./generated/plugin-contract.js").NetworkCredentialLeaseFeature;
 export const PLUGIN_BYTE_STREAM_FEATURE = "network.byte-streams" as const satisfies import("./generated/plugin-contract.js").ByteStreamFeature;
 export const PLUGIN_AI_MODEL_INVOCATION_FEATURE = "ai.model-invocation" as const satisfies import("./generated/plugin-contract.js").PluginAIModelInvocationFeature;
+export const PLUGIN_AI_SIDEBAR_TOOLS_FEATURE = "ai.sidebar-tools" as const satisfies import("./generated/plugin-contract.js").PluginAISidebarToolsFeature;
 export const PLUGIN_AGENT_SESSIONS_FEATURE = "ai.agent-sessions" as const satisfies import("./generated/plugin-contract.js").PluginAgentFeature;
 export const PLUGIN_AGENT_CAPABILITIES = ["session.environment", "terminal.execute", "terminal.start", "terminal.poll", "terminal.stop", "harness.terminal.read_context"] as const satisfies import("./generated/plugin-contract.js").PluginAgentCapabilities;
 export const PLUGIN_SELECTED_CONTEXT_FEATURE = "context.selected-read" as const satisfies import("./generated/plugin-contract.js").PluginSelectedContextFeature;

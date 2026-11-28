@@ -413,6 +413,7 @@ function createBridgeRegistrar(context) {
       logService: pluginHostService?.logService,
       hostDrawnViewHost: pluginHostService?.hostDrawnViewHost,
       viewBadgeService: pluginHostService?.viewBadgeService,
+      aiSidebarService: pluginHostService?.aiSidebarService,
       env: process.env,
       isTrustedSender: createTrustedPluginBridgeSender({ devServerUrl: effectiveDevServerUrl }),
       broadcast: (channel, payload) => {

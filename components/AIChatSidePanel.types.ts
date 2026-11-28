@@ -104,7 +104,7 @@ export interface AIChatSidePanelProps {
   quickMessages?: AIQuickMessage[];
 
   // Context
-  scopeType: 'terminal' | 'workspace';
+  scopeType: 'terminal' | 'workspace' | 'global';
   scopeTargetId?: string;
   scopeHostIds?: string[];
   scopeLabel?: string;
@@ -143,13 +143,21 @@ export interface AIChatSidePanelProps {
     connected: boolean;
   }>;
   resolveExecutorContext?: (scope: {
-    type: 'terminal' | 'workspace';
+    type: 'terminal' | 'workspace' | 'global';
     targetId?: string;
     label?: string;
   }) => ExecutorContext;
 
   // Visibility
   isVisible?: boolean;
+
+  // Plugin contextual sidebar integration (native Catty Agent + plugin tools)
+  pluginContext?: import('../infrastructure/ai/pluginAiSidebarTypes').PluginAISidebarTurnContext | null;
+  pluginSuggestedPrompts?: readonly import('../infrastructure/ai/pluginAiSidebarTypes').PluginAISidebarPrompt[];
+  pendingPluginPrompt?: { id: number; prompt: string; autoSend?: boolean } | null;
+  onPendingPluginPromptConsumed?: (id: number) => void;
+  onClosePanel?: () => void;
+  borderlessChrome?: boolean;
 
   // Vault artifact navigation (from AI chat tool results)
   notes?: VaultNote[];

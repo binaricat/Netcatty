@@ -109,7 +109,8 @@ export interface UseAIChatStreamingReturn {
 export interface SendToCattyContext {
   activeProvider: ProviderConfig | undefined;
   activeModelId: string;
-  scopeType: 'terminal' | 'workspace';
+  reasoningEffort?: string;
+  scopeType: 'terminal' | 'workspace' | 'global';
   scopeTargetId?: string;
   scopeLabel?: string;
   globalPermissionMode: AIPermissionMode;
@@ -125,6 +126,7 @@ export interface SendToCattyContext {
   selectedUserSkillSlugs?: string[];
   permissionMode?: AIPermissionMode;
   forceCompaction?: boolean;
+  pluginContext?: import('../../infrastructure/ai/pluginAiSidebarTypes').PluginAISidebarTurnContext | null;
 }
 
 export interface SendToExternalContext {

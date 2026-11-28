@@ -528,7 +528,10 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
   // Listen for global AI panel toggle (from TopTabs button). Uses the toggle
     // handler so a second click on an already-open AI panel closes it.
     useEffect(() => {
-      const handler = () => handleToggleAiFromTopBar();
+      const handler = (event: Event) => {
+        if (event.defaultPrevented) return;
+        handleToggleAiFromTopBar();
+      };
       window.addEventListener('netcatty:toggle-ai-panel', handler);
       return () => window.removeEventListener('netcatty:toggle-ai-panel', handler);
     }, [handleToggleAiFromTopBar]);

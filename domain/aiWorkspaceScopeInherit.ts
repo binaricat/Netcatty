@@ -7,7 +7,7 @@ import { buildAIScopeKey } from './aiSessionsForScope';
  * the chat the user was using survives the merge.
  */
 export function resolveInheritedAIActiveSessionId(input: {
-  scopeType: 'terminal' | 'workspace';
+  scopeType: 'terminal' | 'workspace' | 'global';
   scopeTargetId?: string;
   activeSessionIdMap: Readonly<Record<string, string | null | undefined>>;
   memberTerminalIds: readonly string[];

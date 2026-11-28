@@ -106,6 +106,10 @@ const CHANNELS = Object.freeze({
   hostDrawnEvent: "netcatty:plugins:host-ui-event",
   viewBadges: "netcatty:plugins:view-badges",
   viewBadgesChanged: "netcatty:plugins:view-badges-changed",
+  aiSidebarState: "netcatty:plugins:ai-sidebar-state",
+  aiSidebarStateChanged: "netcatty:plugins:ai-sidebar-state-changed",
+  aiSidebarCommand: "netcatty:plugins:ai-sidebar-command",
+  aiSidebarInvokeTool: "netcatty:plugins:ai-sidebar-invoke-tool",
   getScopeCatalog: "netcatty:plugins:get-scope-catalog",
   setScopeCatalog: "netcatty:plugins:set-scope-catalog",
   scopeCatalogChanged: "netcatty:plugins:scope-catalog-changed",
@@ -259,6 +263,7 @@ function registerPluginBridge(ipcMain, options) {
   const selectImporterFile = options.selectImporterFile;
   const hostDrawnViewHost = options.hostDrawnViewHost;
   const viewBadgeService = options.viewBadgeService;
+  const aiSidebarService = options.aiSidebarService;
   const isTrustedSender = options.isTrustedSender;
   const defaultScopeCatalog = normalizePluginScopeCatalog({ device: [{ id: "device", label: "This device" }] });
   const scopeCatalogs = new Map();
@@ -1742,6 +1747,11 @@ function registerPluginBridge(ipcMain, options) {
     await hostDrawnViewHost.event(payload?.instanceId, payload?.event, event.sender); return null;
   });
   handlePassive(CHANNELS.viewBadges, () => [], async () => viewBadgeService?.listBadges() ?? []);
+  handlePassive(CHANNELS.aiSidebarState, () => ({ contexts: [], tools: [] }), async () => aiSidebarService?.getState() ?? { contexts: [], tools: [] });
+  handle(CHANNELS.aiSidebarInvokeTool, async (_activeManager, payload) => {
+    if (!aiSidebarService) throw new Error("Plugin AI sidebar service is unavailable");
+    return aiSidebarService.invokeTool(payload);
+  });
   handlePassive(CHANNELS.getScopeCatalog, () => currentScopeCatalog(), async () => currentScopeCatalog());
   handlePassive(CHANNELS.setScopeCatalog, null, async (_activeManager, payload, event) => {
     const key = scopeCatalogSenderKey(event);
@@ -1755,6 +1765,8 @@ function registerPluginBridge(ipcMain, options) {
   options.catalogService?.onDidChange?.((event) => options.broadcast?.(CHANNELS.catalogChanged, event));
   contributionService?.onDidChange?.((event) => options.broadcast?.(CHANNELS.contributionsChanged, event));
   viewBadgeService?.onDidChange?.((badges) => options.broadcast?.(CHANNELS.viewBadgesChanged, badges));
+  aiSidebarService?.onDidChangeState?.((state) => options.broadcast?.(CHANNELS.aiSidebarStateChanged, state));
+  aiSidebarService?.onDidEmitCommand?.((command) => options.broadcast?.(CHANNELS.aiSidebarCommand, command));
 
 }
 

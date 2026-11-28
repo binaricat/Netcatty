@@ -36,6 +36,7 @@ const { PluginManager } = require("./pluginManager.cjs");
 const { PluginNetworkBroker } = require("./networkBroker.cjs");
 const { PluginByteStreamService, FEATURE: BYTE_STREAM_FEATURE } = require("./byteStreamService.cjs");
 const { PluginAIContextService, PLUGIN_AI_CONTEXT_FEATURES } = require("./ai/aiContextService.cjs");
+const { PluginAISidebarService, PLUGIN_AI_SIDEBAR_TOOLS_FEATURE } = require("./pluginAiSidebarService.cjs");
 const { PluginAITrustedHostAdapter } = require("./ai/trustedHostAdapter.cjs");
 const { PluginAgentService, PLUGIN_AGENT_FEATURE } = require("./agent/agentService.cjs");
 const { PluginAgentConversationStore } = require("./agent/conversationStore.cjs");
@@ -118,7 +119,7 @@ function createPluginHostService(options) {
   const paths = createPluginPaths(options.app.getPath("userData"));
   const appRoot = options.appRoot ?? options.app.getAppPath();
   const runtimeDirectory = options.runtimeDirectory ?? path.join(__dirname, "runtime");
-  const supportedFeatures = [...new Set(["network.host-byte-streams", "terminal.input-drafts", "terminal.selection-sharing", "appearance.theme-packs", "metadata.brand-icon", BYTE_STREAM_FEATURE, ...PLUGIN_AI_CONTEXT_FEATURES, PLUGIN_AGENT_FEATURE, NETWORK_CREDENTIAL_LEASE_FEATURE, HOST_INTERACTION_FEATURE, HOST_VAULT_FEATURE, HOST_VAULT_EXEC_FEATURE, HOST_VAULT_PROBE_FEATURE, HOST_VAULT_SFTP_FEATURE, HOST_PORT_FORWARD_FEATURE, HOST_SNIPPETS_FEATURE, TERMINAL_SESSION_CONTROL_FEATURE, WORKSPACE_TABS_FEATURE, VAULT_PAGES_FEATURE, TERMINAL_SIDEBAR_FEATURE, VIEW_BADGES_FEATURE, INTERACTIVE_COMMAND_FEATURE, ...(options.supportedFeatures ?? [])])]
+  const supportedFeatures = [...new Set(["network.host-byte-streams", "terminal.input-drafts", "terminal.selection-sharing", "appearance.theme-packs", "metadata.brand-icon", BYTE_STREAM_FEATURE, ...PLUGIN_AI_CONTEXT_FEATURES, PLUGIN_AI_SIDEBAR_TOOLS_FEATURE, PLUGIN_AGENT_FEATURE, NETWORK_CREDENTIAL_LEASE_FEATURE, HOST_INTERACTION_FEATURE, HOST_VAULT_FEATURE, HOST_VAULT_EXEC_FEATURE, HOST_VAULT_PROBE_FEATURE, HOST_VAULT_SFTP_FEATURE, HOST_PORT_FORWARD_FEATURE, HOST_SNIPPETS_FEATURE, TERMINAL_SESSION_CONTROL_FEATURE, WORKSPACE_TABS_FEATURE, VAULT_PAGES_FEATURE, TERMINAL_SIDEBAR_FEATURE, VIEW_BADGES_FEATURE, INTERACTIVE_COMMAND_FEATURE, ...(options.supportedFeatures ?? [])])]
     .filter((feature) => feature !== DIRECTORY_ENUMERATION_FEATURE);
   if (!supportedFeatures.includes("views.host-drawn")) supportedFeatures.push("views.host-drawn");
   if (typeof options.openPluginDirectoryHandle === "function") supportedFeatures.push(DIRECTORY_ENUMERATION_FEATURE);
@@ -136,6 +137,7 @@ function createPluginHostService(options) {
   let permissionDecisionHost;
   let browserRuntimePool;
   let viewBadgeService;
+  let aiSidebarService;
   let manager;
   const logService = new PluginLogService({ paths, electron: options.electron, resolveProvenance: options.resolvePluginProvenance ?? createPluginLogProvenanceResolver(database) });
   try {
@@ -388,6 +390,7 @@ function createPluginHostService(options) {
       runtimeResourceMonitor: quotaManager,
       runtimeCleanup: async (identity) => {
         viewBadgeService?.releaseRuntime(identity.runtimeId);
+        aiSidebarService?.releaseRuntime(identity.runtimeId);
         byteStreamService?.releaseRuntime(identity.runtimeId);
         aiContextService?.releaseRuntime(identity.runtimeId);
         agentService?.releaseRuntime(identity.runtimeId);
@@ -413,6 +416,14 @@ function createPluginHostService(options) {
       hostAdapter: aiHostAdapter,
     });
     aiContextService.registerRpcCapabilities(rpcRegistry);
+    aiSidebarService = new PluginAISidebarService({
+      runtimeSupervisor,
+      permissionEngine,
+      contributionService,
+      isLocked: options.isAppLocked,
+      subscribeLock: options.subscribeAppLock,
+    });
+    aiSidebarService.registerRpcCapabilities(rpcRegistry);
     agentHostAdapter = options.pluginAgentHostAdapter ?? new PluginAITrustedHostAdapter({
       getWindow: options.getInteractionWindow ?? (() => null),
       isLocked: options.isAppLocked, subscribeLock: options.subscribeAppLock,
@@ -446,6 +457,7 @@ function createPluginHostService(options) {
     const originalOnPluginDisabled = contributionService.onPluginDisabled.bind(contributionService);
     contributionService.onPluginDisabled = (pluginId) => {
       viewBadgeService?.clearPlugin(pluginId);
+      aiSidebarService?.clearPlugin(pluginId);
       aiContextService.releasePlugin(pluginId);
       agentService.releasePlugin(pluginId);
       capabilitiesService?.releasePlugin(pluginId);
@@ -603,6 +615,7 @@ function createPluginHostService(options) {
       beforeClose: async () => {
         try {
           viewBadgeService?.shutdown();
+          aiSidebarService?.shutdown();
           themeService.shutdown();
           capabilitiesService?.shutdown();
           hostVaultService.shutdown();
@@ -668,9 +681,11 @@ function createPluginHostService(options) {
       terminalDataPipelineService,
       hostDrawnViewHost,
       viewBadgeService,
+      aiSidebarService,
     };
   } catch (error) {
     try { viewBadgeService?.shutdown(); } catch {}
+    try { aiSidebarService?.shutdown(); } catch {}
     try { browserRuntimePool?.dispose(); } catch {}
     try { permissionDecisionHost?.shutdown(); } catch {}
     try { interactionService?.shutdown(); } catch {}

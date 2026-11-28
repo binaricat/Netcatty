@@ -40,6 +40,8 @@ import {
 } from './toolArtifacts/toolArtifactNames';
 import { parseVaultToolArtifact } from './toolArtifacts/vaultToolArtifact';
 import { VaultArtifactToolResult } from './toolArtifacts/VaultArtifactToolResult';
+import { parsePluginToolArtifact } from './toolArtifacts/pluginToolArtifact';
+import { PluginArtifactToolResult } from './toolArtifacts/PluginArtifactToolResult';
 import type { Host, Snippet, VaultNote } from '../../types';
 import {
   onApprovalRequest,
@@ -620,6 +622,15 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
               && displayedMessages[end].role === "assistant";
 
             const renderToolResultItem = (item: typeof toolResults[number]) => {
+              const pluginArtifact = parsePluginToolArtifact(item.name, item.content, item.isError);
+              if (pluginArtifact) {
+                return (
+                  <PluginArtifactToolResult
+                    key={item.toolCallId}
+                    artifact={pluginArtifact}
+                  />
+                );
+              }
               const artifactToolName = item.artifactToolName ?? item.name;
               const remoteDesktopArtifact = parseRemoteDesktopToolArtifact(
                 artifactToolName,
@@ -684,6 +695,31 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
               return (
                 <div key={`tool-group-${message.id}`} className="py-0.5">
                   {renderToolResultItem(toolResults[0])}
+                </div>
+              );
+            }
+
+            const pluginArtifactItems = toolResults
+              .map((item) => ({ item, artifact: parsePluginToolArtifact(item.name, item.content, item.isError) }))
+              .filter((entry): entry is { item: typeof toolResults[number]; artifact: NonNullable<ReturnType<typeof parsePluginToolArtifact>> } => entry.artifact !== null);
+            const nonPluginItems = toolResults.filter(
+              (item) => parsePluginToolArtifact(item.name, item.content, item.isError) === null,
+            );
+
+            if (pluginArtifactItems.length > 0) {
+              return (
+                <div key={`tool-group-${message.id}`} className="space-y-2 py-0.5">
+                  {nonPluginItems.length > 0 && (
+                    <ToolCallGroup
+                      count={nonPluginItems.length}
+                      defaultExpanded={!hasAssistantAfter}
+                    >
+                      {nonPluginItems.map(renderToolResultItem)}
+                    </ToolCallGroup>
+                  )}
+                  {pluginArtifactItems.map(({ item, artifact }) => (
+                    <PluginArtifactToolResult key={item.toolCallId} artifact={artifact} />
+                  ))}
                 </div>
               );
             }

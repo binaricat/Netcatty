@@ -38,7 +38,7 @@ export function resolveDisplayedPanelView(
   hasDraft: boolean,
   sessions: AISession[],
   persistedSessionId?: string | null,
-  scopeType: "terminal" | "workspace" = "workspace",
+  scopeType: "terminal" | "workspace" | "global" = "workspace",
   anchorChatId?: string | null,
   preferredHistorySessionId?: string | null,
 ): AIPanelView {

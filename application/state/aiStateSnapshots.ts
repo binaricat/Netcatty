@@ -116,6 +116,9 @@ function isScopeKeyActive(scopeKey: string, activeTargetIds: Set<string>) {
   const separatorIndex = scopeKey.indexOf(':');
   if (separatorIndex === -1) return true;
 
+  const scopeType = scopeKey.slice(0, separatorIndex);
+  if (scopeType === 'global') return true;
+
   const targetId = scopeKey.slice(separatorIndex + 1);
   if (!targetId) return true;
 

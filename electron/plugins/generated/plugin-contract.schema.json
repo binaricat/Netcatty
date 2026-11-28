@@ -2534,6 +2534,177 @@
     "PluginAIModelInvocationFeature": {
       "const": "ai.model-invocation"
     },
+    "PluginAISidebarToolsFeature": {
+      "const": "ai.sidebar-tools"
+    },
+    "PluginAIToolRisk": {
+      "type": "string",
+      "enum": [
+        "read",
+        "write"
+      ]
+    },
+    "PluginAIToolDefinition": {
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "inputSchema"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48,
+          "pattern": "^[a-z][a-z0-9_]{0,47}$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        },
+        "risk": {
+          "$ref": "#/$defs/PluginAIToolRisk"
+        },
+        "viewId": {
+          "$ref": "#/$defs/ContributionId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginAIRegisterToolsParams": {
+      "type": "object",
+      "required": [
+        "tools"
+      ],
+      "properties": {
+        "viewId": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "tools": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/PluginAIToolDefinition"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginAISuggestedPrompt": {
+      "type": "object",
+      "required": [
+        "label",
+        "prompt"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginAISetContextParams": {
+      "type": "object",
+      "required": [
+        "viewId"
+      ],
+      "properties": {
+        "viewId": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 120,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "subtitle": {
+          "type": "string",
+          "maxLength": 160,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 12288
+        },
+        "suggestedPrompts": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/PluginAISuggestedPrompt"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginAIOpenSidebarParams": {
+      "type": "object",
+      "properties": {
+        "viewId": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "autoSend": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginAICloseSidebarParams": {
+      "type": "object",
+      "properties": {
+        "viewId": {
+          "$ref": "#/$defs/ContributionId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginAIInvokeToolParams": {
+      "type": "object",
+      "required": [
+        "toolName",
+        "args"
+      ],
+      "properties": {
+        "toolName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48,
+          "pattern": "^[a-z][a-z0-9_]{0,47}$"
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        },
+        "viewId": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "chatSessionId": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
     "PluginSelectedContextFeature": {
       "const": "context.selected-read"
     },

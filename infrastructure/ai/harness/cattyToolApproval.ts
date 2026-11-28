@@ -1,6 +1,7 @@
 import type { ToolApprovalConfiguration } from 'ai';
 import { findHighRiskRemoteDesktopActionsFromInput } from '../../../domain/remoteDesktopActionCodec';
 import type { AIPermissionMode } from '../types';
+import type { PluginDynamicToolPolicy } from '../pluginAiSidebarTypes';
 import { requestApproval as defaultRequestApproval } from '../shared/approvalGate';
 import {
   HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID,
@@ -25,40 +26,52 @@ const policyByToolName = new Map<string, CattyToolPolicySpec>(
 function needsUserApproval(
   toolName: string,
   permissionMode: AIPermissionMode,
+  dynamicToolPolicies?: ReadonlyMap<string, PluginDynamicToolPolicy>,
 ): boolean {
   if (permissionMode !== 'confirm') return false;
   const spec = policyByToolName.get(toolName);
-  if (!spec) return false;
-  return spec.policy.write && !spec.policy.bypassesApproval;
+  if (spec) {
+    return spec.policy.write && !spec.policy.bypassesApproval;
+  }
+  const dynamic = dynamicToolPolicies?.get(toolName);
+  return Boolean(dynamic?.write);
 }
 
 export function buildCattyToolApproval(input: {
   permissionMode: AIPermissionMode;
   chatSessionId?: string;
+  dynamicToolPolicies?: ReadonlyMap<string, PluginDynamicToolPolicy>;
   requestApproval?: typeof defaultRequestApproval;
 }): ToolApprovalConfiguration<Record<string, never>, import('./cattyRuntimeContext').CattyRuntimeContext> {
-  const { permissionMode, chatSessionId, requestApproval = defaultRequestApproval } = input;
+  const {
+    permissionMode,
+    chatSessionId,
+    dynamicToolPolicies,
+    requestApproval = defaultRequestApproval,
+  } = input;
 
   return async ({ toolCall }) => {
     const spec = policyByToolName.get(toolCall.toolName);
-    if (!spec?.policy.write) {
+    const dynamicPolicy = !spec ? dynamicToolPolicies?.get(toolCall.toolName) : undefined;
+    const isWrite = Boolean(spec?.policy.write || dynamicPolicy?.write);
+    if (!isWrite) {
       return undefined;
     }
 
-    if (permissionMode === 'observer' && !spec.policy.bypassesObserverBlock) {
+    if (permissionMode === 'observer' && !spec?.policy.bypassesObserverBlock) {
       return { type: 'denied' as const, reason: 'Observer mode blocks write operations.' };
     }
 
     const args = (toolCall.input ?? {}) as Record<string, unknown>;
     const isRemoteDesktopAct =
       toolCall.toolName === 'remote_desktop_act'
-      || spec.capabilityId === 'harness.remote_desktop.act';
+      || spec?.capabilityId === 'harness.remote_desktop.act';
     const highRiskMatches = isRemoteDesktopAct
       ? findHighRiskRemoteDesktopActionsFromInput(args)
       : [];
     const requiresFreshHighRiskApproval = highRiskMatches.length > 0;
 
-    if (!requiresFreshHighRiskApproval && !needsUserApproval(toolCall.toolName, permissionMode)) {
+    if (!requiresFreshHighRiskApproval && !needsUserApproval(toolCall.toolName, permissionMode, dynamicToolPolicies)) {
       return undefined;
     }
 
@@ -70,7 +83,7 @@ export function buildCattyToolApproval(input: {
       undefined,
       requiresFreshHighRiskApproval
         ? HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID
-        : (spec.capabilityId ?? resolveCapabilityId(toolCall.toolName)),
+        : (spec?.capabilityId ?? dynamicPolicy?.capabilityId ?? resolveCapabilityId(toolCall.toolName)),
     );
 
     if (approved) {

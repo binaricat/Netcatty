@@ -369,6 +369,18 @@ function createPreloadApi(ctx) {
     pluginViewBadgesChangedListeners.add(callback);
     return () => pluginViewBadgesChangedListeners.delete(callback);
   },
+  getPluginAiSidebarState: () => ipcRenderer.invoke("netcatty:plugins:ai-sidebar-state"),
+  onPluginAiSidebarStateChanged: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("netcatty:plugins:ai-sidebar-state-changed", listener);
+    return () => ipcRenderer.removeListener("netcatty:plugins:ai-sidebar-state-changed", listener);
+  },
+  onPluginAiSidebarCommand: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("netcatty:plugins:ai-sidebar-command", listener);
+    return () => ipcRenderer.removeListener("netcatty:plugins:ai-sidebar-command", listener);
+  },
+  invokePluginAiTool: (payload) => ipcRenderer.invoke("netcatty:plugins:ai-sidebar-invoke-tool", payload),
   onPluginViewClosed: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("netcatty:plugins:view-closed", listener);

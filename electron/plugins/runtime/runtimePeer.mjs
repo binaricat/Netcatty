@@ -652,9 +652,119 @@ function createPluginContext(config, client, runtimeApi) {
       deadlineMs: forwardedDeadline(request?.timeoutMs, 300_000),
     }),
   };
-  const ai = Object.fromEntries(["openChat", "startTurn", "readTurn", "stopTurn", "closeChat"].map((operation) => [
+  const aiBase = Object.fromEntries(["openChat", "startTurn", "readTurn", "stopTurn", "closeChat"].map((operation) => [
     operation, (params) => client.request(`ai.${operation}`, params, operation === "readTurn" ? { deadlineMs: 65_000 } : {}),
   ]));
+  const ai = {
+    ...aiBase,
+    async registerTools(tools, executor, options = {}) {
+      if (!config.enabledFeatures?.includes("ai.sidebar-tools")) {
+        throw new PluginError("unsupported", "AI sidebar tools feature is not enabled");
+      }
+      if (!Array.isArray(tools)) {
+        throw new PluginError("invalid_argument", "Plugin AI tools must be an array");
+      }
+      if (typeof executor !== "function") {
+        throw new PluginError("invalid_argument", "Plugin AI tool executor must be a function");
+      }
+      const viewId = options?.viewId !== undefined
+        ? assertOwnedContributionId(config.pluginId, options.viewId, "Plugin view")
+        : undefined;
+      const scopeKey = viewId ?? "*";
+      const normalizedTools = tools.map((toolDef) => {
+        if (!toolDef || typeof toolDef !== "object" || Array.isArray(toolDef)) {
+          throw new PluginError("invalid_argument", "Plugin AI tool definition must be an object");
+        }
+        const toolViewId = toolDef.viewId !== undefined
+          ? assertOwnedContributionId(config.pluginId, toolDef.viewId, "Plugin view")
+          : undefined;
+        return {
+          ...toolDef,
+          ...(toolViewId ? { viewId: toolViewId } : {}),
+        };
+      });
+      await client.request("ai.registerTools", {
+        ...(viewId ? { viewId } : {}),
+        tools: normalizedTools,
+      });
+      const prevBucket = runtimeApi.aiToolBuckets.get(scopeKey);
+      if (prevBucket) {
+        for (const name of prevBucket.names) {
+          if (runtimeApi.aiToolExecutors.get(name)?.scopeKey === scopeKey) {
+            runtimeApi.aiToolExecutors.delete(name);
+          }
+        }
+      }
+      const names = normalizedTools.map((toolDef) => toolDef.name);
+      const token = Symbol("aiToolRegistration");
+      runtimeApi.aiToolBuckets.set(scopeKey, { token, names });
+      for (const name of names) {
+        runtimeApi.aiToolExecutors.set(name, { scopeKey, token, executor });
+      }
+      let disposed = false;
+      return Object.freeze({
+        dispose() {
+          if (disposed) return;
+          disposed = true;
+          const current = runtimeApi.aiToolBuckets.get(scopeKey);
+          if (current?.token !== token) return;
+          runtimeApi.aiToolBuckets.delete(scopeKey);
+          for (const name of names) {
+            if (runtimeApi.aiToolExecutors.get(name)?.token === token) {
+              runtimeApi.aiToolExecutors.delete(name);
+            }
+          }
+          void client.request("ai.registerTools", {
+            ...(viewId ? { viewId } : {}),
+            tools: [],
+          }).catch(() => {});
+        },
+      });
+    },
+    setContext(params) {
+      if (!config.enabledFeatures?.includes("ai.sidebar-tools")) {
+        return Promise.reject(new PluginError("unsupported", "AI sidebar tools feature is not enabled"));
+      }
+      if (!params || typeof params !== "object" || Array.isArray(params)) {
+        return Promise.reject(new PluginError("invalid_argument", "Plugin AI context must be an object"));
+      }
+      const viewId = assertOwnedContributionId(config.pluginId, params.viewId, "Plugin view");
+      return client.request("ai.setContext", { ...params, viewId }).then(() => undefined);
+    },
+    clearContext(viewId) {
+      if (!config.enabledFeatures?.includes("ai.sidebar-tools")) {
+        return Promise.reject(new PluginError("unsupported", "AI sidebar tools feature is not enabled"));
+      }
+      const ownedViewId = assertOwnedContributionId(config.pluginId, viewId, "Plugin view");
+      return client.request("ai.setContext", { viewId: ownedViewId }).then(() => undefined);
+    },
+    openSidebar(params = {}) {
+      if (!config.enabledFeatures?.includes("ai.sidebar-tools")) {
+        return Promise.reject(new PluginError("unsupported", "AI sidebar tools feature is not enabled"));
+      }
+      const normalized = params && typeof params === "object" && !Array.isArray(params) ? params : {};
+      const viewId = normalized.viewId !== undefined
+        ? assertOwnedContributionId(config.pluginId, normalized.viewId, "Plugin view")
+        : undefined;
+      return client.request("ai.openSidebar", {
+        ...normalized,
+        ...(viewId ? { viewId } : {}),
+      }).then(() => undefined);
+    },
+    closeSidebar(params = {}) {
+      if (!config.enabledFeatures?.includes("ai.sidebar-tools")) {
+        return Promise.reject(new PluginError("unsupported", "AI sidebar tools feature is not enabled"));
+      }
+      const normalized = params && typeof params === "object" && !Array.isArray(params) ? params : {};
+      const viewId = normalized.viewId !== undefined
+        ? assertOwnedContributionId(config.pluginId, normalized.viewId, "Plugin view")
+        : undefined;
+      return client.request("ai.closeSidebar", {
+        ...normalized,
+        ...(viewId ? { viewId } : {}),
+      }).then(() => undefined);
+    },
+  };
   const selectedContext = {
     list: (params) => client.request("context.selected.list", params),
     read: (params) => client.request("context.selected.read", params),
@@ -915,6 +1025,8 @@ export async function startPluginRuntime({
   const runtimeApi = {
     commandHandlers: new Map(),
     providerHandlers: new Map(),
+    aiToolBuckets: new Map(),
+    aiToolExecutors: new Map(),
     settingsChanged: createEmitter(),
     environmentChanged: createEmitter(),
     terminalEvents: createEmitter(),
@@ -983,6 +1095,27 @@ export async function startPluginRuntime({
       const handler = runtimeApi.commandHandlers.get(command);
       if (!handler) throw new PluginError("failed_precondition", `Plugin command has no registered handler: ${command}`);
       return await handler(message.params?.args, message.params?.invocation);
+    }
+    if (message.method === "plugin.ai.invokeTool") {
+      if (!activated || !context) throw new PluginError("failed_precondition", "Plugin is not activated");
+      const toolName = message.params?.toolName;
+      if (typeof toolName !== "string" || !/^[a-z][a-z0-9_]{0,47}$/u.test(toolName)) {
+        throw new PluginError("invalid_argument", "Plugin AI tool name is invalid");
+      }
+      const entry = runtimeApi.aiToolExecutors.get(toolName);
+      if (!entry || typeof entry.executor !== "function") {
+        throw new PluginError("not_found", `Plugin AI tool has no registered executor: ${toolName}`);
+      }
+      const rawArgs = message.params?.args;
+      const args = rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)
+        ? freezeRuntimeJson(rawArgs)
+        : Object.freeze({});
+      const meta = Object.freeze({
+        ...(typeof message.params?.viewId === "string" ? { viewId: message.params.viewId } : {}),
+        ...(typeof message.params?.chatSessionId === "string" ? { chatSessionId: message.params.chatSessionId } : {}),
+        cancellationToken,
+      });
+      return await entry.executor(toolName, args, meta);
     }
     if (message.method === "provider.invoke") {
       if (!activated || !context) throw new PluginError("failed_precondition", "Plugin is not activated");
