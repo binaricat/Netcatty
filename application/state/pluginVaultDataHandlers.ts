@@ -10,7 +10,11 @@ import { STORAGE_KEY_PORT_FORWARDING } from '../../infrastructure/config/storage
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import { preparePluginHostStream } from '../../infrastructure/services/pluginHostStreamService';
-import { startPortForward, stopAndCleanupRule } from '../../infrastructure/services/portForwardingService';
+import {
+  getActiveConnection,
+  startPortForward,
+  stopAndCleanupRule,
+} from '../../infrastructure/services/portForwardingService';
 import { captureScreenSnapshot } from '../../infrastructure/scripts/screenSnapshotRegistry';
 import { activeTabStore } from './activeTabStore';
 import {
@@ -19,11 +23,63 @@ import {
   type AppVaultRuntime,
 } from './appRuntimeBridge';
 import type { PluginHostActionResources } from './pluginHostActionResources';
+import {
+  applyPortForwardingRuntimeStatus,
+  getPortForwardingRuntimeRules,
+} from './usePortForwardingState';
+
+export interface PluginPortForwardRuntimeDeps {
+  startPortForward?: typeof startPortForward;
+  stopAndCleanupRule?: typeof stopAndCleanupRule;
+  getActiveConnection?: typeof getActiveConnection;
+  getRuntimeRules?: typeof getPortForwardingRuntimeRules;
+  applyRuntimeStatus?: typeof applyPortForwardingRuntimeStatus;
+}
 
 export type PluginVaultDataContext = {
   getVault: () => AppVaultRuntime & ReturnType<AppVaultRuntime['readCurrentHostActionState']>;
   resources: PluginHostActionResources;
+  portForwardRuntime?: PluginPortForwardRuntimeDeps;
 };
+
+type PortForwardSummaryStatus = 'inactive' | 'connecting' | 'active' | 'error';
+
+function normalizePortForwardSummaryStatus(
+  status: PortForwardingRule['status'] | undefined,
+): PortForwardSummaryStatus {
+  if (status === 'active' || status === 'connecting' || status === 'error' || status === 'inactive') {
+    return status;
+  }
+  return 'inactive';
+}
+
+function overlayPortForwardRuntimeStatus(
+  rule: PortForwardingRule,
+  runtime?: PluginPortForwardRuntimeDeps,
+): PortForwardingRule {
+  const resolveConnection = runtime?.getActiveConnection ?? getActiveConnection;
+  const liveConn = resolveConnection(rule.id);
+  if (liveConn) {
+    return {
+      ...rule,
+      status: normalizePortForwardSummaryStatus(liveConn.status),
+      error: liveConn.error,
+    };
+  }
+  const runtimeRules = (runtime?.getRuntimeRules ?? getPortForwardingRuntimeRules)();
+  const runtimeRule = runtimeRules.find((candidate) => candidate.id === rule.id);
+  if (runtimeRule && (runtimeRule.status === 'active' || runtimeRule.status === 'connecting' || runtimeRule.status === 'error')) {
+    return {
+      ...rule,
+      status: runtimeRule.status,
+      error: runtimeRule.error,
+    };
+  }
+  return {
+    ...rule,
+    status: normalizePortForwardSummaryStatus(rule.status),
+  };
+}
 
 function readPortForwardRules(): PortForwardingRule[] {
   const raw = localStorageAdapter.read<PortForwardingRule[]>(STORAGE_KEY_PORT_FORWARDING);
@@ -164,7 +220,9 @@ export async function handlePluginVaultDataRequest(
     }
 
     case 'portForward.list': {
-      const rules = readPortForwardRules().slice(0, 500);
+      const rules = readPortForwardRules()
+        .slice(0, 500)
+        .map((rule) => overlayPortForwardRuntimeStatus(rule, ctx.portForwardRuntime));
       return { rules: rules.map((rule) => summarizePortForwardRule(rule, vault.hosts)) };
     }
 
@@ -199,24 +257,42 @@ export async function handlePluginVaultDataRequest(
       const settings = getAppSettingsRuntime();
       const resolvedHost = effectiveHost(rawHost, vault);
       const resolvedHosts = vault.hosts.map((h) => effectiveHost(h, vault));
-      const res = await startPortForward(
+      const pfStart = ctx.portForwardRuntime?.startPortForward ?? startPortForward;
+      const pfApplyStatus = ctx.portForwardRuntime?.applyRuntimeStatus ?? applyPortForwardingRuntimeStatus;
+      const pfGetConnection = ctx.portForwardRuntime?.getActiveConnection ?? getActiveConnection;
+      let observedStatus: PortForwardingRule['status'] | undefined;
+      let observedError: string | undefined;
+      const res = await pfStart(
         rule,
         resolvedHost,
         resolvedHosts,
         vault.keys,
         vault.identities,
         (status, error) => {
-          const latest = readPortForwardRules();
-          writePortForwardRules(latest.map((item) => (item.id === ruleId ? { ...item, status, error } : item)));
+          observedStatus = status;
+          observedError = error;
+          pfApplyStatus(ruleId, status, error);
         },
         false,
         settings?.terminalSettings,
         vault.knownHosts,
       );
-      const updated = readPortForwardRules().find((item) => item.id === ruleId) ?? rule;
+      const liveConn = pfGetConnection(ruleId);
+      const fallbackStatus: PortForwardSummaryStatus = res.success ? 'active' : 'error';
+      const finalStatus = normalizePortForwardSummaryStatus(liveConn?.status ?? observedStatus ?? fallbackStatus);
+      const finalError = finalStatus === 'active'
+        ? undefined
+        : (liveConn?.error ?? observedError ?? (res.error ? String(res.error) : undefined));
+      pfApplyStatus(ruleId, finalStatus, finalError);
+      const latestRule = readPortForwardRules().find((item) => item.id === ruleId) ?? rule;
+      const liveRule: PortForwardingRule = {
+        ...latestRule,
+        status: finalStatus,
+        error: finalError,
+      };
       return {
         ok: Boolean(res.success),
-        rule: summarizePortForwardRule(updated, vault.hosts),
+        rule: summarizePortForwardRule(liveRule, vault.hosts),
         ...(res.error ? { error: String(res.error).slice(0, 512) } : {}),
       };
     }
@@ -226,11 +302,15 @@ export async function handlePluginVaultDataRequest(
       const rules = readPortForwardRules();
       const rule = rules.find((item) => item.id === ruleId);
       if (!rule) return { ok: false, error: 'Port forwarding rule not found' };
-      await stopAndCleanupRule(ruleId);
+      const pfStop = ctx.portForwardRuntime?.stopAndCleanupRule ?? stopAndCleanupRule;
+      const pfApplyStatus = ctx.portForwardRuntime?.applyRuntimeStatus ?? applyPortForwardingRuntimeStatus;
+      await pfStop(ruleId);
+      pfApplyStatus(ruleId, 'inactive', undefined);
       const latestRules = readPortForwardRules();
-      const nextRules = latestRules.map((item) => (item.id === ruleId ? { ...item, status: 'inactive' as const, error: undefined } : item));
-      writePortForwardRules(nextRules);
-      const updated = nextRules.find((item) => item.id === ruleId) ?? rule;
+      const updated = overlayPortForwardRuntimeStatus(
+        latestRules.find((item) => item.id === ruleId) ?? { ...rule, status: 'inactive', error: undefined },
+        ctx.portForwardRuntime,
+      );
       return { ok: true, rule: summarizePortForwardRule(updated, vault.hosts) };
     }
 
@@ -240,7 +320,8 @@ export async function handlePluginVaultDataRequest(
       if (!rules.some((item) => item.id === ruleId)) {
         return { ok: false, error: 'Port forwarding rule not found' };
       }
-      await stopAndCleanupRule(ruleId).catch(() => {});
+      const pfStop = ctx.portForwardRuntime?.stopAndCleanupRule ?? stopAndCleanupRule;
+      await pfStop(ruleId).catch(() => {});
       const latestRules = readPortForwardRules();
       writePortForwardRules(latestRules.filter((item) => item.id !== ruleId));
       return { ok: true };

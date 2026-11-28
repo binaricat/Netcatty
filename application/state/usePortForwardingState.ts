@@ -242,6 +242,9 @@ const persistPortForwardingConfig = (rules: PortForwardingRule[]) => {
   );
 };
 
+/** Read-only snapshot of the in-memory runtime port-forwarding rules projection. */
+export const getPortForwardingRuntimeRules = (): readonly PortForwardingRule[] => globalRules;
+
 /** Persist configuration only — never write runtime phases to storage. */
 const setGlobalRules = (newRules: PortForwardingRule[]) => {
   globalRules = normalizeVaultOrder(newRules);

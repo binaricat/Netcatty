@@ -1,7 +1,13 @@
 "use strict";
 
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { PluginDatabase } = require("./database.cjs");
+const { PluginPermissionEngine } = require("./permissionEngine.cjs");
+const { PluginHostRpcRegistry } = require("./hostRpcRegistry.cjs");
 const { PluginAISidebarService, buildQualifiedToolName, MAX_TOOLS_PER_PLUGIN } = require("./pluginAiSidebarService.cjs");
 
 const manifest = Object.freeze({
@@ -176,4 +182,96 @@ test("PluginAISidebarService manages context, sidebar commands, lock, and runtim
   assert.throws(() => service.closeSidebar({}, undeclaredCtx), /ai\.sidebar-tools/i);
 
   service.shutdown();
+});
+
+test("ai.openSidebar enforces active ai.invoke approval for autoSend: true while deferring decision for open/prefill", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-ai-sidebar-auth-"));
+  const database = new PluginDatabase(path.join(root, "plugins.db"));
+  const authManifest = Object.freeze({
+    ...manifest,
+    publisher: "example",
+    permissions: { optional: ["ai.invoke"] },
+  });
+  database.installVersion({
+    pluginId: authManifest.id,
+    version: authManifest.version,
+    manifest: authManifest,
+    archiveSha256: "b".repeat(64),
+    packageRelativePath: "test/pkg",
+  });
+  database.setEnabled(authManifest.id, true);
+
+  let approve = false;
+  const decisionRequests = [];
+  const engine = new PluginPermissionEngine({
+    database,
+    requestDecision: async (request) => {
+      decisionRequests.push(request);
+      return {
+        requestId: request.requestId,
+        decision: approve ? "allow" : "deny",
+        ...(approve ? { scope: "once" } : {}),
+      };
+    },
+  });
+  const registry = new PluginHostRpcRegistry();
+  registry.use(engine.createMiddleware());
+  const service = new PluginAISidebarService({ permissionEngine: engine });
+  service.registerRpcCapabilities(registry);
+  const commands = [];
+  service.onDidEmitCommand((cmd) => commands.push(cmd));
+
+  t.after(() => {
+    service.shutdown();
+    engine.shutdown();
+    database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  engine.setMode({ id: authManifest.id, manifest: authManifest }, "ai.invoke", "ask");
+  const runtimeCtx = {
+    pluginId: authManifest.id,
+    pluginVersion: authManifest.version,
+    runtimeId: "rt-auth",
+    runtimeKind: "browser",
+    manifest: authManifest,
+  };
+  const handlers = registry.createRoutes(runtimeCtx).requestHandlers;
+
+  // 1. Opening/prefilling without autoSend uses deferDecision: true (no Ask prompt)
+  await handlers["ai.openSidebar"]({ prompt: "hello", autoSend: false }, {});
+  assert.equal(decisionRequests.length, 0);
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].prompt, "hello");
+  assert.equal(commands[0].autoSend, undefined);
+
+  // 2. autoSend: true does NOT defer decision: prompts on Ask and rejects when denied
+  approve = false;
+  await assert.rejects(
+    handlers["ai.openSidebar"]({ prompt: "hello", autoSend: true }, {}),
+    /denied/i,
+  );
+  assert.equal(decisionRequests.length, 1);
+  assert.equal(decisionRequests[0].permission, "ai.invoke");
+  assert.equal(commands.length, 1, "denied autoSend must not emit a sidebar command");
+
+  // 3. When user approves Ask prompt, autoSend: true proceeds
+  approve = true;
+  await handlers["ai.openSidebar"]({ prompt: "run query", autoSend: true }, {});
+  assert.equal(decisionRequests.length, 2);
+  assert.equal(commands.length, 2);
+  assert.equal(commands[1].prompt, "run query");
+  assert.equal(commands[1].autoSend, true);
+
+  // 4. Empty prompt with autoSend: true strips autoSend defensively
+  await handlers["ai.openSidebar"]({ prompt: "   ", autoSend: true }, {});
+  assert.equal(commands.length, 3);
+  assert.equal(commands[2].autoSend, undefined);
+
+  // 5. Explicit Deny blocks even non-autoSend openSidebar
+  engine.setMode({ id: authManifest.id, manifest: authManifest }, "ai.invoke", "deny");
+  await assert.rejects(
+    handlers["ai.openSidebar"]({ prompt: "blocked", autoSend: false }, {}),
+    /disabled|denied/i,
+  );
 });
