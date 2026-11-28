@@ -75,6 +75,9 @@ test("runtime-scoped protocol serves only registered package and host resources"
 
   const page = await handler({ method: "GET", url: registration.url });
   assert.equal(page.status, 200);
+  const pageHtml = await page.text();
+  assert.match(pageHtml, /id="netcatty-plugin-config"/);
+  assert.match(pageHtml, /"pluginId":"com\.example\.test"/);
   assert.doesNotMatch(page.headers.get("content-security-policy"), /unsafe-inline/);
   assert.match(page.headers.get("content-security-policy"), /nonce-/);
   assert.match(page.headers.get("content-security-policy"), /worker-src 'none'/);

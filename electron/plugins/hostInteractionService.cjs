@@ -50,6 +50,13 @@ function assertInteractionRequest(params) {
   if (params.kind === "quickPick" && new Set(params.items.map((item) => item.id)).size !== params.items.length) {
     throw fail("invalidArgument", "Host interaction choice IDs must be unique");
   }
+  if (params.kind === "openExternalUrl") {
+    let parsed;
+    try { parsed = new URL(params.url); } catch { throw fail("invalidArgument", "External URL is invalid"); }
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || !parsed.hostname) {
+      throw fail("invalidArgument", "Only HTTPS URLs without credentials may be opened");
+    }
+  }
   return Object.freeze(structuredClone(params));
 }
 function interactionAuthorization(params, terminalTarget) {
@@ -88,6 +95,7 @@ class PluginHostInteractionService {
     this.quotaManager = options.quotaManager;
     this.clipboard = options.clipboard;
     this.dialog = options.dialog ?? tryLoadElectronDialog();
+    this.shell = options.shell ?? null;
     this.getWindow = options.getWindow ?? (() => null);
     this.isLocked = options.isLocked ?? (() => true);
     this.clock = options.clock ?? Date.now;
@@ -774,7 +782,13 @@ class PluginHostInteractionService {
       } else if (entry.params.kind === "terminal.selection.read") {
         if (entry.phase !== "preview" || typeof entry.previewText !== "string") throw fail("failedPrecondition", "Terminal selection was not previewed");
       } else if (entry.params.kind === "clipboard.read") value = entry.previewText;
-      else value = true;
+      else if (entry.params.kind === "openExternalUrl") {
+        if (typeof this.shell?.openExternal !== "function") {
+          throw fail("unavailable", "External URL opener is unavailable");
+        }
+        await this.shell.openExternal(entry.params.url);
+        value = true;
+      } else value = true;
       this.#audit(entry, entry.params.kind === "terminal.input.propose" ? "draft-reviewed" : entry.params.kind === "clipboard.write" ? "copy-confirmed" : "share-confirmed");
       if (entry.params.kind === "terminal.selection.read") {
         value = Object.freeze({ text: entry.previewText, ...this.terminalSelection.issue(entry.terminalTarget, entry.context) });

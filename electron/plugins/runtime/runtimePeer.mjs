@@ -475,6 +475,8 @@ function createPluginContext(config, client, runtimeApi) {
   const ui = {
     quickPick: (title, items) => interact({ kind: "quickPick", title, items }),
     input: (title, initialValue) => interact({ kind: "input", title, ...(initialValue === undefined ? {} : { initialValue }) }),
+    confirm: (options) => interact({ kind: "confirm", ...options }).then((value) => value === true),
+    openExternalUrl: (options) => interact({ kind: "openExternalUrl", ...options }).then((value) => value === true),
     openFile: async (options = {}) => {
       const result = await client.request("ui.openFile", {
         ...(options?.title === undefined ? {} : { title: options.title }),
@@ -530,11 +532,112 @@ function createPluginContext(config, client, runtimeApi) {
     writeFileHandle: writeFileHandleAll,
     closeFileHandle: (handleId) => client.request("ui.closeFileHandle", { handleId }).then(() => undefined),
   };
+  const vaultSftp = {
+    listDir: (params, cancellationToken) => {
+      if (!config.enabledFeatures?.includes("vault.host-sftp")) return Promise.reject(new PluginError("unsupported", "Host SFTP feature is not enabled"));
+      return client.request("vault.sftp.listDir", params, { cancellationToken, deadlineMs: 35_000 });
+    },
+    stat: (params, cancellationToken) => {
+      if (!config.enabledFeatures?.includes("vault.host-sftp")) return Promise.reject(new PluginError("unsupported", "Host SFTP feature is not enabled"));
+      return client.request("vault.sftp.stat", params, { cancellationToken, deadlineMs: 35_000 });
+    },
+    readFile: (params, cancellationToken) => {
+      if (!config.enabledFeatures?.includes("vault.host-sftp")) return Promise.reject(new PluginError("unsupported", "Host SFTP feature is not enabled"));
+      return client.request("vault.sftp.readFile", params, { cancellationToken, deadlineMs: 35_000 });
+    },
+    writeFile: (params, cancellationToken) => {
+      if (!config.enabledFeatures?.includes("vault.host-sftp")) return Promise.reject(new PluginError("unsupported", "Host SFTP feature is not enabled"));
+      return client.request("vault.sftp.writeFile", params, { cancellationToken, deadlineMs: 35_000 });
+    },
+    mkdir: (params, cancellationToken) => {
+      if (!config.enabledFeatures?.includes("vault.host-sftp")) return Promise.reject(new PluginError("unsupported", "Host SFTP feature is not enabled"));
+      return client.request("vault.sftp.mkdir", params, { cancellationToken, deadlineMs: 35_000 });
+    },
+    delete: (params, cancellationToken) => {
+      if (!config.enabledFeatures?.includes("vault.host-sftp")) return Promise.reject(new PluginError("unsupported", "Host SFTP feature is not enabled"));
+      return client.request("vault.sftp.delete", params, { cancellationToken, deadlineMs: 35_000 });
+    },
+  };
   const vault = {
     ...Object.fromEntries(["selectHosts", "requestHostDraft", "requestConnect"].map((method) => [
       method, (params) => client.request(`vault.${method}`, params, { deadlineMs: PLUGIN_HOST_INTERACTION_LIMITS.timeoutMs }),
     ])),
+    resolveHostBindings: (params) => client.request("vault.resolveHostBindings", params, { deadlineMs: 20_000 }),
+    execHostCommand: (params, cancellationToken) => {
+      if (!config.enabledFeatures?.includes("vault.host-exec")) {
+        return Promise.reject(new PluginError("unsupported", "Host SSH exec feature is not enabled"));
+      }
+      const timeoutMs = Number.isSafeInteger(params?.timeoutMs) ? params.timeoutMs : 10_000;
+      return client.request("vault.execHostCommand", params, {
+        cancellationToken,
+        deadlineMs: Math.min(Math.max(timeoutMs, 1_000) + 20_000, 50_000),
+      });
+    },
+    probeHost: (params, cancellationToken) => {
+      if (!config.enabledFeatures?.includes("vault.host-probe")) {
+        return Promise.reject(new PluginError("unsupported", "Host probe feature is not enabled"));
+      }
+      const timeoutMs = Number.isSafeInteger(params?.timeoutMs) ? params.timeoutMs : 5_000;
+      return client.request("vault.probeHost", params, {
+        cancellationToken,
+        deadlineMs: Math.min(Math.max(timeoutMs, 1_000) + 10_000, 25_000),
+      });
+    },
+    sftp: vaultSftp,
+    listGroups: () => client.request("vault.listGroups", {}),
+    updateHostNotes: (params) => client.request("vault.updateHostNotes", params),
+    updateHostTags: (params) => client.request("vault.updateHostTags", params),
     revokeHostBinding: (hostBindingToken) => client.request("vault.revokeHostBinding", { hostBindingToken }),
+  };
+  const portForward = {
+    list: () => {
+      if (!config.enabledFeatures?.includes("vault.port-forwarding")) return Promise.reject(new PluginError("unsupported", "Port forwarding feature is not enabled"));
+      return client.request("portForward.list", {});
+    },
+    create: (params) => {
+      if (!config.enabledFeatures?.includes("vault.port-forwarding")) return Promise.reject(new PluginError("unsupported", "Port forwarding feature is not enabled"));
+      return client.request("portForward.create", params);
+    },
+    start: (params) => {
+      if (!config.enabledFeatures?.includes("vault.port-forwarding")) return Promise.reject(new PluginError("unsupported", "Port forwarding feature is not enabled"));
+      return client.request("portForward.start", params, { deadlineMs: 30_000 });
+    },
+    stop: (params) => {
+      if (!config.enabledFeatures?.includes("vault.port-forwarding")) return Promise.reject(new PluginError("unsupported", "Port forwarding feature is not enabled"));
+      return client.request("portForward.stop", params);
+    },
+    delete: (params) => {
+      if (!config.enabledFeatures?.includes("vault.port-forwarding")) return Promise.reject(new PluginError("unsupported", "Port forwarding feature is not enabled"));
+      return client.request("portForward.delete", params);
+    },
+  };
+  const snippets = {
+    list: (params) => {
+      if (!config.enabledFeatures?.includes("vault.snippets")) return Promise.reject(new PluginError("unsupported", "Snippets feature is not enabled"));
+      return client.request("snippets.list", params ?? {});
+    },
+    get: (params) => {
+      if (!config.enabledFeatures?.includes("vault.snippets")) return Promise.reject(new PluginError("unsupported", "Snippets feature is not enabled"));
+      return client.request("snippets.get", params);
+    },
+    save: (params) => {
+      if (!config.enabledFeatures?.includes("vault.snippets")) return Promise.reject(new PluginError("unsupported", "Snippets feature is not enabled"));
+      return client.request("snippets.save", params);
+    },
+    delete: (params) => {
+      if (!config.enabledFeatures?.includes("vault.snippets")) return Promise.reject(new PluginError("unsupported", "Snippets feature is not enabled"));
+      return client.request("snippets.delete", params);
+    },
+  };
+  const workspace = {
+    listTabs: () => {
+      if (!config.enabledFeatures?.includes("workspace.tabs")) return Promise.reject(new PluginError("unsupported", "Workspace tabs feature is not enabled"));
+      return client.request("workspace.listTabs", {});
+    },
+    focusTab: (params) => {
+      if (!config.enabledFeatures?.includes("workspace.tabs")) return Promise.reject(new PluginError("unsupported", "Workspace tabs feature is not enabled"));
+      return client.request("workspace.focusTab", params);
+    },
   };
   const clipboard = {
     readText: (title) => interact({ kind: "clipboard.read", title }),
@@ -680,6 +783,25 @@ function createPluginContext(config, client, runtimeApi) {
       scopeId,
       state,
     }).then(() => undefined),
+    setBadge(viewOrBadge, maybeBadge) {
+      let params;
+      if (typeof viewOrBadge === "string") {
+        const viewId = assertOwnedContributionId(config.pluginId, viewOrBadge, "Plugin view");
+        if (maybeBadge === null || maybeBadge === undefined) {
+          params = { viewId, count: null, text: null, dot: false, tooltip: null };
+        } else if (typeof maybeBadge === "object" && !Array.isArray(maybeBadge)) {
+          params = { ...maybeBadge, viewId };
+        } else {
+          return Promise.reject(new PluginError("invalid_argument", "Plugin view badge must be an object or null"));
+        }
+      } else if (viewOrBadge && typeof viewOrBadge === "object" && !Array.isArray(viewOrBadge)) {
+        const viewId = assertOwnedContributionId(config.pluginId, viewOrBadge.viewId, "Plugin view");
+        params = { ...viewOrBadge, viewId };
+      } else {
+        return Promise.reject(new PluginError("invalid_argument", "Plugin view badge must be an object"));
+      }
+      return client.request("views.setBadge", params).then(() => undefined);
+    },
   };
   const providers = {
     register(providerId, kind, handler) {
@@ -708,6 +830,22 @@ function createPluginContext(config, client, runtimeApi) {
     proposeInput: (handle, text, title) => {
       if (!config.enabledFeatures?.includes("terminal.input-drafts")) return Promise.reject(new Error("Terminal input drafts are unsupported"));
       return interact({ kind: "terminal.input.propose", handle, text, title }).then((value) => value === true);
+    },
+    listSessions: () => {
+      if (!config.enabledFeatures?.includes("terminal.session-control")) return Promise.reject(new PluginError("unsupported", "Terminal session control is not enabled"));
+      return client.request("terminals.listSessions", {});
+    },
+    readScreen: (params) => {
+      if (!config.enabledFeatures?.includes("terminal.session-control")) return Promise.reject(new PluginError("unsupported", "Terminal session control is not enabled"));
+      return client.request("terminals.readScreen", params);
+    },
+    sendInput: (params) => {
+      if (!config.enabledFeatures?.includes("terminal.session-control")) return Promise.reject(new PluginError("unsupported", "Terminal session control is not enabled"));
+      return client.request("terminals.sendInput", params);
+    },
+    openLocal: () => {
+      if (!config.enabledFeatures?.includes("terminal.session-control")) return Promise.reject(new PluginError("unsupported", "Terminal session control is not enabled"));
+      return client.request("terminals.openLocal", {});
     },
     onDidChange: runtimeApi.terminalEvents.event,
   };
@@ -749,6 +887,9 @@ function createPluginContext(config, client, runtimeApi) {
     selectedContext,
     ui,
     vault,
+    portForward,
+    snippets,
+    workspace,
     clipboard,
     filesystem,
     companions,

@@ -11,11 +11,20 @@ export function useHostDrawnPluginView({ viewId, version, slot, active, context,
 }) {
   const contextKey = JSON.stringify(context);
   const key = JSON.stringify([viewId, version, slot, contextKey]);
+  const scopeId = typeof window !== 'undefined'
+    ? resolvePluginViewWindowScope({ pathname: window.location.pathname, search: window.location.search, hash: `${window.location.hash}|plugin-slot:${slot}` })
+    : '';
+  const sessionKey = scopeId ? JSON.stringify([scopeId, key]) : '';
+  const cachedSession = active && sessionKey ? pluginViewSessions.peek(sessionKey) : null;
   const [state, setState] = useState<{
     key: string;
     snapshot: PluginViewSnapshot;
     image?: (path: string) => Promise<string>;
-  }>({ key: '', snapshot: initial() });
+  }>(() => (
+    cachedSession
+      ? { key, snapshot: cachedSession.getSnapshot(), image: cachedSession.image }
+      : { key: '', snapshot: initial() }
+  ));
   const [hidden, setHidden] = useState(false);
   const unavailableRef = useRef(unavailable); unavailableRef.current = unavailable;
   const sessionRef = useRef<{ key: string; image(path: string): Promise<string>; send(event: HostDrawnViewEvent): void } | null>(null);
@@ -23,9 +32,9 @@ export function useHostDrawnPluginView({ viewId, version, slot, active, context,
     if (!active) return;
     const bridge = netcattyBridge.get();
     if (!bridge) { unavailableRef.current(); return; }
-    const scopeId = resolvePluginViewWindowScope({ pathname: window.location.pathname, search: window.location.search, hash: `${window.location.hash}|plugin-slot:${slot}` });
+    const resolvedScopeId = resolvePluginViewWindowScope({ pathname: window.location.pathname, search: window.location.search, hash: `${window.location.hash}|plugin-slot:${slot}` });
     try {
-      const session = pluginViewSessions.acquire(JSON.stringify([scopeId, key]), bridge, { viewId, scopeId, context: JSON.parse(contextKey) });
+      const session = pluginViewSessions.acquire(JSON.stringify([resolvedScopeId, key]), bridge, { viewId, scopeId: resolvedScopeId, context: JSON.parse(contextKey) });
       sessionRef.current = { key, send: session.send, image: session.image };
       const update = () => { const snapshot = session.getSnapshot(); setState({ key, snapshot, image: session.image }); if (snapshot.error) unavailableRef.current(); };
       const stop = session.subscribe(update); update(); setHidden(false);
@@ -37,11 +46,18 @@ export function useHostDrawnPluginView({ viewId, version, slot, active, context,
     const session = sessionRef.current;
     return active && session?.key === key ? session.image(path) : Promise.reject(new Error('Plugin view unavailable'));
   }, [active, key]);
-  const loadImage = active && state.key === key && state.image ? state.image : fallbackLoadImage;
+  const resolvedSnapshot = state.key === key
+    ? state.snapshot
+    : cachedSession
+      ? cachedSession.getSnapshot()
+      : initial();
+  const loadImage = active && state.key === key && state.image
+    ? state.image
+    : (cachedSession?.image ?? fallbackLoadImage);
   const sendEvent = useCallback((event: HostDrawnViewEvent) => {
     const session = sessionRef.current; if (active && session?.key === key) session.send(event);
   }, [active, key]);
   // A newly selected plugin must never receive values from the previous tree,
   // even during the render before effect cleanup and the next activation.
-  return { ...(state.key === key ? state.snapshot : initial()), visible: active && !hidden, loadImage, sendEvent };
+  return { ...resolvedSnapshot, visible: active && !hidden, loadImage, sendEvent };
 }

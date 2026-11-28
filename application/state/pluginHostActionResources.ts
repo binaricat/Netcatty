@@ -24,11 +24,22 @@ export class PluginHostActionResources {
     const entry = this.entries.get(id);
     if (!entry) throw new Error('Selected host is unavailable');
     const host = entry.host;
+    const osValue = typeof host.os === 'string'
+      ? Array.from(host.os).filter((ch) => {
+        const code = ch.charCodeAt(0);
+        return code >= 0x20 && code !== 0x7f;
+      }).join('').slice(0, 128)
+      : '';
+    const notesValue = typeof host.notes === 'string'
+      ? host.notes.split('\0').join('').slice(0, 4096)
+      : '';
     return {
       resourceId: host.id, revision: entry.revision,
       label: host.label, hostname: host.hostname, username: host.username,
       ...(host.port === undefined ? {} : { port: host.port }), protocol: host.protocol ?? 'ssh',
       group: host.group ?? '', tags: [...host.tags],
+      ...(osValue ? { os: osValue } : {}),
+      ...(notesValue ? { notes: notesValue } : {}),
     };
   }
 }

@@ -6,6 +6,17 @@ import type { HostDrawnViewEvent } from '@netcatty/plugin-contract';
 type Bridge = Pick<NonNullable<ReturnType<typeof import('../../infrastructure/services/netcattyBridge').netcattyBridge.get>>, 'openHostDrawnPluginView' | 'closeHostDrawnPluginView' | 'onHostDrawnPluginViewUpdate' | 'onPluginViewClosed' | 'sendHostDrawnPluginViewEvent' | 'getPluginViewResource'>;
 export type PluginViewSnapshot = { tree: ReturnType<ReturnType<typeof createPluginRemoteTree>['snapshot']>; css: string; loading: boolean; error: boolean; settled: boolean };
 const empty = (): PluginViewSnapshot => ({ tree: { children: [] }, css: '', loading: true, error: false, settled: true });
+const EMPTY_FIRST_FRAME_GRACE_MS = 60;
+
+function hasRenderableTreeContent(tree: PluginViewSnapshot['tree']): boolean {
+  for (const child of tree.children) {
+    if (child.type === 3 && child.data.trim().length > 0) return true;
+    if (child.type === 1) {
+      if (child.element !== 'div' || child.children.length > 0) return true;
+    }
+  }
+  return false;
+}
 
 /** Owns a window's bounded, retained UI instances independently of React mounts. */
 export class PluginViewSessions {
@@ -15,13 +26,15 @@ export class PluginViewSessions {
     const id = crypto.randomUUID();
     const tree = createPluginRemoteTree();
     let state = empty(); let sequence = 1; let eventId = 0; let disposed = false; let users = 0;
+    let lastRawCss: string | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let emptyFrameTimer: ReturnType<typeof setTimeout> | undefined;
     const listeners = new Set<() => void>();
     const publish = (next: PluginViewSnapshot) => { state = next; for (const listener of listeners) listener(); };
     const cleanup: Array<() => void> = [];
     const dispose = (failed = false) => {
       if (disposed) return;
-      disposed = true; clearTimeout(timer); cleanup.forEach((stop) => stop());
+      disposed = true; clearTimeout(timer); clearTimeout(emptyFrameTimer); cleanup.forEach((stop) => stop());
       this.sessions.delete(key);
       publish({ ...empty(), loading: false, error: failed });
       void bridge.closeHostDrawnPluginView?.(id).catch(() => {});
@@ -31,7 +44,30 @@ export class PluginViewSessions {
       if (disposed || update.kind !== 'host-ui.update' || update.instanceId !== id || update.viewId !== request.viewId) return;
       try {
         if (update.sequence !== sequence++) throw new Error('Invalid plugin update order');
-        publish({ tree: tree.apply(update.mutations), css: validatePluginStylesheet(update.css), loading: false, error: false, settled: (update.acknowledgedEvent ?? 0) >= eventId });
+        const nextCss = update.cssUnchanged
+          ? state.css
+          : (lastRawCss !== null && update.css === lastRawCss)
+            ? state.css
+            : ((lastRawCss = update.css), validatePluginStylesheet(update.css));
+        const nextTree = tree.apply(update.mutations);
+        const settled = (update.acknowledgedEvent ?? 0) >= eventId;
+        if (state.loading && !hasRenderableTreeContent(nextTree)) {
+          // Hold the host loading surface briefly while an older SDK flushes its
+          // initial React commit so users never see an empty blank frame flash.
+          publish({ tree: nextTree, css: nextCss, loading: true, error: false, settled });
+          if (emptyFrameTimer === undefined) {
+            emptyFrameTimer = setTimeout(() => {
+              emptyFrameTimer = undefined;
+              if (!disposed && state.loading) publish({ ...state, loading: false });
+            }, EMPTY_FIRST_FRAME_GRACE_MS);
+          }
+          return;
+        }
+        if (emptyFrameTimer !== undefined) {
+          clearTimeout(emptyFrameTimer);
+          emptyFrameTimer = undefined;
+        }
+        publish({ tree: nextTree, css: nextCss, loading: false, error: false, settled });
       } catch { dispose(true); }
     }));
     cleanup.push(bridge.onPluginViewClosed((event) => { if (event.instanceId === id) dispose(true); }));
@@ -68,6 +104,9 @@ export class PluginViewSessions {
       },
       dispose,
     };
+  }
+  peek(key: string) {
+    return this.sessions.get(key) ?? null;
   }
   acquire(key: string, bridge: Bridge, request: Omit<import('@netcatty/plugin-contract').HostDrawnViewOpenRequest, 'instanceId'>) {
     let session = this.sessions.get(key);

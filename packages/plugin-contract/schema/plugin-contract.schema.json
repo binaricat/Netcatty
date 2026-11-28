@@ -234,6 +234,585 @@
     "HostVaultFeature": {
       "const": "vault.host-actions"
     },
+    "HostVaultExecFeature": {
+      "const": "vault.host-exec"
+    },
+    "HostVaultProbeFeature": {
+      "const": "vault.host-probe"
+    },
+    "HostVaultSftpFeature": {
+      "const": "vault.host-sftp"
+    },
+    "HostPortForwardFeature": {
+      "const": "vault.port-forwarding"
+    },
+    "HostSnippetsFeature": {
+      "const": "vault.snippets"
+    },
+    "TerminalSessionControlFeature": {
+      "const": "terminal.session-control"
+    },
+    "WorkspaceTabsFeature": {
+      "const": "workspace.tabs"
+    },
+    "VaultHostProbeParams": {
+      "type": "object",
+      "required": ["hostBindingToken"],
+      "properties": {
+        "hostBindingToken": { "$ref": "#/$defs/VaultHostBindingToken" },
+        "protocol": { "enum": ["rdp", "vnc", "ssh"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 15000 }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostProbeResult": {
+      "type": "object",
+      "required": ["reachable", "protocol", "port", "bannerVerified", "checkedAt"],
+      "properties": {
+        "reachable": { "type": "boolean" },
+        "protocol": { "enum": ["rdp", "vnc", "ssh"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "rttMs": { "type": ["integer", "null"], "minimum": 0 },
+        "bannerVerified": { "type": "boolean" },
+        "bannerDetail": { "type": "string", "maxLength": 512 },
+        "error": { "type": "string", "maxLength": 512 },
+        "checkedAt": { "$ref": "#/$defs/SafePositiveInteger" }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostSftpLimits": {
+      "const": {
+        "maxPathBytes": 4096,
+        "maxFileBytes": 2097152,
+        "maxEntries": 2000,
+        "timeoutMs": 30000
+      }
+    },
+    "VaultHostSftpPathParams": {
+      "type": "object",
+      "required": ["hostBindingToken", "path"],
+      "properties": {
+        "hostBindingToken": { "$ref": "#/$defs/VaultHostBindingToken" },
+        "path": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000]+$" }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostSftpEntry": {
+      "type": "object",
+      "required": ["name", "type", "size", "mtime"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "type": { "enum": ["file", "directory", "symlink", "other"] },
+        "size": { "type": "integer", "minimum": 0 },
+        "mtime": { "type": "integer", "minimum": 0 },
+        "mode": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostSftpListResult": {
+      "type": "object",
+      "required": ["path", "entries", "truncated"],
+      "properties": {
+        "path": { "type": "string", "maxLength": 4096 },
+        "entries": { "type": "array", "maxItems": 2000, "items": { "$ref": "#/$defs/VaultHostSftpEntry" } },
+        "truncated": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostSftpStatResult": {
+      "type": "object",
+      "required": ["exists"],
+      "properties": {
+        "exists": { "type": "boolean" },
+        "type": { "enum": ["file", "directory", "symlink", "other"] },
+        "size": { "type": "integer", "minimum": 0 },
+        "mtime": { "type": "integer", "minimum": 0 },
+        "mode": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostSftpReadParams": {
+      "type": "object",
+      "required": ["hostBindingToken", "path"],
+      "properties": {
+        "hostBindingToken": { "$ref": "#/$defs/VaultHostBindingToken" },
+        "path": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000]+$" },
+        "encoding": { "enum": ["utf8", "base64"] },
+        "maxBytes": { "type": "integer", "minimum": 1, "maximum": 2097152 }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostSftpReadResult": {
+      "type": "object",
+      "required": ["data", "encoding", "bytes", "truncated"],
+      "properties": {
+        "data": { "type": "string" },
+        "encoding": { "enum": ["utf8", "base64"] },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostSftpWriteParams": {
+      "type": "object",
+      "required": ["hostBindingToken", "path", "data"],
+      "properties": {
+        "hostBindingToken": { "$ref": "#/$defs/VaultHostBindingToken" },
+        "path": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000]+$" },
+        "data": { "type": "string", "maxLength": 2800000 },
+        "encoding": { "enum": ["utf8", "base64"] }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostSftpWriteResult": {
+      "type": "object",
+      "required": ["bytesWritten"],
+      "properties": {
+        "bytesWritten": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostSftpDeleteParams": {
+      "type": "object",
+      "required": ["hostBindingToken", "path"],
+      "properties": {
+        "hostBindingToken": { "$ref": "#/$defs/VaultHostBindingToken" },
+        "path": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000]+$" },
+        "recursive": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "VaultListGroupsResult": {
+      "type": "object",
+      "required": ["groups"],
+      "properties": {
+        "groups": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "required": ["path", "hostCount"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "hostCount": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "VaultUpdateHostNotesParams": {
+      "type": "object",
+      "required": ["hostBindingToken", "notes"],
+      "properties": {
+        "hostBindingToken": { "$ref": "#/$defs/VaultHostBindingToken" },
+        "notes": { "type": "string", "maxLength": 4096, "pattern": "^[^\\u0000]*$" }
+      },
+      "additionalProperties": false
+    },
+    "VaultUpdateHostTagsParams": {
+      "type": "object",
+      "required": ["hostBindingToken", "tags"],
+      "properties": {
+        "hostBindingToken": { "$ref": "#/$defs/VaultHostBindingToken" },
+        "tags": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PortForwardRuleSummary": {
+      "type": "object",
+      "required": ["id", "label", "type", "localPort", "bindAddress", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "label": { "type": "string", "maxLength": 256 },
+        "type": { "enum": ["local", "remote", "dynamic"] },
+        "localPort": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "bindAddress": { "type": "string", "maxLength": 256 },
+        "remoteHost": { "type": "string", "maxLength": 512 },
+        "remotePort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "hostLabel": { "type": "string", "maxLength": 512 },
+        "hostname": { "type": "string", "maxLength": 1024 },
+        "status": { "enum": ["inactive", "connecting", "active", "error"] },
+        "error": { "type": "string", "maxLength": 512 }
+      },
+      "additionalProperties": false
+    },
+    "PortForwardListResult": {
+      "type": "object",
+      "required": ["rules"],
+      "properties": {
+        "rules": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/PortForwardRuleSummary" } }
+      },
+      "additionalProperties": false
+    },
+    "PortForwardCreateParams": {
+      "type": "object",
+      "required": ["hostBindingToken", "label", "type", "localPort"],
+      "properties": {
+        "hostBindingToken": { "$ref": "#/$defs/VaultHostBindingToken" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "type": { "enum": ["local", "remote", "dynamic"] },
+        "localPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "bindAddress": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "remoteHost": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "remotePort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      },
+      "additionalProperties": false
+    },
+    "PortForwardRuleIdParams": {
+      "type": "object",
+      "required": ["ruleId"],
+      "properties": {
+        "ruleId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }
+      },
+      "additionalProperties": false
+    },
+    "PortForwardActionResult": {
+      "type": "object",
+      "required": ["ok"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "rule": { "$ref": "#/$defs/PortForwardRuleSummary" },
+        "error": { "type": "string", "maxLength": 512 }
+      },
+      "additionalProperties": false
+    },
+    "SnippetSummary": {
+      "type": "object",
+      "required": ["id", "label", "command"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "label": { "type": "string", "maxLength": 256 },
+        "command": { "type": "string", "maxLength": 65536 },
+        "package": { "type": "string", "maxLength": 256 },
+        "tags": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 128 } },
+        "shortcut": { "type": "string", "maxLength": 64 }
+      },
+      "additionalProperties": false
+    },
+    "SnippetListParams": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "maxLength": 256 },
+        "tag": { "type": "string", "maxLength": 128 },
+        "package": { "type": "string", "maxLength": 256 }
+      },
+      "additionalProperties": false
+    },
+    "SnippetListResult": {
+      "type": "object",
+      "required": ["snippets"],
+      "properties": {
+        "snippets": { "type": "array", "maxItems": 1000, "items": { "$ref": "#/$defs/SnippetSummary" } }
+      },
+      "additionalProperties": false
+    },
+    "SnippetGetParams": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }
+      },
+      "additionalProperties": false
+    },
+    "SnippetSaveParams": {
+      "type": "object",
+      "required": ["label", "command"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "command": { "type": "string", "minLength": 1, "maxLength": 65536, "pattern": "^[^\\u0000]+$" },
+        "package": { "type": "string", "maxLength": 256, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "tags": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" } },
+        "shortcut": { "type": "string", "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }
+      },
+      "additionalProperties": false
+    },
+    "SnippetDeleteParams": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }
+      },
+      "additionalProperties": false
+    },
+    "TerminalSessionSummary": {
+      "type": "object",
+      "required": ["sessionId", "label", "hostname", "protocol", "status", "active"],
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "label": { "type": "string", "maxLength": 512 },
+        "hostname": { "type": "string", "maxLength": 1024 },
+        "username": { "type": "string", "maxLength": 512 },
+        "protocol": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 64 },
+        "workspaceId": { "type": "string", "maxLength": 128 },
+        "active": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "TerminalListSessionsResult": {
+      "type": "object",
+      "required": ["sessions"],
+      "properties": {
+        "sessions": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/TerminalSessionSummary" } }
+      },
+      "additionalProperties": false
+    },
+    "TerminalReadScreenParams": {
+      "type": "object",
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "maxRows": { "type": "integer", "minimum": 1, "maximum": 300 }
+      },
+      "additionalProperties": false
+    },
+    "TerminalReadScreenResult": {
+      "type": "object",
+      "required": ["sessionId", "rows", "cols", "lines"],
+      "properties": {
+        "sessionId": { "type": "string", "maxLength": 128 },
+        "rows": { "type": "integer", "minimum": 0 },
+        "cols": { "type": "integer", "minimum": 0 },
+        "lines": { "type": "array", "maxItems": 300, "items": { "type": "string", "maxLength": 4096 } }
+      },
+      "additionalProperties": false
+    },
+    "TerminalSendInputParams": {
+      "type": "object",
+      "required": ["sessionId", "data"],
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "data": { "type": "string", "minLength": 1, "maxLength": 8192, "pattern": "^[^\\u0000]+$" }
+      },
+      "additionalProperties": false
+    },
+    "TerminalOpenResult": {
+      "type": "object",
+      "required": ["opened"],
+      "properties": {
+        "opened": { "type": "boolean" },
+        "sessionId": { "type": "string", "maxLength": 128 }
+      },
+      "additionalProperties": false
+    },
+    "HostConfirmRequest": {
+      "type": "object",
+      "required": ["kind", "title"],
+      "properties": {
+        "kind": { "const": "confirm" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "message": { "type": "string", "maxLength": 1024, "pattern": "^[^\\u0000]*$" },
+        "confirmLabel": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "cancelLabel": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+        "destructive": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "HostOpenExternalUrlRequest": {
+      "type": "object",
+      "required": ["kind", "url"],
+      "properties": {
+        "kind": { "const": "openExternalUrl" },
+        "url": { "type": "string", "minLength": 10, "maxLength": 2048, "pattern": "^https://[^\\s\\u0000-\\u001f\\u007f]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }
+      },
+      "additionalProperties": false
+    },
+    "WorkspaceTabSummary": {
+      "type": "object",
+      "required": ["id", "kind", "title", "active"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "kind": { "enum": ["vault", "sftp", "session", "workspace", "log"] },
+        "title": { "type": "string", "maxLength": 512 },
+        "active": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "WorkspaceListTabsResult": {
+      "type": "object",
+      "required": ["activeTabId", "tabs"],
+      "properties": {
+        "activeTabId": { "type": "string", "maxLength": 128 },
+        "tabs": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/WorkspaceTabSummary" } }
+      },
+      "additionalProperties": false
+    },
+    "WorkspaceFocusTabParams": {
+      "type": "object",
+      "required": ["tabId"],
+      "properties": {
+        "tabId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostBindingToken": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "VaultHostConnectMode": {
+      "enum": [
+        "terminal",
+        "sftp",
+        "remoteDesktop"
+      ]
+    },
+    "VaultHostExecLimits": {
+      "const": {
+        "maxCommandBytes": 8192,
+        "minTimeoutMs": 1000,
+        "maxTimeoutMs": 30000,
+        "defaultTimeoutMs": 10000,
+        "minOutputBytes": 1024,
+        "maxOutputBytes": 1048576,
+        "defaultOutputBytes": 262144,
+        "maxConcurrentPerRuntime": 16,
+        "maxConcurrentTotal": 64
+      }
+    },
+    "VaultHostExecParams": {
+      "type": "object",
+      "required": [
+        "hostBindingToken",
+        "command"
+      ],
+      "properties": {
+        "hostBindingToken": {
+          "$ref": "#/$defs/VaultHostBindingToken"
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "pattern": "^[^\\u0000]+$"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 30000
+        },
+        "maxOutputBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576
+        }
+      },
+      "additionalProperties": false
+    },
+    "VaultHostExecResult": {
+      "type": "object",
+      "required": [
+        "stdout",
+        "stderr",
+        "exitCode",
+        "truncated",
+        "durationMs"
+      ],
+      "properties": {
+        "stdout": {
+          "type": "string"
+        },
+        "stderr": {
+          "type": "string"
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latencyMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "responseLatencyMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "VaultResolveHostBindingsParams": {
+      "type": "object",
+      "required": [
+        "hostBindingTokens"
+      ],
+      "properties": {
+        "hostBindingTokens": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/VaultHostBindingToken"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "VaultResolvedHostBinding": {
+      "type": "object",
+      "required": [
+        "hostBindingToken",
+        "status"
+      ],
+      "properties": {
+        "hostBindingToken": {
+          "$ref": "#/$defs/VaultHostBindingToken"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "missing",
+            "revoked"
+          ]
+        },
+        "metadata": {
+          "$ref": "#/$defs/VaultHostMetadata"
+        }
+      },
+      "additionalProperties": false
+    },
+    "VaultResolveHostBindingsResult": {
+      "type": "object",
+      "required": [
+        "hosts"
+      ],
+      "properties": {
+        "hosts": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/VaultResolvedHostBinding"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "VaultHostRef": {
       "type": "object",
       "required": [
@@ -318,6 +897,16 @@
           "maxLength": 199,
           "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
           "minLength": 1
+        },
+        "os": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000]*$"
         }
       },
       "additionalProperties": false
@@ -404,6 +993,9 @@
           "maxLength": 128,
           "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
           "minLength": 1
+        },
+        "durable": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -448,23 +1040,45 @@
       ]
     },
     "VaultHostConnectParams": {
-      "type": "object",
-      "required": [
-        "target",
-        "expectedRevision"
-      ],
-      "properties": {
-        "target": {
-          "$ref": "#/$defs/VaultHostRef"
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "target",
+            "expectedRevision"
+          ],
+          "properties": {
+            "target": {
+              "$ref": "#/$defs/VaultHostRef"
+            },
+            "expectedRevision": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+              "minLength": 1
+            },
+            "mode": {
+              "$ref": "#/$defs/VaultHostConnectMode"
+            }
+          },
+          "additionalProperties": false
         },
-        "expectedRevision": {
-          "type": "string",
-          "maxLength": 128,
-          "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
-          "minLength": 1
+        {
+          "type": "object",
+          "required": [
+            "hostBindingToken"
+          ],
+          "properties": {
+            "hostBindingToken": {
+              "$ref": "#/$defs/VaultHostBindingToken"
+            },
+            "mode": {
+              "$ref": "#/$defs/VaultHostConnectMode"
+            }
+          },
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "VaultHostActionRequest": {
       "oneOf": [
@@ -483,6 +1097,9 @@
               "maxLength": 128,
               "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
               "minLength": 1
+            },
+            "durable": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false
@@ -549,6 +1166,28 @@
               "maxLength": 128,
               "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
               "minLength": 1
+            },
+            "mode": {
+              "$ref": "#/$defs/VaultHostConnectMode"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "hostBindingToken"
+          ],
+          "properties": {
+            "kind": {
+              "const": "vault.requestConnect"
+            },
+            "hostBindingToken": {
+              "$ref": "#/$defs/VaultHostBindingToken"
+            },
+            "mode": {
+              "$ref": "#/$defs/VaultHostConnectMode"
             }
           },
           "additionalProperties": false
@@ -682,6 +1321,16 @@
             "maxLength": 199,
             "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
             "minLength": 1
+          },
+          "os": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 4096,
+            "pattern": "^[^\\u0000]*$"
           }
         },
         "additionalProperties": false
@@ -713,6 +1362,9 @@
               },
               "metadata": {
                 "$ref": "#/$defs/VaultHostMetadata"
+              },
+              "hostBindingToken": {
+                "$ref": "#/$defs/VaultHostBindingToken"
               }
             },
             "additionalProperties": false
@@ -1016,6 +1668,12 @@
         },
         {
           "$ref": "#/$defs/HostTerminalInputProposalRequest"
+        },
+        {
+          "$ref": "#/$defs/HostConfirmRequest"
+        },
+        {
+          "$ref": "#/$defs/HostOpenExternalUrlRequest"
         }
       ]
     },
@@ -1911,6 +2569,13 @@
         "vault.metadata",
         "vault.write",
         "vault.credentials",
+        "vault.hostExec",
+        "portForward.read",
+        "portForward.manage",
+        "snippets.read",
+        "snippets.write",
+        "workspace.read",
+        "workspace.navigate",
         "sftp.read",
         "sftp.write",
         "network",
@@ -1958,6 +2623,13 @@
         "vault.metadata",
         "vault.write",
         "vault.credentials",
+        "vault.hostExec",
+        "portForward.read",
+        "portForward.manage",
+        "snippets.read",
+        "snippets.write",
+        "workspace.read",
+        "workspace.navigate",
         "sftp.read",
         "sftp.write",
         "secrets",
@@ -2567,6 +3239,113 @@
     },
     "TerminalSidebarFeature": {
       "const": "views.terminal-sidebar"
+    },
+    "ViewBadgesFeature": {
+      "const": "views.badges"
+    },
+    "ViewBadgeTone": {
+      "type": "string",
+      "enum": [
+        "default",
+        "info",
+        "warning",
+        "danger"
+      ]
+    },
+    "ViewBadgeParams": {
+      "type": "object",
+      "required": [
+        "viewId"
+      ],
+      "properties": {
+        "viewId": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "count": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SafeUnsignedInteger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 16,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dot": {
+          "type": "boolean"
+        },
+        "tone": {
+          "$ref": "#/$defs/ViewBadgeTone"
+        },
+        "tooltip": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 160,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginViewBadge": {
+      "type": "object",
+      "required": [
+        "pluginId",
+        "viewId",
+        "tone"
+      ],
+      "properties": {
+        "pluginId": {
+          "$ref": "#/$defs/PluginId"
+        },
+        "viewId": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4,
+          "pattern": "^[\\u0020-\\u007e]{1,4}$"
+        },
+        "dot": {
+          "type": "boolean"
+        },
+        "tone": {
+          "$ref": "#/$defs/ViewBadgeTone"
+        },
+        "tooltip": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/SafeUnsignedInteger"
+        }
+      },
+      "additionalProperties": false
     },
     "PluginViewResourceRequest": {
       "type": "object",

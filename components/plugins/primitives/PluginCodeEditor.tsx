@@ -3,7 +3,17 @@ import React, { Suspense, lazy } from 'react';
 import { LazyLoadBoundary } from '../../ui/lazy-load-boundary';
 import type { PluginCodeEditorWidgetProps, PluginWidgetEventCallback } from './types';
 
-const LazyPluginCodeEditorInner = lazy(() => import('./PluginCodeEditorInner'));
+let preloadEditorPromise: Promise<unknown> | null = null;
+const loadPluginCodeEditorInner = () => {
+  preloadEditorPromise ??= import('./PluginCodeEditorInner');
+  return preloadEditorPromise as Promise<{ default: typeof import('./PluginCodeEditorInner').default }>;
+};
+
+export function preloadPluginCodeEditor(): void {
+  void loadPluginCodeEditorInner().catch(() => { preloadEditorPromise = null; });
+}
+
+const LazyPluginCodeEditorInner = lazy(loadPluginCodeEditorInner);
 
 export interface PluginCodeEditorProps extends PluginCodeEditorWidgetProps {
   onWidgetEvent: PluginWidgetEventCallback;

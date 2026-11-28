@@ -14,10 +14,12 @@ export function PluginHostActionHost() {
   if (!entry) return null;
   const request = entry.prompt.request;
   const selection = request.kind === 'vault.selectHosts';
+  const durableSelection = selection && request.durable === true;
   const stream = request.kind === 'network.stream.connectViaHost';
   const directStreamConfirm = request.kind === 'network.stream.confirm';
   const tlsConfirm = request.kind === 'network.stream.tlsConfirm';
   const connection = request.kind === 'vault.requestConnect' || stream;
+  const isSftpConnect = request.kind === 'vault.requestConnect' && request.mode === 'sftp';
   const effective = entry.host ? applyGroupDefaults(entry.host, entry.host.group ? resolveGroupDefaults(entry.host.group, entry.groups) : {}) : undefined;
   const protocol = effective ? resolveEffectiveTerminalProtocol(effective) : undefined;
   const dialogTitle = selection
@@ -26,11 +28,13 @@ export function PluginHostActionHost() {
       ? 'Confirm Network Connection'
       : tlsConfirm
         ? 'Verify TLS Certificate'
-        : connection
-          ? t('plugins.hostActions.connect')
-          : entry.host
-            ? t('plugins.hostActions.edit')
-            : t('plugins.hostActions.create');
+        : isSftpConnect
+          ? t('vault.hosts.openSftp')
+          : connection
+            ? t('plugins.hostActions.connect')
+            : entry.host
+              ? t('plugins.hostActions.edit')
+              : t('plugins.hostActions.create');
 
   return <Dialog open onOpenChange={(open) => { if (!open) void state.respond('cancel'); }}>
     <DialogContent className={selection ? 'max-w-md h-[min(85vh,640px)] flex flex-col p-0 gap-0 overflow-hidden' : 'sm:max-w-[560px] max-h-[85vh] overflow-y-auto'} hideCloseButton>
@@ -40,6 +44,11 @@ export function PluginHostActionHost() {
       </DialogHeader>
       {selection ? <>
         <p className="px-4 pt-3 text-xs text-muted-foreground">{t('plugins.hostActions.selectionNote')}</p>
+        {durableSelection && (
+          <p className="px-4 pt-1 text-xs text-amber-600 dark:text-amber-400">
+            Selected hosts will remain bound to this plugin across sessions until revoked. SSH passwords and private keys are never shared.
+          </p>
+        )}
         <p className="px-4 pt-2 text-sm font-medium break-words">{request.title}</p>
         {state.selectedIds.length > 50 && <p role="alert" className="px-4 text-sm text-destructive">{t('plugins.hostActions.selectionLimit')}</p>}
         <SelectHostPanelContent hosts={entry.candidates} customGroups={entry.customGroups} selectedHostIds={state.selectedIds} multiSelect className="flex-1 min-h-0" confirmDisabled={state.busy || state.selectedIds.length > 50} onSelect={(host) => state.setSelectedIds((ids) => ids.includes(host.id) ? ids.filter((id) => id !== host.id) : [...ids, host.id])} onSelectionChange={state.setSelectedIds} onConfirm={() => { if (!state.busy && state.selectedIds.length <= 50) void state.respond('submit'); }} />

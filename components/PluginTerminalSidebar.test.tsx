@@ -262,3 +262,90 @@ test('usePluginTerminalSidebar skips tab/focus subscriptions when zero pages exi
     }
   }
 });
+
+test('PluginTerminalSidebarLauncher renders live view badges and clears them on updates', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true, url: 'http://localhost' });
+  const previous = new Map<string, PropertyDescriptor | undefined>();
+  const install = (key: string, value: unknown) => {
+    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  };
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'SVGElement', 'Node', 'NodeFilter', 'MutationObserver', 'CustomEvent', 'Event', 'MouseEvent']) {
+    install(key, key === 'window' ? dom.window : dom.window[key as keyof typeof dom.window]);
+  }
+  install('PointerEvent', dom.window.MouseEvent);
+  install('getComputedStyle', dom.window.getComputedStyle.bind(dom.window));
+  install('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 0));
+  install('cancelAnimationFrame', (id: number) => clearTimeout(id));
+  install('IS_REACT_ACT_ENVIRONMENT', true);
+
+  const { default: React, act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('../application/i18n/I18nProvider');
+  const { TooltipProvider } = await import('./ui/tooltip');
+  const { PluginTerminalSidebarLauncher } = await import('./plugins/PluginTerminalSidebar');
+
+  const viewA = { id: 'com.example.sidebar.alerts', title: 'Alerts', location: 'terminal-sidebar', visible: true };
+  const snapshot = {
+    locale: 'en',
+    plugins: [{ id: 'com.example.sidebar', displayName: 'Synthetic Monitor', version: '1.0.0', commands: [], keybindings: [], menus: [], settings: [], views: [viewA] }],
+  };
+  let badges: ReadonlyArray<NetcattyPluginViewBadge> = [
+    { pluginId: 'com.example.sidebar', viewId: viewA.id, count: 5, tone: 'danger', tooltip: '5 active alerts' },
+  ];
+  const badgeListeners = new Set<(next: ReadonlyArray<NetcattyPluginViewBadge>) => void>();
+
+  Object.assign(dom.window, {
+    netcatty: {
+      async getPluginRuntimeStatus() { return { available: true }; },
+      async getPluginContributions() { return snapshot; },
+      onPluginContributionsChanged() { return () => {}; },
+      async listPluginViewBadges() { return badges; },
+      onPluginViewBadgesChanged(cb: (next: ReadonlyArray<NetcattyPluginViewBadge>) => void) {
+        badgeListeners.add(cb);
+        return () => badgeListeners.delete(cb);
+      },
+    },
+  });
+
+  const root = createRoot(document.getElementById('root')!);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
+
+  try {
+    await act(async () => {
+      root.render(
+        <I18nProvider locale="en">
+          <TooltipProvider delayDuration={0}>
+            <PluginTerminalSidebarLauncher sessionId="session-1" />
+          </TooltipProvider>
+        </I18nProvider>,
+      );
+      await settle();
+    });
+
+    const btn = document.querySelector<HTMLButtonElement>('button[aria-label="Alerts — Synthetic Monitor (5 active alerts)"]')!;
+    assert.ok(btn, 'terminal sidebar launcher includes badge tooltip in aria-label');
+    const badgeEl = btn.querySelector<HTMLElement>('[data-plugin-view-badge]')!;
+    assert.equal(badgeEl.textContent, '5');
+    assert.equal(badgeEl.getAttribute('data-plugin-view-badge-tone'), 'danger');
+
+    // Clear badge via push event
+    badges = [];
+    await act(async () => {
+      for (const listener of badgeListeners) listener(badges);
+      await settle();
+    });
+    assert.equal(document.querySelector('[data-plugin-view-badge]'), null);
+    assert.ok(document.querySelector('button[aria-label="Alerts — Synthetic Monitor"]'));
+  } finally {
+    await act(async () => {
+      root.unmount();
+      await settle();
+    });
+    dom.window.close();
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
+});

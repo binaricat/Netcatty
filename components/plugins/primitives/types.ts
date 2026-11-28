@@ -134,3 +134,52 @@ export interface PluginErCanvasWidgetProps {
   tables?: PluginErTable[];
   relations?: PluginErRelation[];
 }
+
+export type PluginMetricChartColor =
+  | 'primary'
+  | 'sky'
+  | 'emerald'
+  | 'amber'
+  | 'violet'
+  | 'rose'
+  | 'cyan'
+  | 'muted';
+
+export type PluginMetricChartUnit = '%' | 'bytes/s' | 'ms' | 'count' | 'temp' | 'bytes' | '';
+
+export interface PluginMetricChartPoint {
+  at: number;
+  value: number | null;
+}
+
+export interface PluginMetricChartSeries {
+  id: string;
+  label: string;
+  color?: PluginMetricChartColor;
+  unit?: PluginMetricChartUnit;
+  points: PluginMetricChartPoint[];
+}
+
+export interface PluginMetricChartThreshold {
+  value: number;
+  tone: 'warning' | 'critical';
+  label?: string;
+}
+
+export interface PluginMetricChartWidgetProps {
+  variant?: 'area' | 'line' | 'sparkline' | 'bar';
+  series?: PluginMetricChartSeries[];
+  rangeMs?: number;
+  intervalMs?: number;
+  endAt?: number;
+  min?: number;
+  max?: number | 'auto';
+  height?: number;
+  thresholds?: PluginMetricChartThreshold[];
+  showGrid?: boolean;
+  showLegend?: boolean;
+  showAxes?: boolean;
+  interactive?: boolean;
+  emptyText?: string;
+  ariaLabel?: string;
+}

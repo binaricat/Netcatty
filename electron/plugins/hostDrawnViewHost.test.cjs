@@ -73,10 +73,123 @@ test("disable and owner navigation invalidate every retained view", async () => 
 
 test("updates are rate limited and resource caches are bounded", async () => {
   const f = fixture({ image: async () => ({ url: 'data:image/png;base64,AAAA' }) }); await open(f);
-  for (let i = 0; i < 128; i++) await f.host.resource('instance-1', `image-${i}.png`, f.sender);
+  for (let i = 0; i < 256; i++) await f.host.resource('instance-1', `image-${i}.png`, f.sender);
   await assert.rejects(f.host.resource('instance-1', 'extra.png', f.sender), /limit/);
   for (let i = 1; i <= 121; i++) f.message({ ...update(i), mutations: [] });
   assert.equal(f.host.instances.size, 0); await f.host.shutdown();
+});
+
+test("unchanged CSS is deduplicated over internal host-to-renderer IPC", async () => {
+  const f = fixture(); await open(f);
+  f.message(update(1));
+  f.message(update(2));
+  assert.equal(f.sender.sent.length, 2);
+  assert.equal(f.sender.sent[0][1].css, ".x{display:grid}");
+  assert.equal(f.sender.sent[0][1].cssUnchanged, undefined);
+  assert.equal(f.sender.sent[1][1].css, "");
+  assert.equal(f.sender.sent[1][1].cssUnchanged, true);
+  await f.host.shutdown();
+});
+
+test("prewarm warms the standby pool and starts only eligible non-prompting browser-only view plugins", async () => {
+  let poolWarms = 0;
+  const started = [];
+  const prepared = [];
+  const sender = new EventEmitter(); sender.isDestroyed = () => false;
+  const other = new EventEmitter(); other.isDestroyed = () => false;
+  const owner = new EventEmitter(); owner.webContents = sender; owner.isDestroyed = () => false;
+  let locked = false;
+  const askPlugins = new Set(["com.test.ask"]);
+  const contributions = {
+    onDidPostViewMessage() { return { dispose() {} }; },
+    database: {
+      listPlugins: () => [
+        {
+          id: "com.test.browser",
+          enabled: true,
+          runtime: { quarantinedAt: null },
+          manifest: {
+            main: { browser: "dist/index.js" },
+            activationEvents: ["onView:com.test.browser.main"],
+            contributes: { views: [{ id: "com.test.browser.main" }] },
+          },
+        },
+        {
+          id: "com.test.undeclared",
+          enabled: true,
+          runtime: { quarantinedAt: null },
+          manifest: {
+            main: { browser: "dist/index.js" },
+            activationEvents: [],
+            contributes: { views: [{ id: "com.test.undeclared.main" }] },
+          },
+        },
+        {
+          id: "com.test.ask",
+          enabled: true,
+          runtime: { quarantinedAt: null },
+          manifest: {
+            main: { browser: "dist/index.js" },
+            activationEvents: ["onView:com.test.ask.main"],
+            contributes: { views: [{ id: "com.test.ask.main" }] },
+          },
+        },
+        {
+          id: "com.test.advanced",
+          enabled: true,
+          runtime: { quarantinedAt: null },
+          manifest: {
+            main: { node: "dist/node.js" },
+            activationEvents: ["onView:com.test.advanced.main"],
+            permissions: { required: ["runtime.advanced"] },
+            contributes: { views: [{ id: "com.test.advanced.main" }] },
+          },
+        },
+      ],
+    },
+    runtimeSupervisor: {
+      getRuntimeIdentity: () => null,
+      start: async (id) => { started.push(id); },
+    },
+  };
+  const host = new HostDrawnViewHost({
+    electron: { BrowserWindow: { fromWebContents: (s) => (s === sender ? owner : null) } },
+    contributionService: contributions,
+    packageStore: { preparePackageRoot: async (plugin) => { prepared.push(plugin.id); } },
+    permissionEngine: {
+      describePolicies: (plugin) => (askPlugins.has(plugin.id)
+        ? [{ permission: "network", resources: ["*"], mode: "ask" }]
+        : [{ permission: "views", resources: ["*"], mode: "allow" }]),
+    },
+    runtimePool: { warm: () => { poolWarms += 1; } },
+    isLocked: () => locked,
+  });
+  assert.equal(host.prewarm("com.test.browser.main", other), false);
+  assert.equal(poolWarms, 0);
+  assert.deepEqual(started, []);
+
+  assert.equal(host.prewarm("com.test.browser.main", sender), true);
+  assert.equal(poolWarms, 1);
+  assert.deepEqual(started, ["com.test.browser"]);
+
+  // Views without declared onView:<id> stay strictly passive (preparePackageRoot only, no runtime start).
+  assert.equal(host.prewarm("com.test.undeclared.main", sender), true);
+  assert.deepEqual(started, ["com.test.browser"]);
+  assert.deepEqual(prepared, ["com.test.undeclared"]);
+
+  // Plugins with any permission in Ask mode stay strictly passive so hover can never trigger a prompt.
+  assert.equal(host.prewarm("com.test.ask.main", sender), true);
+  assert.deepEqual(started, ["com.test.browser"]);
+  assert.deepEqual(prepared, ["com.test.undeclared", "com.test.ask"]);
+
+  // Advanced Node/utility plugins must never be prewarmed on hover.
+  assert.equal(host.prewarm("com.test.advanced.main", sender), true);
+  assert.deepEqual(started, ["com.test.browser"]);
+  assert.deepEqual(prepared, ["com.test.undeclared", "com.test.ask"]);
+
+  locked = true;
+  assert.equal(host.prewarm("com.test.browser.main", sender), false);
+  await host.shutdown();
 });
 
 test("extended surface and widget events validate schema and bound detail payload size", async () => {

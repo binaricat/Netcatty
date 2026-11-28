@@ -39,3 +39,24 @@ test('idle instances are evicted while active instances are never silently repla
   assert.throws(() => store.acquire('two', f.bridge, request), /Too many/); first.release();
   const second = store.acquire('two', f.bridge, request); assert.notEqual(second, first); assert.equal(f.closes.length, 1); store.dispose();
 });
+test('cssUnchanged updates retain previously validated stylesheet and peek returns live session synchronously', () => {
+  const f = fixture(); const store = new PluginViewSessions();
+  assert.equal(store.peek('view'), null);
+  const view = store.acquire('view', f.bridge, request); const id = f.opened[0].instanceId;
+  assert.equal(store.peek('view'), view);
+  f.update({ kind: 'host-ui.update', viewId: request.viewId, instanceId: id, sequence: 1, css: '.a{display:flex}', mutations: [] });
+  assert.equal(view.getSnapshot().css, '.a{display:flex}');
+  f.update({ kind: 'host-ui.update', viewId: request.viewId, instanceId: id, sequence: 2, css: '', cssUnchanged: true, mutations: [[0, '~', { id: 't', type: 3, data: 'hi' }, 0]] } as Update);
+  assert.equal(view.getSnapshot().css, '.a{display:flex}');
+  assert.deepEqual(view.getSnapshot().tree.children[0], { id: 't', type: 3, data: 'hi' });
+  store.dispose();
+});
+test('empty first update holds loading briefly to prevent blank-frame flash then completes cleanly', async () => {
+  const f = fixture(); const store = new PluginViewSessions();
+  const view = store.acquire('empty-grace', f.bridge, request); const id = f.opened[0].instanceId;
+  f.update({ kind: 'host-ui.update', viewId: request.viewId, instanceId: id, sequence: 1, css: '', mutations: [] });
+  assert.equal(view.getSnapshot().loading, true, 'empty first update holds loading briefly');
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  assert.equal(view.getSnapshot().loading, false, 'truly empty view finishes loading after grace window');
+  store.dispose();
+});

@@ -31,7 +31,7 @@ test("offline first launch returns bundled source examples with no GitHub README
     install() { assert.fail("offline must not install"); },
   } });
   const snapshot = await service.list();
-  assert.equal(snapshot.source, "builtin"); assert.equal(snapshot.entries.length, 2);
+  assert.equal(snapshot.source, "builtin"); assert.equal(snapshot.entries.length, 3);
   await assert.rejects(service.readme(snapshot.entries[0].id, snapshot.entries[0].selectionToken), /No published README/);
   assert.equal(calls, 1);
   await assert.rejects(service.install(snapshot.entries[0].id, snapshot.entries[0].selectionToken), /browse-only/);

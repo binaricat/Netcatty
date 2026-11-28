@@ -32,41 +32,66 @@ function loadComponent(path: string, name: string, bindings: Record<string, unkn
   }) as React.ComponentType;
 }
 
-test('monitor controls update their runtime without rendering unrelated app siblings', async () => {
+test('App no longer mounts retired built-in MonitorRuntimeHost or MonitorHostKeyDialog', async () => {
+  const env = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = env.IS_REACT_ACT_ENVIRONMENT;
+  env.IS_REACT_ACT_ENVIRONMENT = true;
+  let sideEffectRenders = 0;
+  let shellRenders = 0;
+  const appSource = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(appSource, /MonitorRuntimeHost/, 'App must not mount retired MonitorRuntimeHost');
+  assert.doesNotMatch(appSource, /MonitorHostKeyDialog/, 'App must not mount retired MonitorHostKeyDialog');
+
+  const App = loadComponent('../../App.tsx', 'App', {
+    performance: { mark: () => {} },
+    AppLocalStateProvider: ({ children }: { children: React.ReactNode }) => children,
+    AppSideEffects: () => { sideEffectRenders += 1; return null; },
+    AppShell: React.memo(() => { shellRenders += 1; return null; }),
+  });
+  let renderer: ReturnType<typeof create> | undefined;
+  try {
+    await act(async () => { renderer = create(React.createElement(App)); });
+    assert.equal(sideEffectRenders, 1);
+    assert.equal(shellRenders, 1);
+  } finally {
+    await act(async () => renderer?.unmount());
+    env.IS_REACT_ACT_ENVIRONMENT = previous;
+  }
+});
+
+test('MonitorRuntimeHost keeps monitor runtime updates isolated from sibling components when mounted', async () => {
   const env = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
   const previous = env.IS_REACT_ACT_ENVIRONMENT;
   env.IS_REACT_ACT_ENVIRONMENT = true;
   let updateMonitor: (() => void) | undefined;
   let runtimeRenders = 0;
-  let sideEffectRenders = 0;
-  let shellRenders = 0;
+  let siblingRenders = 0;
   const useMonitorRuntime = () => {
     const [, setVersion] = useState(0);
     updateMonitor = () => setVersion((version) => version + 1);
     runtimeRenders += 1;
   };
   const MonitorRuntimeHost = loadComponent('./MonitorRuntimeHost.tsx', 'MonitorRuntimeHost', { useMonitorRuntime });
-  const App = loadComponent('../../App.tsx', 'App', {
-    performance: { mark: () => {} },
-    useMonitorRuntime,
-    MonitorRuntimeHost,
-    AppLocalStateProvider: ({ children }: { children: React.ReactNode }) => children,
-    AppSideEffects: () => { sideEffectRenders += 1; return null; },
-    MonitorHostKeyDialog: () => null,
-    AppShell: React.memo(() => { shellRenders += 1; return null; }),
-  });
+  const StableSibling = React.memo(() => { siblingRenders += 1; return null; });
   let renderer: ReturnType<typeof create> | undefined;
   try {
-    await act(async () => { renderer = create(React.createElement(App)); });
+    await act(async () => {
+      renderer = create(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(MonitorRuntimeHost),
+          React.createElement(StableSibling),
+        ),
+      );
+    });
     const initialRuntimeRenders = runtimeRenders;
-    const initialSideEffectRenders = sideEffectRenders;
-    const initialShellRenders = shellRenders;
+    const initialSiblingRenders = siblingRenders;
     for (let i = 0; i < 10; i += 1) {
       await act(async () => updateMonitor!());
     }
-    assert.equal(runtimeRenders - initialRuntimeRenders, 10, 'monitor updates must still run');
-    assert.equal(sideEffectRenders - initialSideEffectRenders, 0, 'monitor-only state must not render AppSideEffects');
-    assert.equal(shellRenders - initialShellRenders, 0, 'monitor controls must leave the shell stable');
+    assert.equal(runtimeRenders - initialRuntimeRenders, 10, 'monitor updates must run inside MonitorRuntimeHost');
+    assert.equal(siblingRenders - initialSiblingRenders, 0, 'monitor updates must not re-render siblings');
   } finally {
     await act(async () => renderer?.unmount());
     env.IS_REACT_ACT_ENVIRONMENT = previous;

@@ -92,6 +92,7 @@ class RuntimeSupervisor {
       utility: (runtimeOptions) => new UtilityPluginRuntime(runtimeOptions),
     };
     this.runtimeResourceMonitor = options.runtimeResourceMonitor ?? null;
+    this.browserRuntimePool = options.browserRuntimePool ?? null;
     this.runtimeCleanup = options.runtimeCleanup ?? null;
     if (this.runtimeCleanup != null && typeof this.runtimeCleanup !== "function") {
       throw new TypeError("Plugin runtime cleanup must be a function");
@@ -323,6 +324,7 @@ class RuntimeSupervisor {
       ? this.runtimeFactories.browser({
           electron: this.electron,
           protocol: this.protocol,
+          runtimePool: this.browserRuntimePool,
           plugin,
           packageRoot,
           preloadPath: path.join(this.runtimeDirectory, "browserPreload.cjs"),

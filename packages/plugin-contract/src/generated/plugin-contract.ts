@@ -261,6 +261,15 @@ export type HostClipboardWriteRequest = {
   text: string;
 };
 
+export type HostConfirmRequest = {
+  kind: "confirm";
+  title: string;
+  message?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  destructive?: boolean;
+};
+
 export type HostDrawnViewEvent = {
   nodeId: string;
   type: "click" | "input" | "change" | "keydown" | "keyup" | "focusin" | "focusout" | "compositionstart" | "compositionupdate" | "compositionend" | "dismiss" | "submit" | "reset" | "dblclick" | "contextmenu" | "scroll" | "widget";
@@ -379,7 +388,7 @@ export type HostInteractionReceipt = (boolean) | ({
   completionToken: string;
 });
 
-export type HostInteractionRequest = (HostQuickPickRequest) | (HostInputRequest) | (HostClipboardReadRequest) | (HostClipboardWriteRequest) | (HostTerminalSelectionReadRequest) | (HostTerminalInputProposalRequest);
+export type HostInteractionRequest = (HostQuickPickRequest) | (HostInputRequest) | (HostClipboardReadRequest) | (HostClipboardWriteRequest) | (HostTerminalSelectionReadRequest) | (HostTerminalInputProposalRequest) | (HostConfirmRequest) | (HostOpenExternalUrlRequest);
 
 export type HostInteractionResponse = {
   requestId: string;
@@ -403,12 +412,20 @@ export type HostInteractionResult = ({
   remember?: boolean;
 });
 
+export type HostOpenExternalUrlRequest = {
+  kind: "openExternalUrl";
+  url: string;
+  title?: string;
+};
+
 export type HostOpenFileRequest = {
   title?: string;
   filters?: Array<HostFileDialogFilter>;
   readAs?: "bytes" | "utf8";
   maxBytes?: number;
 };
+
+export type HostPortForwardFeature = "vault.port-forwarding";
 
 export type HostQuickPickItem = {
   id: string;
@@ -433,6 +450,8 @@ export type HostSaveFileRequest = {
 
 export type HostSingleLineInputText = string;
 
+export type HostSnippetsFeature = "vault.snippets";
+
 export type HostTerminalInputProposalRequest = {
   kind: "terminal.input.propose";
   title: string;
@@ -447,7 +466,13 @@ export type HostTerminalSelectionReadRequest = {
 
 export type HostTerminalTarget = (unknown);
 
+export type HostVaultExecFeature = "vault.host-exec";
+
 export type HostVaultFeature = "vault.host-actions";
+
+export type HostVaultProbeFeature = "vault.host-probe";
+
+export type HostVaultSftpFeature = "vault.host-sftp";
 
 export type IconReference = (ThemeIcon) | (PackageIcon);
 
@@ -643,7 +668,7 @@ export type MenuLocation = "commandPalette" | "application" | "host/context" | "
 
 export type NetworkCredentialLeaseFeature = "network.credential-lease";
 
-export type NonResourceScopedPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "secrets" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose" | "network.hostStream";
+export type NonResourceScopedPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "vault.hostExec" | "portForward.read" | "portForward.manage" | "snippets.read" | "snippets.write" | "workspace.read" | "workspace.navigate" | "sftp.read" | "sftp.write" | "secrets" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose" | "network.hostStream";
 
 export type NullableRpcId = (RpcId) | (null);
 
@@ -1243,7 +1268,7 @@ export type PluginNetworkResponse = {
   };
 };
 
-export type PluginPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "network" | "network.stream" | "filesystem.read" | "filesystem.write" | "secrets" | "companion.execute" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose" | "network.hostStream";
+export type PluginPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "vault.hostExec" | "portForward.read" | "portForward.manage" | "snippets.read" | "snippets.write" | "workspace.read" | "workspace.navigate" | "sftp.read" | "sftp.write" | "network" | "network.stream" | "filesystem.read" | "filesystem.write" | "secrets" | "companion.execute" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose" | "network.hostStream";
 
 export type PluginSelectedContextContent = {
   handle: string;
@@ -1273,6 +1298,17 @@ export type PluginSelectedContextSummary = {
   expiresAt: number;
 };
 
+export type PluginViewBadge = {
+  pluginId: PluginId;
+  viewId: ContributionId;
+  count?: number;
+  text?: string;
+  dot?: boolean;
+  tone: ViewBadgeTone;
+  tooltip?: string;
+  updatedAt?: SafeUnsignedInteger;
+};
+
 export type PluginViewFocusEvent = {
   instanceId: string;
 };
@@ -1289,6 +1325,44 @@ export type PluginViewResourceResult = {
 };
 
 export type PluginWireErrorCode = -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016;
+
+export type PortForwardActionResult = {
+  ok: boolean;
+  rule?: PortForwardRuleSummary;
+  error?: string;
+};
+
+export type PortForwardCreateParams = {
+  hostBindingToken: VaultHostBindingToken;
+  label: string;
+  type: "local" | "remote" | "dynamic";
+  localPort: number;
+  bindAddress?: string;
+  remoteHost?: string;
+  remotePort?: number;
+};
+
+export type PortForwardListResult = {
+  rules: Array<PortForwardRuleSummary>;
+};
+
+export type PortForwardRuleIdParams = {
+  ruleId: string;
+};
+
+export type PortForwardRuleSummary = {
+  id: string;
+  label: string;
+  type: "local" | "remote" | "dynamic";
+  localPort: number;
+  bindAddress: string;
+  remoteHost?: string;
+  remotePort?: number;
+  hostLabel?: string;
+  hostname?: string;
+  status: "inactive" | "connecting" | "active" | "error";
+  error?: string;
+};
 
 export type ProgressBegin = {
   kind: "begin";
@@ -1511,6 +1585,42 @@ export type SharedTerminalSelection = {
   expiresAt: SafePositiveInteger;
 };
 
+export type SnippetDeleteParams = {
+  id: string;
+};
+
+export type SnippetGetParams = {
+  id: string;
+};
+
+export type SnippetListParams = {
+  query?: string;
+  tag?: string;
+  package?: string;
+};
+
+export type SnippetListResult = {
+  snippets: Array<SnippetSummary>;
+};
+
+export type SnippetSaveParams = {
+  id?: string;
+  label: string;
+  command: string;
+  package?: string;
+  tags?: Array<string>;
+  shortcut?: string;
+};
+
+export type SnippetSummary = {
+  id: string;
+  label: string;
+  command: string;
+  package?: string;
+  tags?: Array<string>;
+  shortcut?: string;
+};
+
 export type StreamChunkByteLength = number;
 
 export type StreamChunkData = ({
@@ -1731,9 +1841,37 @@ export type TerminalInterceptorReadyFrame = {
 
 export type TerminalInterceptorWindowBytes = number;
 
+export type TerminalListSessionsResult = {
+  sessions: Array<TerminalSessionSummary>;
+};
+
+export type TerminalOpenResult = {
+  opened: boolean;
+  sessionId?: string;
+};
+
+export type TerminalReadScreenParams = {
+  sessionId: string;
+  maxRows?: number;
+};
+
+export type TerminalReadScreenResult = {
+  sessionId: string;
+  rows: number;
+  cols: number;
+  lines: Array<string>;
+};
+
 export type TerminalSelectionSharingFeature = "terminal.selection-sharing";
 
 export type TerminalSelectionSharingLimits = {"textBytes":4096,"handleTtlMs":120000,"handlesPerRuntime":4,"handlesTotal":64};
+
+export type TerminalSendInputParams = {
+  sessionId: string;
+  data: string;
+};
+
+export type TerminalSessionControlFeature = "terminal.session-control";
 
 export type TerminalSessionSnapshot = {
   sessionId: string;
@@ -1747,6 +1885,17 @@ export type TerminalSessionSnapshot = {
   cols?: number;
   rows?: number;
   alternateScreen?: boolean;
+};
+
+export type TerminalSessionSummary = {
+  sessionId: string;
+  label: string;
+  hostname: string;
+  username?: string;
+  protocol: string;
+  status: string;
+  workspaceId?: string;
+  active: boolean;
 };
 
 export type TerminalSidebarFeature = "views.terminal-sidebar";
@@ -1844,6 +1993,7 @@ export type VaultHostActionAccepted = {
 export type VaultHostActionRequest = ({
   kind: "vault.selectHosts";
   title: string;
+  durable?: boolean;
 }) | ({
   kind: "vault.requestHostDraft";
   draft: VaultHostCreateFields;
@@ -1856,6 +2006,11 @@ export type VaultHostActionRequest = ({
   kind: "vault.requestConnect";
   target: VaultHostRef;
   expectedRevision: string;
+  mode?: VaultHostConnectMode;
+}) | ({
+  kind: "vault.requestConnect";
+  hostBindingToken: VaultHostBindingToken;
+  mode?: VaultHostConnectMode;
 }) | ({
   target: VaultHostRef;
   expectedRevision: string;
@@ -1876,10 +2031,18 @@ export type VaultHostBindingRevokeParams = {
   hostBindingToken: string;
 };
 
-export type VaultHostConnectParams = {
+export type VaultHostBindingToken = string;
+
+export type VaultHostConnectMode = "terminal" | "sftp" | "remoteDesktop";
+
+export type VaultHostConnectParams = ({
   target: VaultHostRef;
   expectedRevision: string;
-};
+  mode?: VaultHostConnectMode;
+}) | ({
+  hostBindingToken: VaultHostBindingToken;
+  mode?: VaultHostConnectMode;
+});
 
 export type VaultHostCreateFields = {
   label?: string;
@@ -1904,6 +2067,25 @@ export type VaultHostEditFields = {
   tags?: Array<string>;
 };
 
+export type VaultHostExecLimits = {"maxCommandBytes":8192,"minTimeoutMs":1000,"maxTimeoutMs":30000,"defaultTimeoutMs":10000,"minOutputBytes":1024,"maxOutputBytes":1048576,"defaultOutputBytes":262144,"maxConcurrentPerRuntime":16,"maxConcurrentTotal":64};
+
+export type VaultHostExecParams = {
+  hostBindingToken: VaultHostBindingToken;
+  command: string;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+};
+
+export type VaultHostExecResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  truncated: boolean;
+  durationMs: number;
+  latencyMs?: number | null;
+  responseLatencyMs?: number | null;
+};
+
 export type VaultHostLocalTarget = {
   resourceId: string;
   revision: string;
@@ -1917,6 +2099,26 @@ export type VaultHostMetadata = {
   group: string;
   tags: Array<string>;
   protocol: string;
+  os?: string;
+  notes?: string;
+};
+
+export type VaultHostProbeParams = {
+  hostBindingToken: VaultHostBindingToken;
+  protocol?: "rdp" | "vnc" | "ssh";
+  port?: number;
+  timeoutMs?: number;
+};
+
+export type VaultHostProbeResult = {
+  reachable: boolean;
+  protocol: "rdp" | "vnc" | "ssh";
+  port: number;
+  rttMs?: number | null;
+  bannerVerified: boolean;
+  bannerDetail?: string;
+  error?: string;
+  checkedAt: SafePositiveInteger;
 };
 
 export type VaultHostRef = {
@@ -1937,6 +2139,8 @@ export type VaultHostSelectedResources = Array<{
   group: string;
   tags: Array<string>;
   protocol: string;
+  os?: string;
+  notes?: string;
 }>;
 
 export type VaultHostSelectedResult = {
@@ -1944,6 +2148,7 @@ export type VaultHostSelectedResult = {
   hosts: Array<{
     target: VaultHostRef;
     metadata: VaultHostMetadata;
+    hostBindingToken?: VaultHostBindingToken;
   }>;
   groups: Array<{
     path: string;
@@ -1955,11 +2160,116 @@ export type VaultHostSelectionResult = ({
   cancelled: true;
 }) | (VaultHostSelectedResult);
 
+export type VaultHostSftpDeleteParams = {
+  hostBindingToken: VaultHostBindingToken;
+  path: string;
+  recursive?: boolean;
+};
+
+export type VaultHostSftpEntry = {
+  name: string;
+  type: "file" | "directory" | "symlink" | "other";
+  size: number;
+  mtime: number;
+  mode?: number;
+};
+
+export type VaultHostSftpLimits = {"maxPathBytes":4096,"maxFileBytes":2097152,"maxEntries":2000,"timeoutMs":30000};
+
+export type VaultHostSftpListResult = {
+  path: string;
+  entries: Array<VaultHostSftpEntry>;
+  truncated: boolean;
+};
+
+export type VaultHostSftpPathParams = {
+  hostBindingToken: VaultHostBindingToken;
+  path: string;
+};
+
+export type VaultHostSftpReadParams = {
+  hostBindingToken: VaultHostBindingToken;
+  path: string;
+  encoding?: "utf8" | "base64";
+  maxBytes?: number;
+};
+
+export type VaultHostSftpReadResult = {
+  data: string;
+  encoding: "utf8" | "base64";
+  bytes: number;
+  truncated: boolean;
+};
+
+export type VaultHostSftpStatResult = {
+  exists: boolean;
+  type?: "file" | "directory" | "symlink" | "other";
+  size?: number;
+  mtime?: number;
+  mode?: number;
+};
+
+export type VaultHostSftpWriteParams = {
+  hostBindingToken: VaultHostBindingToken;
+  path: string;
+  data: string;
+  encoding?: "utf8" | "base64";
+};
+
+export type VaultHostSftpWriteResult = {
+  bytesWritten: number;
+};
+
+export type VaultListGroupsResult = {
+  groups: Array<{
+    path: string;
+    hostCount: number;
+  }>;
+};
+
 export type VaultPagesFeature = "views.vault-pages";
+
+export type VaultResolvedHostBinding = {
+  hostBindingToken: VaultHostBindingToken;
+  status: "available" | "missing" | "revoked";
+  metadata?: VaultHostMetadata;
+};
+
+export type VaultResolveHostBindingsParams = {
+  hostBindingTokens: Array<VaultHostBindingToken>;
+};
+
+export type VaultResolveHostBindingsResult = {
+  hosts: Array<VaultResolvedHostBinding>;
+};
 
 export type VaultSelectHostsParams = {
   title: string;
+  durable?: boolean;
 };
+
+export type VaultUpdateHostNotesParams = {
+  hostBindingToken: VaultHostBindingToken;
+  notes: string;
+};
+
+export type VaultUpdateHostTagsParams = {
+  hostBindingToken: VaultHostBindingToken;
+  tags: Array<string>;
+};
+
+export type ViewBadgeParams = {
+  viewId: ContributionId;
+  count?: (SafeUnsignedInteger) | (null);
+  text?: (string) | (null);
+  dot?: boolean;
+  tone?: ViewBadgeTone;
+  tooltip?: (string) | (null);
+};
+
+export type ViewBadgesFeature = "views.badges";
+
+export type ViewBadgeTone = "default" | "info" | "warning" | "danger";
 
 export type ViewContribution = {
   id: ContributionId;
@@ -1973,3 +2283,21 @@ export type ViewContribution = {
 export type ViewLocation = "aside" | "panel" | "tab" | "modal" | "vault-page" | "terminal-sidebar";
 
 export type WireIntegerLimits = {"maxSafeInteger":9007199254740991};
+
+export type WorkspaceFocusTabParams = {
+  tabId: string;
+};
+
+export type WorkspaceListTabsResult = {
+  activeTabId: string;
+  tabs: Array<WorkspaceTabSummary>;
+};
+
+export type WorkspaceTabsFeature = "workspace.tabs";
+
+export type WorkspaceTabSummary = {
+  id: string;
+  kind: "vault" | "sftp" | "session" | "workspace" | "log";
+  title: string;
+  active: boolean;
+};

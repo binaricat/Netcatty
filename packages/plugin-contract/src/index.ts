@@ -61,9 +61,17 @@ export const PLUGIN_SELECTED_CONTEXT_FEATURE = "context.selected-read" as const 
 
 export const PLUGIN_HOST_INTERACTION_FEATURE = "host.interactions" as const satisfies import("./generated/plugin-contract.js").HostInteractionFeature;
 export const PLUGIN_HOST_VAULT_FEATURE = "vault.host-actions" as const satisfies import("./generated/plugin-contract.js").HostVaultFeature;
+export const PLUGIN_HOST_VAULT_EXEC_FEATURE = "vault.host-exec" as const satisfies import("./generated/plugin-contract.js").HostVaultExecFeature;
+export const PLUGIN_HOST_VAULT_PROBE_FEATURE = "vault.host-probe" as const satisfies import("./generated/plugin-contract.js").HostVaultProbeFeature;
+export const PLUGIN_HOST_VAULT_SFTP_FEATURE = "vault.host-sftp" as const satisfies import("./generated/plugin-contract.js").HostVaultSftpFeature;
+export const PLUGIN_HOST_PORT_FORWARD_FEATURE = "vault.port-forwarding" as const satisfies import("./generated/plugin-contract.js").HostPortForwardFeature;
+export const PLUGIN_HOST_SNIPPETS_FEATURE = "vault.snippets" as const satisfies import("./generated/plugin-contract.js").HostSnippetsFeature;
+export const PLUGIN_TERMINAL_SESSION_CONTROL_FEATURE = "terminal.session-control" as const satisfies import("./generated/plugin-contract.js").TerminalSessionControlFeature;
+export const PLUGIN_WORKSPACE_TABS_FEATURE = "workspace.tabs" as const satisfies import("./generated/plugin-contract.js").WorkspaceTabsFeature;
 
 export const PLUGIN_VAULT_PAGES_FEATURE = "views.vault-pages" as const satisfies import("./generated/plugin-contract.js").VaultPagesFeature;
 export const PLUGIN_TERMINAL_SIDEBAR_FEATURE = "views.terminal-sidebar" as const satisfies import("./generated/plugin-contract.js").TerminalSidebarFeature;
+export const PLUGIN_VIEW_BADGES_FEATURE = "views.badges" as const satisfies import("./generated/plugin-contract.js").ViewBadgesFeature;
 export const PLUGIN_INTERACTIVE_COMMAND_FEATURE = "commands.interactive" as const satisfies import("./generated/plugin-contract.js").InteractiveCommandFeature;
 
 export const PLUGIN_THEME_PACK_FEATURE = "appearance.theme-packs" as const satisfies import("./generated/plugin-contract.js").ThemePackFeature;

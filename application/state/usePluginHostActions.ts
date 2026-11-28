@@ -6,6 +6,8 @@ import { getAppHandlers } from '../app/appHandlersBridge';
 import { getAppAppLockRuntime, getAppVaultRuntime, getAppSettingsRuntime } from './appRuntimeBridge';
 import { PluginHostActionResources } from './pluginHostActionResources';
 import { executePluginHostAction, type PluginHostAction } from './pluginHostActionExecution';
+import { handlePluginVaultDataRequest } from './pluginVaultDataHandlers';
+import { requestOpenDualPaneSftp } from './sftp/sftpDualPaneOpenStore';
 import { pluginHostRunsSavedScripts, type PluginHostDraftFields } from '../../domain/pluginHostActions';
 import type { Host, GroupConfig, ManagedSource, Snippet } from '../../domain/models';
 
@@ -120,6 +122,27 @@ export function usePluginHostActions() {
         });
         return;
       }
+      const openHostSession = (host: Host) => {
+        const mode = request.kind === 'vault.requestConnect' ? (request.mode ?? 'terminal') : 'terminal';
+        if (mode === 'sftp') {
+          requestOpenDualPaneSftp(host.id);
+          return;
+        }
+        const connect = getAppHandlers()?.handleConnectToHost;
+        if (typeof connect !== 'function') throw new Error('Host connection flow unavailable');
+        return connect(host);
+      };
+      if (request.kind === 'vault.requestConnect' && entry.prompt.durableHostId && entry.host) {
+        assertCurrent(entry);
+        const receipt = await bridge.respondPluginInteraction!({ requestId: entry.prompt.requestId, actionToken: entry.prompt.actionToken, action: 'commit' });
+        if (!receipt || typeof receipt !== 'object' || !receipt.completionToken) throw new Error('Host action was revoked');
+        entry.completionToken = receipt.completionToken;
+        entry.claimed = true;
+        assertCurrent(entry);
+        await openHostSession(entry.host);
+        await bridge.respondPluginInteraction({ requestId: entry.prompt.requestId, actionToken: entry.completionToken!, action: 'complete' });
+        return;
+      }
       let action: PluginHostAction;
       if (request.kind === 'vault.requestConnect' && target) action = { kind: 'connect', target };
       else if (request.kind === 'vault.requestHostDraft' && entry.prompt.reviewedDraft) {
@@ -136,11 +159,7 @@ export function usePluginHostActions() {
           entry.claimed = true;
           assertCurrent(entry);
         },
-        connect: (host) => {
-          const connect = getAppHandlers()?.handleConnectToHost;
-          if (typeof connect !== 'function') throw new Error('Host connection flow unavailable');
-          return connect(host);
-        },
+        connect: openHostSession,
       });
       await bridge.respondPluginInteraction({ requestId: entry.prompt.requestId, actionToken: entry.completionToken!, action: 'complete' });
     } catch { await fail(entry); }
@@ -191,7 +210,12 @@ export function usePluginHostActions() {
         }
         const vault = getVault();
         const candidates = [...vault.hosts];
-        const host = prompt.vaultTarget ? resources.current.resolve(prompt.vaultTarget.resourceId, prompt.vaultTarget.revision) : undefined;
+        const host = prompt.durableHostId
+          ? vault.hosts.find((candidate) => candidate.id === prompt.durableHostId)
+          : prompt.vaultTarget
+            ? resources.current.resolve(prompt.vaultTarget.resourceId, prompt.vaultTarget.revision)
+            : undefined;
+        if (prompt.durableHostId && !host) throw new Error('Saved SSH host no longer exists');
         const entry: Review = {
           prompt, candidates, candidateRevisions: new Map(candidates.map((candidate) => [candidate.id, resources.current.metadata(candidate.id).revision])),
           customGroups: vault.customGroups, host, groups: vault.groupConfigs, snippets: vault.snippets,
@@ -219,6 +243,39 @@ export function usePluginHostActions() {
       if (entry && !entry.claimed) void bridge.respondPluginInteraction?.({ requestId: entry.prompt.requestId, actionToken: entry.prompt.actionToken, action: 'cancel' }).catch(() => {});
     };
   }, [execute, fail, getVault]);
+
+  useEffect(() => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.onPluginVaultDataRequest || !bridge.respondPluginVaultData || !bridge.setPluginVaultDataReady) return;
+    const unsubscribe = bridge.onPluginVaultDataRequest((request) => {
+      void (async () => {
+        try {
+          const data = await handlePluginVaultDataRequest(request.kind, request.payload ?? {}, {
+            getVault,
+            resources: resources.current,
+          });
+          await bridge.respondPluginVaultData!({
+            requestId: request.requestId,
+            actionToken: request.actionToken,
+            ok: true,
+            data,
+          });
+        } catch (err) {
+          await bridge.respondPluginVaultData!({
+            requestId: request.requestId,
+            actionToken: request.actionToken,
+            ok: false,
+            error: err instanceof Error ? err.message : 'Vault data request failed',
+          }).catch(() => {});
+        }
+      })();
+    });
+    void bridge.setPluginVaultDataReady(true).catch(() => {});
+    return () => {
+      unsubscribe();
+      void bridge.setPluginVaultDataReady?.(false).catch(() => {});
+    };
+  }, [getVault]);
 
   const respond = useCallback(async (action: 'cancel' | 'submit', draft?: PluginHostDraftFields, rememberOverride?: boolean) => {
     const entry = current.current;
