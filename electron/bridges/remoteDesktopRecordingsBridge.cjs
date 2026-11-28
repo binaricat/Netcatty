@@ -19,6 +19,8 @@ const { Readable } = require("node:stream");
 const RECORDING_MEDIA_SCHEME = "netcatty-media";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STALE_PART_AGE_MS = 5 * 60 * 1000;
+const MAX_THUMBNAIL_BYTES = 256 * 1024;
+const WRITER_CLOSE_TIMEOUT_MS = 3000;
 
 function isValidRecordingId(value) {
   return typeof value === "string" && UUID_RE.test(value);
@@ -132,41 +134,67 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
     const dir = path.resolve(getRecordingsDir());
     const finalPath = path.resolve(dir, `${recordingId}.webm`);
     const partPath = path.resolve(dir, `${recordingId}.webm.part`);
+    const thumbPath = path.resolve(dir, `${recordingId}.jpg`);
+    const thumbPartPath = path.resolve(dir, `${recordingId}.jpg.part`);
     if (
       !finalPath.startsWith(`${dir}${path.sep}`)
       || !partPath.startsWith(`${dir}${path.sep}`)
+      || !thumbPath.startsWith(`${dir}${path.sep}`)
+      || !thumbPartPath.startsWith(`${dir}${path.sep}`)
     ) {
       throw new Error("Invalid recording path");
     }
-    return { dir, finalPath, partPath };
+    return { dir, finalPath, partPath, thumbPath, thumbPartPath };
   }
 
   function buildPlaybackUrl(recordingId) {
     return `${RECORDING_MEDIA_SCHEME}://recording/${recordingId}?token=${launchToken}`;
   }
 
+  function buildThumbnailUrl(id) {
+    return `${RECORDING_MEDIA_SCHEME}://thumbnail/${id}?token=${launchToken}`;
+  }
+
   async function closeWriterStream(writer) {
-    if (!writer || writer.closed) return;
+    if (!writer) return;
+    if (writer.closePromise) {
+      return writer.closePromise;
+    }
     writer.closed = true;
-    await writer.writeChain.catch(() => {});
-    if (writer.stream && !writer.stream.destroyed) {
+    writer.closePromise = (async () => {
+      await writer.writeChain.catch(() => {});
+      const stream = writer.stream;
+      if (!stream || stream.destroyed || stream.writableFinished) return;
       await new Promise((resolve) => {
         let settled = false;
         const done = () => {
           if (settled) return;
           settled = true;
+          clearTimeout(timer);
+          stream.removeListener("finish", done);
+          stream.removeListener("close", done);
+          stream.removeListener("error", done);
           resolve();
         };
-        writer.stream.once("finish", done);
-        writer.stream.once("close", done);
-        writer.stream.once("error", done);
+        const timer = setTimeout(() => {
+          try {
+            stream.destroy();
+          } catch {
+            // ignore
+          }
+          done();
+        }, WRITER_CLOSE_TIMEOUT_MS);
+        stream.once("finish", done);
+        stream.once("close", done);
+        stream.once("error", done);
         try {
-          writer.stream.end();
+          stream.end();
         } catch {
           done();
         }
       });
-    }
+    })();
+    return writer.closePromise;
   }
 
   async function begin(payload = {}) {
@@ -308,7 +336,12 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
         playbackUrl: buildPlaybackUrl(recordingId),
       };
     } catch (err) {
-      await fs.promises.unlink(writer.partPath).catch(() => {});
+      const { thumbPath, thumbPartPath } = resolveRecordingPaths(recordingId);
+      await Promise.all([
+        fs.promises.unlink(writer.partPath).catch(() => {}),
+        fs.promises.unlink(thumbPath).catch(() => {}),
+        fs.promises.unlink(thumbPartPath).catch(() => {}),
+      ]);
       throw err;
     } finally {
       activeWriters.delete(recordingId);
@@ -321,14 +354,16 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
       return { ok: false };
     }
     const writer = activeWriters.get(recordingId);
+    const { partPath, thumbPath, thumbPartPath } = resolveRecordingPaths(recordingId);
     if (writer) {
       activeWriters.delete(recordingId);
       await closeWriterStream(writer);
-      await fs.promises.unlink(writer.partPath).catch(() => {});
-      return { ok: true };
     }
-    const { partPath } = resolveRecordingPaths(recordingId);
-    await fs.promises.unlink(partPath).catch(() => {});
+    await Promise.all([
+      fs.promises.unlink(partPath).catch(() => {}),
+      fs.promises.unlink(thumbPath).catch(() => {}),
+      fs.promises.unlink(thumbPartPath).catch(() => {}),
+    ]);
     return { ok: true };
   }
 
@@ -345,6 +380,54 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
       }
       return {
         url: buildPlaybackUrl(recordingId),
+        exists: true,
+        bytes: stat.size,
+      };
+    } catch {
+      return { url: null, exists: false };
+    }
+  }
+
+  async function saveThumbnail(payload = {}) {
+    const { id: rawId, data } = payload || {};
+    const id = typeof rawId === "string" && rawId.length > 0 ? rawId : crypto.randomUUID();
+    if (!isValidRecordingId(id)) {
+      throw new Error("Invalid thumbnail id");
+    }
+    const buf = toBuffer(data);
+    if (!buf || buf.length === 0 || buf.length > MAX_THUMBNAIL_BYTES) {
+      throw new Error("Invalid or oversized thumbnail payload");
+    }
+    await ensureRecordingsDir();
+    const { thumbPath, thumbPartPath } = resolveRecordingPaths(id);
+    try {
+      await fs.promises.writeFile(thumbPartPath, buf, { mode: 0o600 });
+      await fs.promises.rename(thumbPartPath, thumbPath);
+      return {
+        ok: true,
+        id,
+        url: buildThumbnailUrl(id),
+        bytes: buf.length,
+      };
+    } catch (err) {
+      await fs.promises.unlink(thumbPartPath).catch(() => {});
+      throw err;
+    }
+  }
+
+  async function getThumbnailUrl(payload = {}) {
+    const { id } = payload || {};
+    if (!isValidRecordingId(id)) {
+      return { url: null, exists: false };
+    }
+    const { thumbPath } = resolveRecordingPaths(id);
+    try {
+      const stat = await fs.promises.stat(thumbPath);
+      if (!stat.isFile()) {
+        return { url: null, exists: false };
+      }
+      return {
+        url: buildThumbnailUrl(id),
         exists: true,
         bytes: stat.size,
       };
@@ -392,9 +475,9 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
       activeWriters.delete(recordingId);
       await closeWriterStream(writer);
     }
-    const { finalPath, partPath } = resolveRecordingPaths(recordingId);
+    const { finalPath, partPath, thumbPath, thumbPartPath } = resolveRecordingPaths(recordingId);
     let removed = false;
-    for (const target of [finalPath, partPath]) {
+    for (const target of [finalPath, partPath, thumbPath, thumbPartPath]) {
       try {
         await fs.promises.unlink(target);
         removed = true;
@@ -434,15 +517,26 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
     for (const entry of entries) {
       if (!entry.isFile()) continue;
       const name = entry.name;
-      const isWebm = name.endsWith(".webm");
-      const isPart = name.endsWith(".webm.part");
-      if (!isWebm && !isPart) continue;
-      const id = isPart ? name.slice(0, -".webm.part".length) : name.slice(0, -".webm".length);
+      let id = null;
+      let isRecordingFile = false;
+      if (name.endsWith(".webm")) {
+        id = name.slice(0, -".webm".length);
+        isRecordingFile = true;
+      } else if (name.endsWith(".webm.part")) {
+        id = name.slice(0, -".webm.part".length);
+        isRecordingFile = true;
+      } else if (name.endsWith(".jpg")) {
+        id = name.slice(0, -".jpg".length);
+      } else if (name.endsWith(".jpg.part")) {
+        id = name.slice(0, -".jpg.part".length);
+      } else {
+        continue;
+      }
       if (!isValidRecordingId(id)) continue;
       if (activeWriters.has(id) || protectedSet.has(id)) continue;
       try {
         await fs.promises.unlink(path.join(dir, name));
-        deleted += 1;
+        if (isRecordingFile) deleted += 1;
       } catch {
         // ignore individual file delete failure
       }
@@ -464,13 +558,18 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
     let count = 0;
     let totalBytes = 0;
     for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".webm")) continue;
-      const id = entry.name.slice(0, -".webm".length);
+      if (!entry.isFile()) continue;
+      const isWebm = entry.name.endsWith(".webm");
+      const isThumb = entry.name.endsWith(".jpg");
+      if (!isWebm && !isThumb) continue;
+      const id = isWebm
+        ? entry.name.slice(0, -".webm".length)
+        : entry.name.slice(0, -".jpg".length);
       if (!isValidRecordingId(id)) continue;
       try {
         const stat = await fs.promises.stat(path.join(dirPath, entry.name));
         if (stat.isFile()) {
-          count += 1;
+          if (isWebm) count += 1;
           totalBytes += stat.size;
         }
       } catch {
@@ -517,23 +616,39 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
 
     let deleted = 0;
     const files = [];
+    const thumbFiles = [];
 
     for (const entry of entries) {
       if (!entry.isFile()) continue;
       const name = entry.name;
       const fullPath = path.join(dir, name);
-      if (name.endsWith(".webm.part")) {
-        const id = name.slice(0, -".webm.part".length);
+      if (name.endsWith(".webm.part") || name.endsWith(".jpg.part")) {
+        const suffix = name.endsWith(".webm.part") ? ".webm.part" : ".jpg.part";
+        const id = name.slice(0, -suffix.length);
         if (!isValidRecordingId(id) || activeWriters.has(id)) continue;
         try {
           const stat = await fs.promises.stat(fullPath);
           if (purgeAllInactiveParts || now - stat.mtimeMs >= STALE_PART_AGE_MS) {
             await fs.promises.unlink(fullPath);
-            deleted += 1;
+            if (suffix === ".webm.part") deleted += 1;
           }
         } catch {
           // ignore
         }
+        continue;
+      }
+
+      if (name.endsWith(".jpg")) {
+        const id = name.slice(0, -".jpg".length);
+        if (!isValidRecordingId(id)) continue;
+        let stat;
+        try {
+          stat = await fs.promises.stat(fullPath);
+        } catch {
+          continue;
+        }
+        if (!stat.isFile()) continue;
+        thumbFiles.push({ id, fullPath, mtimeMs: stat.mtimeMs });
         continue;
       }
 
@@ -555,6 +670,7 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
       if (referencedSet && !referencedSet.has(id) && !isProtected) {
         try {
           await fs.promises.unlink(fullPath);
+          await fs.promises.unlink(path.join(dir, `${id}.jpg`)).catch(() => {});
           deleted += 1;
           continue;
         } catch {
@@ -573,6 +689,7 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
         if (stat.mtimeMs < cutoff) {
           try {
             await fs.promises.unlink(fullPath);
+            await fs.promises.unlink(path.join(dir, `${id}.jpg`)).catch(() => {});
             deleted += 1;
             continue;
           } catch {
@@ -591,6 +708,7 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
     }
 
     // 3. Max storage quota eviction (oldest non-protected first).
+    const evictedIds = new Set();
     if (typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0) {
       let totalBytes = files.reduce((sum, f) => sum + f.size, 0);
       if (totalBytes > maxBytes) {
@@ -601,6 +719,8 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
           if (totalBytes <= maxBytes) break;
           try {
             await fs.promises.unlink(item.fullPath);
+            await fs.promises.unlink(path.join(dir, `${item.id}.jpg`)).catch(() => {});
+            evictedIds.add(item.id);
             totalBytes -= item.size;
             deleted += 1;
           } catch {
@@ -610,11 +730,43 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
       }
     }
 
+    // 4. Sweep orphaned / expired standalone thumbnails.
+    const survivingWebmIds = new Set(
+      files.filter((f) => !evictedIds.has(f.id)).map((f) => f.id),
+    );
+    for (const thumb of thumbFiles) {
+      if (protectedSet.has(thumb.id) || activeWriters.has(thumb.id) || survivingWebmIds.has(thumb.id)) {
+        continue;
+      }
+      if (referencedSet && !referencedSet.has(thumb.id)) {
+        await fs.promises.unlink(thumb.fullPath).catch(() => {});
+        continue;
+      }
+      if (
+        typeof retentionDays === "number"
+        && Number.isFinite(retentionDays)
+        && retentionDays > 0
+      ) {
+        const cutoff = now - retentionDays * 24 * 60 * 60 * 1000;
+        if (thumb.mtimeMs < cutoff) {
+          await fs.promises.unlink(thumb.fullPath).catch(() => {});
+        }
+      }
+    }
+
     return { deleted };
   }
 
+  function toSafeWebStream(filePath, streamOpts) {
+    const nodeStream = fs.createReadStream(filePath, streamOpts);
+    // Guard against unhandled error events if the file is removed mid-playback.
+    nodeStream.on("error", () => {});
+    return Readable.toWeb(nodeStream);
+  }
+
   /**
-   * HTTP 206 Range streaming handler for `netcatty-media://recording/<uuid>?token=<token>`.
+   * HTTP 206 Range streaming handler for `netcatty-media://recording/<uuid>?token=<token>`
+   * and `netcatty-media://thumbnail/<uuid>?token=<token>`.
    * Zero-RAM streaming via `fs.createReadStream` -> Web `ReadableStream`.
    */
   async function handleMediaProtocolRequest(request) {
@@ -626,7 +778,9 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
 
     try {
       const url = new URL(request.url);
-      if (url.protocol !== `${RECORDING_MEDIA_SCHEME}:` || url.hostname !== "recording") {
+      const isRecordingHost = url.hostname === "recording";
+      const isThumbnailHost = url.hostname === "thumbnail";
+      if (url.protocol !== `${RECORDING_MEDIA_SCHEME}:` || (!isRecordingHost && !isThumbnailHost)) {
         return new Response("Not Found", { status: 404, headers: baseHeaders });
       }
       const token = url.searchParams.get("token");
@@ -638,14 +792,46 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
         return new Response("Bad Request", { status: 400, headers: baseHeaders });
       }
 
-      const { finalPath } = resolveRecordingPaths(recordingId);
+      const { finalPath, thumbPath } = resolveRecordingPaths(recordingId);
+      const method = (request.method || "GET").toUpperCase();
+
+      if (isThumbnailHost) {
+        if (method === "HEAD") {
+          const stat = await fs.promises.stat(thumbPath).catch(() => null);
+          if (!stat || !stat.isFile()) {
+            return new Response("Not Found", { status: 404, headers: baseHeaders });
+          }
+          return new Response(null, {
+            status: 200,
+            headers: {
+              "Cache-Control": "private, max-age=3600",
+              "Cross-Origin-Resource-Policy": "cross-origin",
+              "Content-Type": "image/jpeg",
+              "Content-Length": String(stat.size),
+            },
+          });
+        }
+        const bytes = await fs.promises.readFile(thumbPath).catch(() => null);
+        if (!bytes) {
+          return new Response("Not Found", { status: 404, headers: baseHeaders });
+        }
+        return new Response(bytes, {
+          status: 200,
+          headers: {
+            "Cache-Control": "private, max-age=3600",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Content-Type": "image/jpeg",
+            "Content-Length": String(bytes.byteLength),
+          },
+        });
+      }
+
       const stat = await fs.promises.stat(finalPath).catch(() => null);
       if (!stat || !stat.isFile()) {
         return new Response("Not Found", { status: 404, headers: baseHeaders });
       }
 
       const totalSize = stat.size;
-      const method = (request.method || "GET").toUpperCase();
       const rangeHeader = typeof request.headers?.get === "function"
         ? request.headers.get("range")
         : request.headers?.range;
@@ -671,11 +857,10 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
         if (method === "HEAD") {
           return new Response(null, { status: 206, headers });
         }
-        const nodeStream = fs.createReadStream(finalPath, {
-          start: parsed.start,
-          end: parsed.end,
-        });
-        return new Response(Readable.toWeb(nodeStream), { status: 206, headers });
+        return new Response(
+          toSafeWebStream(finalPath, { start: parsed.start, end: parsed.end }),
+          { status: 206, headers },
+        );
       }
 
       const headers = {
@@ -686,8 +871,7 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
       if (method === "HEAD") {
         return new Response(null, { status: 200, headers });
       }
-      const nodeStream = fs.createReadStream(finalPath);
-      return new Response(Readable.toWeb(nodeStream), { status: 200, headers });
+      return new Response(toSafeWebStream(finalPath), { status: 200, headers });
     } catch {
       return new Response("Not Found", { status: 404, headers: baseHeaders });
     }
@@ -700,7 +884,12 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
       writers.map(async (writer) => {
         try {
           await closeWriterStream(writer);
-          await fs.promises.unlink(writer.partPath).catch(() => {});
+          const { thumbPath, thumbPartPath } = resolveRecordingPaths(writer.recordingId);
+          await Promise.all([
+            fs.promises.unlink(writer.partPath).catch(() => {}),
+            fs.promises.unlink(thumbPath).catch(() => {}),
+            fs.promises.unlink(thumbPartPath).catch(() => {}),
+          ]);
         } catch {
           // ignore shutdown cleanup errors
         }
@@ -714,6 +903,8 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
     ipcMain.handle("netcatty:remote-desktop-recording:finish", (_event, payload) => finish(payload));
     ipcMain.handle("netcatty:remote-desktop-recording:abort", (_event, payload) => abort(payload));
     ipcMain.handle("netcatty:remote-desktop-recording:get-playback-url", (_event, payload) => getPlaybackUrl(payload));
+    ipcMain.handle("netcatty:remote-desktop-recording:save-thumbnail", (_event, payload) => saveThumbnail(payload));
+    ipcMain.handle("netcatty:remote-desktop-recording:get-thumbnail-url", (_event, payload) => getThumbnailUrl(payload));
     ipcMain.handle("netcatty:remote-desktop-recording:export", (event, payload) => exportRecording(event, payload));
     ipcMain.handle("netcatty:remote-desktop-recording:delete", (_event, payload) => deleteRecording(payload));
     ipcMain.handle("netcatty:remote-desktop-recording:delete-many", (_event, payload) => deleteMany(payload));
@@ -728,11 +919,14 @@ function createRemoteDesktopRecordingsBridge(options = {}) {
     launchToken,
     getRecordingsDir,
     buildPlaybackUrl,
+    buildThumbnailUrl,
     begin,
     append,
     finish,
     abort,
     getPlaybackUrl,
+    saveThumbnail,
+    getThumbnailUrl,
     exportRecording,
     deleteRecording,
     deleteMany,

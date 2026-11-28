@@ -9,7 +9,7 @@ export type ConnectionLogsSnapshot = {
 };
 
 export type ConnectionLogsActions = {
-  updateConnectionLog: (id: string, updates: Partial<ConnectionLog>) => void;
+  updateConnectionLog: (id: string, updates: Partial<ConnectionLog>) => void | Promise<unknown>;
   toggleConnectionLogSaved: (id: string) => void;
   deleteConnectionLog: (id: string) => void;
   clearUnsavedConnectionLogs: () => void;

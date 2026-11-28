@@ -47,7 +47,12 @@ import {
   type RemoteDesktopClipboardTransferState,
   type RemoteDesktopDisplayMode,
   type RemoteDesktopRdpdrRequest,
+  type RemoteDesktopRecordingCaptureHandle,
 } from './remoteDesktopHelpers';
+import {
+  captureCanvasThumbnailJpeg,
+  createStableCanvasCaptureStream,
+} from './remoteDesktopVideoCapture';
 import type { RemoteDesktopSpecialKeyId } from './vncKeymap';
 
 import type {
@@ -410,6 +415,12 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       return canvasRef.current?.getBoundingClientRect() ?? null;
     }, []);
 
+    const captureThumbnailJpeg = useCallback(async (): Promise<Uint8Array | null> => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      return captureCanvasThumbnailJpeg(canvas);
+    }, []);
+
     const getCaptureStream = useCallback((fps: number, includeAudio?: boolean): MediaStream | null => {
       const canvas = canvasRef.current;
       if (!canvas || canvas.width === 0 || canvas.height === 0) return null;
@@ -430,6 +441,22 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         return null;
       }
     }, []);
+
+    const createRecordingCapture = useCallback(
+      (fps: number, includeAudio?: boolean): RemoteDesktopRecordingCaptureHandle | null => {
+        const canvas = canvasRef.current;
+        if (!canvas || canvas.width === 0 || canvas.height === 0) return null;
+        const audioPlayer = includeAudio ? audioPlayerRef.current : null;
+        const audioStream = audioPlayer?.ensureCaptureAudioStream() ?? null;
+        return createStableCanvasCaptureStream(canvas, fps, {
+          audioStream,
+          onReleaseAudio: audioStream && audioPlayer
+            ? () => audioPlayer.releaseCaptureAudioStream()
+            : undefined,
+        });
+      },
+      [],
+    );
 
     const emitClipboardTransfer = useCallback((transfer: RemoteDesktopClipboardTransferState | null) => {
       callbacksRef.current.onClipboardTransferChange?.(transfer);
@@ -890,9 +917,11 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         typeText,
         releaseAllInputs,
         captureScreenshot,
+        captureThumbnailJpeg,
         captureFrame,
         getCanvasRect,
         getCaptureStream,
+        createRecordingCapture,
         focusInput,
         syncClipboardNow,
         downloadRemoteClipboardFile,
@@ -907,6 +936,8 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         addSharedDrive,
         captureFrame,
         captureScreenshot,
+        captureThumbnailJpeg,
+        createRecordingCapture,
         downloadRemoteClipboardFile,
         focusInput,
         getCanvasRect,

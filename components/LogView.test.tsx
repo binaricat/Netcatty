@@ -126,10 +126,85 @@ test("LogView renders clean non-terminal metadata card for unrecorded VNC/RDP se
   assert.doesNotMatch(markup, /Appearance/);
 });
 
-test("LogView memo comparator checks recordingId and recordingBytes", () => {
+test("LogView memo comparator checks recordingId, recordings, remoteDesktopEvents, and recordingBytes", () => {
   const source = readFileSync(new URL("./LogView.tsx", import.meta.url), "utf8");
   const comparator = source.match(/const logViewAreEqual[\s\S]*?^};/m)?.[0] ?? "";
   assert.ok(comparator, "expected logViewAreEqual in LogView.tsx");
   assert.match(comparator, /prev\.log\.recordingId === next\.log\.recordingId/);
   assert.match(comparator, /prev\.log\.recordingBytes === next\.log\.recordingBytes/);
+  assert.match(comparator, /prev\.log\.recordings === next\.log\.recordings/);
+  assert.match(comparator, /prev\.log\.remoteDesktopEvents === next\.log\.remoteDesktopEvents/);
+});
+
+test("LogView renders multi-clip strip and video-linked session timeline with seek chips", () => {
+  const log: ConnectionLog = {
+    id: "log-multi",
+    sessionId: "sess-rdp-multi",
+    hostId: "h-1",
+    hostLabel: "Windows Multi",
+    hostname: "10.0.0.11",
+    username: "Administrator",
+    protocol: "rdp",
+    startTime: 1_700_000_000_000,
+    endTime: 1_700_000_180_000,
+    localUsername: "alice",
+    localHostname: "macbook",
+    saved: true,
+    recordingId: "22222222-2222-4222-8222-222222222222",
+    recordings: [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        startedAt: 1_700_000_010_000,
+        endedAt: 1_700_000_040_000,
+        durationMs: 30_000,
+        bytes: 1_048_576,
+        mimeType: "video/webm;codecs=vp9",
+        hasAudio: false,
+        width: 1920,
+        height: 1080,
+      },
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        startedAt: 1_700_000_060_000,
+        endedAt: 1_700_000_120_000,
+        durationMs: 60_000,
+        bytes: 2_097_152,
+        mimeType: "video/webm;codecs=vp9,opus",
+        hasAudio: true,
+        width: 1920,
+        height: 1080,
+      },
+    ],
+    remoteDesktopMeta: {
+      resolution: { width: 1920, height: 1080 },
+      securityLabel: "TLS / NLA",
+      tunneled: true,
+    },
+    remoteDesktopEvents: [
+      {
+        id: "ev-1",
+        timestamp: 1_700_000_075_000,
+        kind: "clipboard_download",
+        summary: "Downloaded report.pdf",
+        detail: "1.2 MB",
+      },
+    ],
+  };
+
+  const markup = renderWithI18n(
+    React.createElement(LogView, {
+      log,
+      defaultTerminalTheme: defaultTheme,
+      defaultFontSize: 13,
+      isVisible: true,
+      onClose: () => {},
+      onUpdateLog: () => {},
+    }),
+  );
+
+  assert.match(markup, /data-testid="log-view-clip-strip"/);
+  assert.match(markup, /data-testid="log-view-timeline-drawer"/);
+  assert.match(markup, /Downloaded report\.pdf/);
+  assert.match(markup, /data-seek-seconds="15"/);
+  assert.match(markup, /TLS \/ NLA/);
 });

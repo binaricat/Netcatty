@@ -309,3 +309,56 @@ test("remoteDesktopRecordingsBridge end-to-end: streaming write, duration patch,
     await fs.promises.rm(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("remoteDesktopRecordingsBridge saves, serves, caps, and garbage-collects JPEG thumbnails", async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "nc-rec-thumb-"));
+  try {
+    const recordingsDir = path.join(tmpDir, "recordings");
+    const bridge = createRemoteDesktopRecordingsBridge({
+      recordingsDir,
+      launchToken: "thumb-token-99",
+    });
+
+    const jpegBytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
+    const saved = await bridge.saveThumbnail({ data: jpegBytes });
+    assert.equal(saved.ok, true);
+    assert.equal(isValidRecordingId(saved.id), true);
+    assert.equal(saved.url, `netcatty-media://thumbnail/${saved.id}?token=thumb-token-99`);
+
+    // Oversized thumbnail rejected (> 256 KB)
+    await assert.rejects(
+      () => bridge.saveThumbnail({ data: new Uint8Array(300 * 1024) }),
+      /oversized/i,
+    );
+
+    const urlInfo = await bridge.getThumbnailUrl({ id: saved.id });
+    assert.equal(urlInfo.exists, true);
+    assert.equal(urlInfo.url, saved.url);
+
+    // Media protocol serves image/jpeg
+    const resp = await bridge.handleMediaProtocolRequest({
+      url: saved.url,
+      method: "GET",
+      headers: new Headers(),
+    });
+    assert.equal(resp.status, 200);
+    assert.equal(resp.headers.get("content-type"), "image/jpeg");
+    assert.deepEqual(new Uint8Array(await resp.arrayBuffer()), jpegBytes);
+
+    // Orphan GC sweeps unreferenced standalone thumbnails
+    await bridge.runGc({ referencedIds: [], protectedIds: [] });
+    assert.equal((await bridge.getThumbnailUrl({ id: saved.id })).exists, false);
+
+    // Deleting a recording cascades to its companion thumbnail
+    const { recordingId } = await bridge.begin({ protocol: "rdp" });
+    await bridge.append({ recordingId, chunk: Buffer.from([1, 2, 3, 4]) });
+    await bridge.saveThumbnail({ id: recordingId, data: jpegBytes });
+    await bridge.finish({ recordingId, durationMs: 3000 });
+    assert.equal((await bridge.getThumbnailUrl({ id: recordingId })).exists, true);
+
+    await bridge.deleteRecording({ recordingId });
+    assert.equal((await bridge.getThumbnailUrl({ id: recordingId })).exists, false);
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+  }
+});

@@ -12,6 +12,7 @@ import { retainLocalHostLastConnectedAt } from "../../domain/sync";
 import { sanitizeGroupConfig } from "../../domain/groupConfig";
 import { normalizeKnownHosts } from "../../domain/knownHosts";
 import { normalizeNoteGroups, normalizeVaultNotes } from "../../domain/notes";
+import { getConnectionLogMediaIds } from "../../domain/remoteDesktopRecording";
 import {
   applyPluginImporterDestination,
   mergePluginImporterDrafts,
@@ -634,16 +635,18 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
     }
     const remainingRecordingIds = new Set<string>();
     for (const log of next) {
-      if (log.recordingId) remainingRecordingIds.add(log.recordingId);
+      for (const mediaId of getConnectionLogMediaIds(log)) {
+        remainingRecordingIds.add(mediaId);
+      }
     }
     const removedRecordingIds: string[] = [];
     for (const log of prev) {
-      if (
-        !nextIds.has(log.id)
-        && log.recordingId
-        && !remainingRecordingIds.has(log.recordingId)
-      ) {
-        removedRecordingIds.push(log.recordingId);
+      if (!nextIds.has(log.id)) {
+        for (const mediaId of getConnectionLogMediaIds(log)) {
+          if (!remainingRecordingIds.has(mediaId)) {
+            removedRecordingIds.push(mediaId);
+          }
+        }
       }
     }
     if (removedRecordingIds.length > 0) {
@@ -1586,19 +1589,25 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
 
   // One-time startup GC to sweep orphaned / expired / over-quota remote desktop recordings
   // while preserving all bookmarked/saved connection log recordings.
+  // CRITICAL: Must wait for `isInitialized` so `connectionLogsRef.current` has been hydrated
+  // from storage; running before boot hydration would pass `referencedIds: []` and wipe files!
   const hasRunRecordingStartupGcRef = useRef(false);
   useEffect(() => {
-    if (!syncConnectionLogTerminalData || hasRunRecordingStartupGcRef.current) return;
+    if (!isInitialized || !syncConnectionLogTerminalData || hasRunRecordingStartupGcRef.current) return;
     hasRunRecordingStartupGcRef.current = true;
     const bridge = netcattyBridge.get();
     if (!bridge?.remoteDesktopRecordings?.runGc) return;
     const logs = connectionLogsRef.current;
-    const referencedIds = logs
-      .map((log) => log.recordingId)
-      .filter((id): id is string => typeof id === "string" && id.length > 0);
-    const protectedIds = logs
-      .filter((log) => log.saved && typeof log.recordingId === "string" && log.recordingId.length > 0)
-      .map((log) => log.recordingId as string);
+    const referencedSet = new Set<string>();
+    const protectedSet = new Set<string>();
+    for (const log of logs) {
+      for (const mediaId of getConnectionLogMediaIds(log)) {
+        referencedSet.add(mediaId);
+        if (log.saved) protectedSet.add(mediaId);
+      }
+    }
+    const referencedIds = Array.from(referencedSet);
+    const protectedIds = Array.from(protectedSet);
     const storedMaxMb = localStorageAdapter.readNumber(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB);
     const maxMb = storedMaxMb != null && storedMaxMb >= 64 ? storedMaxMb : 1024;
     const storedRetention = localStorageAdapter.readNumber(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS);
@@ -1611,7 +1620,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
         protectedIds,
       })
       .catch(() => {});
-  }, [syncConnectionLogTerminalData]);
+  }, [isInitialized, syncConnectionLogTerminalData]);
 
   useLayoutEffect(() => {
     registerConnectionLogsActions({

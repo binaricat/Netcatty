@@ -670,3 +670,90 @@ test("reopening a moved tab cancels stale close notifications from an earlier cr
     setRestoreAttachedSessionOutput(null);
   }
 });
+
+test("standalone terminal popup finalizes session logs on normal close and skips preventDefault when isQuitting", async () => {
+  const { EventEmitter } = require("node:events");
+  const ipcMain = new EventEmitter();
+  let isQuittingFlag = false;
+  const createdWindows = [];
+
+  class StandalonePopupStub {
+    constructor() {
+      createdWindows.push(this);
+      this.handlers = new Map();
+      this.closeCalls = 0;
+      this.destroyed = false;
+      this.webContents = {
+        id: 100 + createdWindows.length,
+        on() {},
+        send: (channel, payload) => {
+          if (channel === "app:finalize-session-logs") {
+            queueMicrotask(() => {
+              ipcMain.emit("app:session-logs-finalized", { sender: this.webContents }, {
+                requestId: payload.requestId,
+                success: true,
+              });
+            });
+          }
+        },
+        setWindowOpenHandler() {},
+      };
+    }
+
+    on(channel, handler) { this.handlers.set(channel, handler); }
+    isDestroyed() { return this.destroyed; }
+    loadURL() { return Promise.resolve(); }
+    setBackgroundColor() {}
+    close() {
+      this.closeCalls += 1;
+      const evt = { prevented: false, preventDefault() { this.prevented = true; } };
+      this.handlers.get("close")?.(evt);
+      if (!evt.prevented) {
+        this.destroyed = true;
+        this.handlers.get("closed")?.();
+      }
+    }
+  }
+
+  const api = createTerminalPopupWindowApi({
+    mainWindow: null,
+    currentTheme: "light",
+    get isQuitting() { return isQuittingFlag; },
+    V8_CACHE_OPTIONS: "bypassHeatCheck",
+    resolveFrontendBackgroundColor() { return "#fff"; },
+    resolveSettingsWindowBounds() { return {}; },
+    createExternalOnlyWindowOpenHandler() { return {}; },
+    applyWindowOpacityToWindow() {},
+    getDevRendererBaseUrl(url) { return url; },
+    showAndFocusWindow() {},
+    registerAppContentWindow() {},
+    unregisterAppContentWindow() {},
+    notifyAppContentWindowClosed() {},
+  });
+
+  // Case 1: Normal close prevents first close, finalizes logs, then closes cleanly.
+  await api.openTerminalPopupWindow(
+    { BrowserWindow: StandalonePopupStub, nativeTheme: {}, shell: {}, ipcMain },
+    { preload: "/tmp/preload.cjs", isDev: false, appIcon: null, isMac: false, electronDir: __dirname },
+    { popupId: "standalone-normal", title: "RDP Popup" },
+  );
+  const normalWin = createdWindows[0];
+  const normalCloseEvent = { prevented: false, preventDefault() { this.prevented = true; } };
+  normalWin.handlers.get("close")?.(normalCloseEvent);
+  assert.equal(normalCloseEvent.prevented, true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(normalWin.closeCalls, 1);
+  assert.equal(normalWin.destroyed, true);
+
+  // Case 2: App quit (isQuitting === true) must NOT preventDefault on popup close.
+  isQuittingFlag = true;
+  await api.openTerminalPopupWindow(
+    { BrowserWindow: StandalonePopupStub, nativeTheme: {}, shell: {}, ipcMain },
+    { preload: "/tmp/preload.cjs", isDev: false, appIcon: null, isMac: false, electronDir: __dirname },
+    { popupId: "standalone-quit", title: "RDP Popup Quit" },
+  );
+  const quitWin = createdWindows[1];
+  const quitCloseEvent = { prevented: false, preventDefault() { this.prevented = true; } };
+  quitWin.handlers.get("close")?.(quitCloseEvent);
+  assert.equal(quitCloseEvent.prevented, false);
+});

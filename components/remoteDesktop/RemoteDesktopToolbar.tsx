@@ -24,6 +24,7 @@ import {
   History,
   Keyboard,
   Layers,
+  Loader2,
   Lock,
   Maximize,
   Maximize2,
@@ -161,6 +162,7 @@ export interface RemoteDesktopToolbarProps {
   onOpenAiAuditLog?: () => void;
   // Session Recording
   isRecording?: boolean;
+  isStoppingRecording?: boolean;
   recordingElapsedLabel?: string;
   recordingSupported?: boolean;
   onToggleRecording?: () => void;
@@ -682,6 +684,7 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
   aiAuditCount = 0,
   onOpenAiAuditLog,
   isRecording = false,
+  isStoppingRecording = false,
   recordingElapsedLabel = '00:00',
   recordingSupported = true,
   onToggleRecording,
@@ -1974,23 +1977,34 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
         )}
 
         {/* Session Recording Button / Active Pill (P2-B, visible in fullscreen too) */}
-        {onToggleRecording && (!narrowMode || isRecording) && (
+        {onToggleRecording && (!narrowMode || isRecording || isStoppingRecording) && (
           <Tooltip>
             <TooltipTrigger asChild>
-              {isRecording ? (
+              {isRecording || isStoppingRecording ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   data-testid="remote-desktop-record-btn"
-                  data-recording="true"
-                  className="h-7 shrink-0 gap-1.5 rounded-md bg-rose-500/12 px-2 text-xs font-medium text-rose-500 hover:bg-rose-500/20"
+                  data-recording={isStoppingRecording ? 'stopping' : 'true'}
+                  disabled={isStoppingRecording}
+                  className="h-7 shrink-0 gap-1.5 rounded-md bg-rose-500/12 px-2 text-xs font-medium text-rose-500 hover:bg-rose-500/20 disabled:opacity-70"
                   onClick={onToggleRecording}
                   aria-label={tr(t, 'remoteDesktop.toolbar.stopRecording', 'Stop recording')}
                 >
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500 animate-pulse" />
-                  <Square size={9} className="fill-current" />
-                  <span className="font-mono text-[11px] font-medium">{recordingElapsedLabel}</span>
+                  {isStoppingRecording ? (
+                    <Loader2 size={11} className="shrink-0 animate-spin" />
+                  ) : (
+                    <>
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500 animate-pulse" />
+                      <Square size={9} className="fill-current" />
+                    </>
+                  )}
+                  <span className="font-mono text-[11px] font-medium">
+                    {isStoppingRecording
+                      ? tr(t, 'remoteDesktop.toolbar.savingRecording', 'Saving...')
+                      : recordingElapsedLabel}
+                  </span>
                 </Button>
               ) : (
                 <Button
@@ -2010,9 +2024,11 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
               )}
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
-              {isRecording
-                ? tr(t, 'remoteDesktop.toolbar.stopRecording', 'Stop recording')
-                : tr(t, 'remoteDesktop.toolbar.record', 'Record session')}
+              {isStoppingRecording
+                ? tr(t, 'remoteDesktop.toolbar.savingRecording', 'Saving...')
+                : isRecording
+                  ? tr(t, 'remoteDesktop.toolbar.stopRecording', 'Stop recording')
+                  : tr(t, 'remoteDesktop.toolbar.record', 'Record session')}
             </TooltipContent>
           </Tooltip>
         )}
@@ -2193,15 +2209,17 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                 <PopoverClose asChild>
                   <button
                     type="button"
-                    disabled={status !== 'connected' || !recordingSupported}
+                    disabled={status !== 'connected' || !recordingSupported || isStoppingRecording}
                     onClick={onToggleRecording}
                     className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent disabled:opacity-45"
                   >
                     <Circle size={12} className={isRecording ? 'fill-rose-500 text-rose-500' : 'text-muted-foreground'} />
                     <span>
-                      {isRecording
-                        ? tr(t, 'remoteDesktop.toolbar.stopRecording', 'Stop recording')
-                        : tr(t, 'remoteDesktop.toolbar.record', 'Record session')}
+                      {isStoppingRecording
+                        ? tr(t, 'remoteDesktop.toolbar.savingRecording', 'Saving...')
+                        : isRecording
+                          ? tr(t, 'remoteDesktop.toolbar.stopRecording', 'Stop recording')
+                          : tr(t, 'remoteDesktop.toolbar.record', 'Record session')}
                     </span>
                   </button>
                 </PopoverClose>

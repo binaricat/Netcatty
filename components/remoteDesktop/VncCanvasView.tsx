@@ -31,7 +31,12 @@ import {
   type RemoteDesktopCanvasHandle,
   type RemoteDesktopDisplayMode,
   type RemoteDesktopQualityPreset,
+  type RemoteDesktopRecordingCaptureHandle,
 } from './remoteDesktopHelpers';
+import {
+  captureCanvasThumbnailJpeg,
+  createStableCanvasCaptureStream,
+} from './remoteDesktopVideoCapture';
 
 // VNC Binary WebSocket Opcodes (must match electron/bridges/remoteDesktopBridge.cjs)
 const S2C = {
@@ -375,6 +380,12 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       return canvasRef.current?.getBoundingClientRect() ?? null;
     }, []);
 
+    const captureThumbnailJpeg = useCallback(async (): Promise<Uint8Array | null> => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      return captureCanvasThumbnailJpeg(canvas);
+    }, []);
+
     const getCaptureStream = useCallback((fps: number): MediaStream | null => {
       const canvas = canvasRef.current;
       if (!canvas || canvas.width === 0 || canvas.height === 0) return null;
@@ -385,6 +396,15 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
         return null;
       }
     }, []);
+
+    const createRecordingCapture = useCallback(
+      (fps: number): RemoteDesktopRecordingCaptureHandle | null => {
+        const canvas = canvasRef.current;
+        if (!canvas || canvas.width === 0 || canvas.height === 0) return null;
+        return createStableCanvasCaptureStream(canvas, fps);
+      },
+      [],
+    );
 
     const focusInput = useCallback(() => {
       imeInputRef.current?.focus({ preventScroll: true });
@@ -673,9 +693,11 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
         typeText,
         releaseAllInputs,
         captureScreenshot,
+        captureThumbnailJpeg,
         captureFrame,
         getCanvasRect,
         getCaptureStream,
+        createRecordingCapture,
         focusInput,
         syncClipboardNow,
         requestRefresh,
@@ -687,6 +709,8 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       [
         captureFrame,
         captureScreenshot,
+        captureThumbnailJpeg,
+        createRecordingCapture,
         focusInput,
         getCanvasRect,
         getCaptureStream,

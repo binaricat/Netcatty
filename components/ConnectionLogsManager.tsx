@@ -2,6 +2,7 @@ import {
     Bookmark,
     ChevronDown,
     CircleUserRound,
+    Monitor,
     Server,
     Terminal,
     Trash2,
@@ -11,7 +12,8 @@ import {
 import React, { memo, useCallback, useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { resolveHostIconAppearance } from "../domain/hostIcon";
-import { isRdpProtocol, isVncProtocol } from "../domain/remoteDesktop";
+import { isRdpProtocol, isRemoteDesktopProtocol, isVncProtocol } from "../domain/remoteDesktop";
+import { getConnectionLogRecordingSummary } from "../domain/remoteDesktopRecording";
 import { cn } from "../lib/utils";
 import { ConnectionLog, Host } from "../types";
 import { DistroAvatar } from "./DistroAvatar";
@@ -27,6 +29,8 @@ interface ConnectionLogsManagerProps {
     onClearUnsaved: () => void;
     onOpenLogView: (log: ConnectionLog) => void;
 }
+
+export type ConnectionLogFilter = "all" | "terminal" | "remoteDesktop" | "recorded";
 
 export function formatRecordingDuration(durationMs?: number): string {
     if (!durationMs || !Number.isFinite(durationMs) || durationMs <= 0) {
@@ -110,8 +114,28 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
         iconColorCustom: log.hostIconColorCustom,
     });
     const hasPersistedHostIcon = !isLocal && !isSerial && !isRemoteDesktop && (!!log.hostDistro || !!customHostIcon);
-    const recordingSizeText = formatRecordingBytes(log.recordingBytes);
-    const recordingDurationText = formatRecordingDuration(log.recordingDurationMs);
+    const recordingSummary = getConnectionLogRecordingSummary(log);
+    const recordingSizeText = formatRecordingBytes(recordingSummary.totalBytes);
+    const recordingDurationText = formatRecordingDuration(recordingSummary.totalDurationMs);
+    const resolutionText = log.remoteDesktopMeta?.resolution
+        ? `${log.remoteDesktopMeta.resolution.width}\u00d7${log.remoteDesktopMeta.resolution.height}`
+        : "";
+    const subtitleParts: string[] = [];
+    if (isLocal) {
+        subtitleParts.push("local");
+    } else if (isSerial) {
+        subtitleParts.push(`serial, ${log.hostname}`);
+    } else if (log.username) {
+        subtitleParts.push(`${log.protocol}, ${log.username}`);
+    } else {
+        subtitleParts.push(`${log.protocol}, ${log.hostname}`);
+    }
+    if (isRemoteDesktop && resolutionText) {
+        subtitleParts.push(resolutionText);
+    }
+    if (isRemoteDesktop && log.remoteDesktopMeta?.securityLabel) {
+        subtitleParts.push(log.remoteDesktopMeta.securityLabel);
+    }
 
     return (
         <div
@@ -185,13 +209,16 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
                         <div className="text-sm font-medium truncate">
                             {isLocal ? t("logs.localTerminal") : log.hostLabel}
                         </div>
-                        {log.recordingId && (
+                        {recordingSummary.primaryClip && (
                             <span
-                                data-recording-badge={log.recordingId}
+                                data-recording-badge={recordingSummary.primaryClip.id}
                                 className="inline-flex items-center gap-1 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-primary shrink-0"
                             >
                                 <Video size={12} />
                                 <span>
+                                    {recordingSummary.clipCount > 1
+                                        ? `${t("logs.recording.clipsCount", { count: recordingSummary.clipCount })} · `
+                                        : ""}
                                     {recordingDurationText}
                                     {recordingSizeText ? ` · ${recordingSizeText}` : ""}
                                 </span>
@@ -199,13 +226,7 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
                         )}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
-                        {isLocal
-                            ? "local"
-                            : isSerial
-                                ? `serial, ${log.hostname}`
-                                : log.username
-                                    ? `${log.protocol}, ${log.username}`
-                                    : `${log.protocol}, ${log.hostname}`}
+                        {subtitleParts.join(" · ")}
                     </div>
                 </div>
             </div>
@@ -264,19 +285,51 @@ const ConnectionLogsManager: React.FC<ConnectionLogsManagerProps> = ({
     const INITIAL_RENDER_LIMIT = 30;
     const LOAD_MORE_COUNT = 30;
 
-    // Track how many items to show
+    const [filter, setFilter] = useState<ConnectionLogFilter>("all");
     const [renderLimit, setRenderLimit] = useState(INITIAL_RENDER_LIMIT);
 
-    // Sort logs by newest first
-    const filteredLogs = useMemo(() => {
-        return [...logs].sort((a, b) => b.startTime - a.startTime);
+    const filterCounts = useMemo(() => {
+        let terminal = 0;
+        let remoteDesktop = 0;
+        let recorded = 0;
+        for (const log of logs) {
+            if (isRemoteDesktopProtocol(log.protocol)) {
+                remoteDesktop += 1;
+            } else {
+                terminal += 1;
+            }
+            if (getConnectionLogRecordingSummary(log).clipCount > 0) {
+                recorded += 1;
+            }
+        }
+        return { all: logs.length, terminal, remoteDesktop, recorded };
     }, [logs]);
+
+    const showFilterBar = logs.length > 0 && (filterCounts.remoteDesktop > 0 || filterCounts.recorded > 0);
+    const effectiveFilter: ConnectionLogFilter = showFilterBar ? filter : "all";
+
+    // Filter and sort logs by newest first
+    const filteredLogs = useMemo(() => {
+        const subset = effectiveFilter === "all"
+            ? logs
+            : logs.filter((log) => {
+                if (effectiveFilter === "remoteDesktop") return isRemoteDesktopProtocol(log.protocol);
+                if (effectiveFilter === "terminal") return !isRemoteDesktopProtocol(log.protocol);
+                return getConnectionLogRecordingSummary(log).clipCount > 0;
+            });
+        return [...subset].sort((a, b) => b.startTime - a.startTime);
+    }, [effectiveFilter, logs]);
 
     const displayedLogs = useMemo(() => {
         return filteredLogs.slice(0, renderLimit);
     }, [filteredLogs, renderLimit]);
 
     const hasMore = filteredLogs.length > renderLimit;
+
+    const handleChangeFilter = useCallback((next: ConnectionLogFilter) => {
+        setFilter(next);
+        setRenderLimit(INITIAL_RENDER_LIMIT);
+    }, []);
 
     const handleLoadMore = useCallback(() => {
         setRenderLimit(prev => prev + LOAD_MORE_COUNT);
@@ -292,7 +345,6 @@ const ConnectionLogsManager: React.FC<ConnectionLogsManagerProps> = ({
         [onDelete],
     );
 
-    // Rendered items
     const renderedItems = useMemo(() => {
         return displayedLogs.map((log) => (
             <LogItem
@@ -307,9 +359,46 @@ const ConnectionLogsManager: React.FC<ConnectionLogsManagerProps> = ({
 
     return (
         <div className="h-full flex flex-col">
+            {/* Protocol / Recording Filter Bar */}
+            {showFilterBar && (
+                <div
+                    data-testid="logs-filter-bar"
+                    className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-border/30 bg-background shrink-0"
+                >
+                    {(
+                        [
+                            { id: "all" as const, label: t("logs.filter.all"), count: filterCounts.all, icon: null },
+                            { id: "terminal" as const, label: t("logs.filter.terminal"), count: filterCounts.terminal, icon: <Terminal size={12} /> },
+                            { id: "remoteDesktop" as const, label: t("logs.filter.remoteDesktop"), count: filterCounts.remoteDesktop, icon: <Monitor size={12} /> },
+                            { id: "recorded" as const, label: t("logs.filter.recorded"), count: filterCounts.recorded, icon: <Video size={12} /> },
+                        ]
+                    ).map((item) => {
+                        const active = effectiveFilter === item.id;
+                        return (
+                            <button
+                                key={item.id}
+                                type="button"
+                                data-logs-filter={item.id}
+                                onClick={() => handleChangeFilter(item.id)}
+                                className={cn(
+                                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer",
+                                    active
+                                        ? "bg-primary/12 text-primary border border-primary/25"
+                                        : "text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-transparent",
+                                )}
+                            >
+                                {item.icon}
+                                <span>{item.label}</span>
+                                <span className="font-mono text-[10px] opacity-75 tabular-nums">{item.count}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+
             {/* Table Header */}
             {displayedLogs.length > 0 && (
-                <div className="flex items-center gap-4 px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border/30 bg-secondary/30">
+                <div className="flex items-center gap-4 px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border/30 bg-secondary/30 shrink-0">
                     <div className="w-32 shrink-0 flex items-center gap-1">
                         {t("logs.table.date")}
                         <ChevronDown size={12} />
@@ -329,13 +418,19 @@ const ConnectionLogsManager: React.FC<ConnectionLogsManagerProps> = ({
                     {displayedLogs.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                             <div className="h-16 w-16 rounded-2xl bg-secondary/80 flex items-center justify-center mb-4">
-                                <Terminal size={32} className="opacity-60" />
+                                {effectiveFilter === "recorded" ? (
+                                    <Video size={32} className="opacity-60" />
+                                ) : effectiveFilter === "remoteDesktop" ? (
+                                    <Monitor size={32} className="opacity-60" />
+                                ) : (
+                                    <Terminal size={32} className="opacity-60" />
+                                )}
                             </div>
                             <h3 className="text-lg font-semibold text-foreground mb-2">
-                                {t("logs.empty.title")}
+                                {effectiveFilter === "all" ? t("logs.empty.title") : t("logs.filter.emptyTitle")}
                             </h3>
                             <p className="text-sm text-center max-w-sm">
-                                {t("logs.empty.desc")}
+                                {effectiveFilter === "all" ? t("logs.empty.desc") : t("logs.filter.emptyDesc")}
                             </p>
                         </div>
                     ) : (

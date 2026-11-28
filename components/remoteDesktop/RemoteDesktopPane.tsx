@@ -1,9 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Check, KeyRound, Loader2, Plug, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { getConnectionLogsSnapshot } from '../../application/state/connectionLogsStore';
+import {
+  registerSessionLogFinalizer,
+  saveRemoteDesktopThumbnail,
+  updateRemoteDesktopConnectionLogActivity,
+} from '../../application/state/remoteDesktopLogActions';
 import { useTerminalSessionCloseCapture } from '../../application/state/terminalSessionCloseCapture';
+import { selectConnectionLogForTerminalDataCapture } from '../../domain/connectionLog';
 import type { Host, Identity, KnownHost, SSHKey, TerminalSession } from '../../types';
-import type { RdpMultiMonitorMode } from '../../domain/models/connection';
+import type {
+  RdpMultiMonitorMode,
+  RemoteDesktopSessionEventKind,
+  RemoteDesktopSessionMetadata,
+} from '../../domain/models';
+import {
+  appendRemoteDesktopSessionEvent,
+  getConnectionLogRecordingClips,
+  mergeRemoteDesktopSessionMetadata,
+} from '../../domain/remoteDesktopRecording';
 import {
   computeMonitorLayoutEntries,
   formatStandardRdpSecurityBadge,
@@ -76,6 +92,7 @@ import { RemoteDesktopCertDialog } from './RemoteDesktopCertDialog';
 import {
   buildRemoteDesktopStartPayload,
   buildSystemRemoteDesktopPayload,
+  formatTransferBytes,
   getRemoteDesktopBridge,
   tr,
   type RemoteDesktopCanvasHandle,
@@ -96,8 +113,8 @@ import { useRemoteDesktopRecorder } from './useRemoteDesktopRecorder';
 import { VncCanvasView, type VncCapabilities } from './VncCanvasView';
 import type { RemoteDesktopSpecialKeyId } from './vncKeymap';
 
-const SHOW_REMOTE_DESKTOP_RECORDING_BUTTON = false;
 const EMPTY_FINALIZE_LOG = () => '';
+const RESIZE_EVENT_DEBOUNCE_MS = 1500;
 
 export interface RemoteDesktopPaneProps {
   sessionId: string;
@@ -197,6 +214,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   const attemptNonceRef = useRef(0);
   const closeCaptureNeverConnectedRef = useRef(false);
   const closeCaptureDoneRef = useRef(false);
+  const closeCapturePromiseRef = useRef<Promise<void> | null>(null);
 
   const spec = useMemo(
     () => resolveRemoteDesktopConnectionSpec(host, protocol, identities),
@@ -309,6 +327,83 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
 
   const tunneled = Boolean(spec.tunnelViaHostSsh || (chainHosts && chainHosts.length > 0));
   const effectiveLabel = desktopTitle || spec.label || spec.hostHostname;
+  const hasConnectedOnceRef = useRef(false);
+  const sessionThumbnailCapturedRef = useRef(false);
+  const sessionThumbnailInFlightRef = useRef(false);
+  const isRecordingOrStoppingRef = useRef(false);
+  const resizeEventTimerRef = useRef<number | null>(null);
+  const thumbnailTimerRef = useRef<number | null>(null);
+  const lastLoggedResolutionRef = useRef<string | null>(null);
+
+  const appendSessionEvent = useCallback(
+    (
+      kind: RemoteDesktopSessionEventKind,
+      summary: string,
+      options?: {
+        timestamp?: number;
+        detail?: string;
+        metaPatch?: Partial<RemoteDesktopSessionMetadata>;
+      },
+    ) => {
+      const ts = options?.timestamp ?? Date.now();
+      void updateRemoteDesktopConnectionLogActivity(sessionId, ({ events, meta }) => ({
+        events: appendRemoteDesktopSessionEvent(events, {
+          timestamp: ts,
+          kind,
+          summary,
+          detail: options?.detail,
+        }),
+        meta: options?.metaPatch ? mergeRemoteDesktopSessionMetadata(meta, options.metaPatch) : undefined,
+      }));
+    },
+    [sessionId],
+  );
+
+  // Capture a compact local JPEG poster for unrecorded sessions before tearing down canvas.
+  const captureUnrecordedSessionThumbnail = useCallback(async () => {
+    if (
+      sessionThumbnailCapturedRef.current
+      || sessionThumbnailInFlightRef.current
+      || isRecordingOrStoppingRef.current
+    ) {
+      return;
+    }
+    const handle = canvasHandleRef.current;
+    if (!handle?.captureThumbnailJpeg) return;
+    const { connectionLogs } = getConnectionLogsSnapshot();
+    const matchingLog = selectConnectionLogForTerminalDataCapture([...connectionLogs], { sessionId });
+    if (!matchingLog) return;
+    if (getConnectionLogRecordingClips(matchingLog).length > 0 || matchingLog.remoteDesktopMeta?.thumbnailId) {
+      sessionThumbnailCapturedRef.current = true;
+      return;
+    }
+    sessionThumbnailInFlightRef.current = true;
+    try {
+      const jpeg = await handle.captureThumbnailJpeg();
+      if (!jpeg || jpeg.byteLength === 0 || isRecordingOrStoppingRef.current) return;
+      const saved = await saveRemoteDesktopThumbnail({ data: jpeg });
+      if (saved?.ok && saved.id) {
+        sessionThumbnailCapturedRef.current = true;
+        await updateRemoteDesktopConnectionLogActivity(sessionId, ({ meta }) => ({
+          meta: mergeRemoteDesktopSessionMetadata(meta, { thumbnailId: saved.id }),
+        }));
+      }
+    } catch {
+      // Non-fatal: session log works fine without a thumbnail.
+    } finally {
+      sessionThumbnailInFlightRef.current = false;
+    }
+  }, [sessionId]);
+
+  const handleRecordingLifecycleEvent = useCallback(
+    (ev: { kind: 'recording_started' | 'recording_stopped'; timestamp: number; summary: string; detail?: string }) => {
+      appendSessionEvent(ev.kind, ev.summary, {
+        timestamp: ev.timestamp,
+        detail: ev.detail,
+      });
+    },
+    [appendSessionEvent],
+  );
 
   const recorder = useRemoteDesktopRecorder({
     sessionId,
@@ -317,13 +412,32 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     status,
     audioEnabled: isRdp && Boolean(spec.rdpConfig?.audioEnabled),
     canvasHandleRef,
+    onRecordingLifecycleEvent: handleRecordingLifecycleEvent,
   });
+  isRecordingOrStoppingRef.current = recorder.isRecording || recorder.isStopping;
 
-  // Stamp ConnectionLog endTime when this remote desktop session closes via any UI/hotkey path.
+  // Clear debounced timers on unmount to prevent post-unmount leaks.
+  useEffect(() => () => {
+    if (resizeEventTimerRef.current !== null) {
+      window.clearTimeout(resizeEventTimerRef.current);
+      resizeEventTimerRef.current = null;
+    }
+    if (thumbnailTimerRef.current !== null) {
+      window.clearTimeout(thumbnailTimerRef.current);
+      thumbnailTimerRef.current = null;
+    }
+  }, []);
+
+  // Stamp ConnectionLog endTime when this remote desktop session closes via any UI/hotkey/quit path.
   const handleCloseLogCapture = useCallback(
     (closingSessionId: string, data: string) => {
+      if (closeCapturePromiseRef.current) return closeCapturePromiseRef.current;
       closeCaptureDoneRef.current = true;
-      return onTerminalDataCapture?.(closingSessionId, data);
+      const promise = Promise.resolve(onTerminalDataCapture?.(closingSessionId, data))
+        .catch(() => {})
+        .then(() => undefined);
+      closeCapturePromiseRef.current = promise;
+      return promise;
     },
     [onTerminalDataCapture],
   );
@@ -335,6 +449,14 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     finalizeTerminalLogData: EMPTY_FINALIZE_LOG,
     onTerminalDataCapture: handleCloseLogCapture,
   });
+
+  // Also await endTime stamping on native window close / app quit (even when unrecorded).
+  useEffect(() => {
+    if (!onTerminalDataCapture) return undefined;
+    return registerSessionLogFinalizer(async () => {
+      await handleCloseLogCapture(sessionId, '');
+    });
+  }, [handleCloseLogCapture, onTerminalDataCapture, sessionId]);
 
   const updateStatus = useCallback(
     (next: 'connecting' | 'connected' | 'disconnected') => {
@@ -389,6 +511,17 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         const toastKey = `${next.id}:${next.phase}`;
         if (lastToastedTransferKeyRef.current !== toastKey) {
           lastToastedTransferKeyRef.current = toastKey;
+          const fileSummary = next.fileCount > 1
+            ? `${next.fileName} (+${next.fileCount - 1})`
+            : next.fileName;
+          const sizeDetail = next.totalBytes > 0 ? formatTransferBytes(next.totalBytes) : undefined;
+          appendSessionEvent(
+            next.direction === 'upload' ? 'clipboard_upload' : 'clipboard_download',
+            next.phase === 'completed'
+              ? `${next.direction === 'upload' ? 'Uploaded' : 'Downloaded'} ${fileSummary}`
+              : `${next.direction === 'upload' ? 'Upload' : 'Download'} failed: ${fileSummary}`,
+            { detail: next.phase === 'error' ? (next.error || sizeDetail) : sizeDetail },
+          );
           if (next.phase === 'completed') {
             toast.success(
               next.message || tr(t, 'remoteDesktop.clipboard.transferCompleted', 'Clipboard file transfer complete'),
@@ -401,7 +534,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         }
       }
     },
-    [t],
+    [appendSessionEvent, t],
   );
 
   useEffect(() => {
@@ -1002,6 +1135,12 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
 
   const handleDisconnect = useCallback(() => {
     releaseKeyboardGrab();
+    if (statusRef.current === 'connected') {
+      void captureUnrecordedSessionThumbnail();
+      appendSessionEvent('disconnected', 'Session closed by user', {
+        metaPatch: { disconnectReason: 'Closed by user' },
+      });
+    }
     const activeId = activeBackendSessionIdRef.current;
     if (activeId) {
       void getRemoteDesktopBridge()?.stop(activeId).catch(() => {});
@@ -1009,7 +1148,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     setWsUrl(null);
     updateStatus('disconnected');
     onCloseSession?.(sessionId);
-  }, [onCloseSession, releaseKeyboardGrab, sessionId, updateStatus]);
+  }, [appendSessionEvent, captureUnrecordedSessionThumbnail, onCloseSession, releaseKeyboardGrab, sessionId, updateStatus]);
 
   const handleOpenSystemClient = useCallback(async () => {
     const rdBridge = getRemoteDesktopBridge();
@@ -1065,12 +1204,13 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     try {
       if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        appendSessionEvent('screenshot', 'Copied screenshot to clipboard');
         toast.success(tr(t, 'remoteDesktop.screenshot.copied', 'Screenshot copied to clipboard'));
       }
     } catch {
       toast.error(tr(t, 'remoteDesktop.screenshot.copyFailed', 'Failed to copy screenshot'));
     }
-  }, [t]);
+  }, [appendSessionEvent, t]);
 
   const handleScreenshotSave = useCallback(async () => {
     const blob = await canvasHandleRef.current?.captureScreenshot();
@@ -1082,6 +1222,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const res = await rdBridge.saveClipboardFile({ action: 'oneshot', fileName, data: bytes });
       if (res?.ok && !res.canceled) {
+        appendSessionEvent('screenshot', 'Saved PNG screenshot', { detail: fileName });
         toast.success(tr(t, 'remoteDesktop.screenshot.saved', 'Screenshot saved'));
       }
       return;
@@ -1092,13 +1233,19 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
-  }, [effectiveLabel, protocol, t]);
+    appendSessionEvent('screenshot', 'Saved PNG screenshot', { detail: fileName });
+  }, [appendSessionEvent, effectiveLabel, protocol, t]);
 
   const handleCanvasError = useCallback(
     (err: { message: string; isAuthError?: boolean }) => {
       releaseKeyboardGrab();
       publishRemoteDesktopNetworkStats(sessionId, null);
       publishRemoteDesktopFps(sessionId, 0);
+      const cleanMessage = sanitizeRemoteDesktopError(err.message) || err.message;
+      appendSessionEvent('error', err.isAuthError ? 'Authentication failed' : 'Connection error', {
+        detail: cleanMessage,
+        metaPatch: { disconnectReason: cleanMessage },
+      });
       if (err.isAuthError) {
         setAuthErrorMessage(err.message);
         setConnectionIntent('idle');
@@ -1110,7 +1257,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       setDisconnectError(err.message);
       updateStatus('disconnected');
     },
-    [releaseKeyboardGrab, sessionId, updateStatus],
+    [appendSessionEvent, releaseKeyboardGrab, sessionId, updateStatus],
   );
 
   const handleCanvasDisconnected = useCallback(
@@ -1118,10 +1265,15 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       releaseKeyboardGrab();
       publishRemoteDesktopNetworkStats(sessionId, null);
       publishRemoteDesktopFps(sessionId, 0);
+      const cleanReason = sanitizeRemoteDesktopError(reason || null) || undefined;
+      appendSessionEvent('disconnected', 'Remote desktop disconnected', {
+        detail: cleanReason,
+        metaPatch: cleanReason ? { disconnectReason: cleanReason } : undefined,
+      });
       if (reason) setDisconnectError(reason);
       updateStatus('disconnected');
     },
-    [releaseKeyboardGrab, sessionId, updateStatus],
+    [appendSessionEvent, releaseKeyboardGrab, sessionId, updateStatus],
   );
 
   const handleNegotiationFallback = useCallback((nextStage: Exclude<RdpAutoFallbackStage, 'none'>) => {
@@ -1356,6 +1508,9 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
           deviceId: result.added.deviceId,
           name: result.added.name,
         });
+        appendSessionEvent('shared_folder_mounted', `Mounted shared folder "${result.added.name}"`, {
+          detail: result.added.readOnly ? 'Read-only' : 'Read / Write',
+        });
         toast.success(
           tr(t, 'remoteDesktop.sharedFolders.mounted', 'Mounted "{name}" on remote desktop', {
             name: result.added.name,
@@ -1365,7 +1520,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to add shared folder');
     }
-  }, [host.id, syncDrivesToBackend, t]);
+  }, [appendSessionEvent, host.id, syncDrivesToBackend, t]);
 
   const handleAddSharedFolderClick = useCallback(() => {
     void handleAddSharedFolder();
@@ -1379,6 +1534,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       void syncDrivesToBackend(next);
       if (target && status === 'connected') {
         canvasHandleRef.current?.removeSharedDrive?.(target.deviceId);
+        appendSessionEvent('shared_folder_unmounted', `Unmounted shared folder "${target.name}"`);
         toast.info(
           tr(t, 'remoteDesktop.sharedFolders.unmounted', 'Unmounted "{name}"', {
             name: target.name,
@@ -1386,7 +1542,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         );
       }
     },
-    [host.id, sharedFolders, status, syncDrivesToBackend, t],
+    [appendSessionEvent, host.id, sharedFolders, status, syncDrivesToBackend, t],
   );
 
   const handleToggleSharedFolderReadOnly = useCallback(
@@ -1428,6 +1584,28 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     void handleOpenSystemClient();
   }, [handleOpenSystemClient]);
 
+  const handleDesktopResize = useCallback(
+    (size: { width: number; height: number }) => {
+      setResolution(size);
+      if (size.width <= 0 || size.height <= 0) return;
+      if (resizeEventTimerRef.current !== null) {
+        window.clearTimeout(resizeEventTimerRef.current);
+        resizeEventTimerRef.current = null;
+      }
+      const key = `${size.width}x${size.height}`;
+      if (lastLoggedResolutionRef.current === key) return;
+      resizeEventTimerRef.current = window.setTimeout(() => {
+        resizeEventTimerRef.current = null;
+        if (lastLoggedResolutionRef.current === key) return;
+        lastLoggedResolutionRef.current = key;
+        appendSessionEvent('resized', `Desktop resized to ${size.width}\u00d7${size.height}`, {
+          metaPatch: { resolution: { width: size.width, height: size.height } },
+        });
+      }, RESIZE_EVENT_DEBOUNCE_MS);
+    },
+    [appendSessionEvent],
+  );
+
   const handleVncConnected = useCallback(
     (info: {
       width: number;
@@ -1444,8 +1622,34 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       setSupportsXvp(Boolean(info.supportsXvp));
       setStageMessage('Desktop connected');
       updateStatus('connected');
+      const isReconnect = hasConnectedOnceRef.current;
+      hasConnectedOnceRef.current = true;
+      lastLoggedResolutionRef.current = `${info.width}x${info.height}`;
+      const securityLabel = info.encrypted ? 'TLS' : 'RFB';
+      appendSessionEvent(
+        isReconnect ? 'reconnected' : 'connected',
+        isReconnect ? 'Reconnected to VNC desktop' : 'Connected to VNC desktop',
+        {
+          detail: `${info.width}\u00d7${info.height} \u00b7 ${securityLabel}${tunneled ? ' \u00b7 SSH Tunnel' : ''}`,
+          metaPatch: {
+            resolution: { width: info.width, height: info.height },
+            securityLabel,
+            tunneled,
+            monitorCount: 1,
+          },
+        },
+      );
+      if (thumbnailTimerRef.current !== null) {
+        window.clearTimeout(thumbnailTimerRef.current);
+      }
+      thumbnailTimerRef.current = window.setTimeout(() => {
+        thumbnailTimerRef.current = null;
+        if (statusRef.current === 'connected') {
+          void captureUnrecordedSessionThumbnail();
+        }
+      }, 1500);
     },
-    [updateStatus],
+    [appendSessionEvent, captureUnrecordedSessionThumbnail, tunneled, updateStatus],
   );
 
   const handleRdpConnected = useCallback(
@@ -1458,15 +1662,15 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       setResolution({ width: info.width, height: info.height });
       setEncrypted(Boolean(info.encrypted));
       setRdpSecurityInfo(info.securityInfo ?? null);
+      const legacyBadge = formatStandardRdpSecurityBadge(info.securityInfo);
       if (autoFallbackStage === 'rdp') {
-        const badge = formatStandardRdpSecurityBadge(info.securityInfo);
         toast.info(
-          badge
+          legacyBadge
             ? tr(
                 t,
                 'remoteDesktop.rdp.fallbackStandardRdpWithCipher',
                 'Connected using Standard RDP Security ({{cipher}}).',
-                { cipher: badge },
+                { cipher: legacyBadge },
               )
             : tr(
                 t,
@@ -1477,8 +1681,38 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       }
       setStageMessage('Desktop connected');
       updateStatus('connected');
+      const isReconnect = hasConnectedOnceRef.current;
+      hasConnectedOnceRef.current = true;
+      lastLoggedResolutionRef.current = `${info.width}x${info.height}`;
+      const securityLabel = info.encrypted
+        ? (autoFallbackStage === 'tls' ? 'TLS' : 'TLS / NLA')
+        : (legacyBadge || 'Standard RDP');
+      const activeMonitors = Math.max(1, monitorLayout.length);
+      appendSessionEvent(
+        isReconnect ? 'reconnected' : 'connected',
+        isReconnect ? 'Reconnected to RDP desktop' : 'Connected to RDP desktop',
+        {
+          detail: `${info.width}\u00d7${info.height} \u00b7 ${securityLabel}${tunneled ? ' \u00b7 SSH Tunnel' : ''}`,
+          metaPatch: {
+            resolution: { width: info.width, height: info.height },
+            securityLabel,
+            tunneled,
+            monitorCount: activeMonitors,
+          },
+        },
+      );
+      // Capture an early lightweight poster thumbnail once desktop finishes first paint.
+      if (thumbnailTimerRef.current !== null) {
+        window.clearTimeout(thumbnailTimerRef.current);
+      }
+      thumbnailTimerRef.current = window.setTimeout(() => {
+        thumbnailTimerRef.current = null;
+        if (statusRef.current === 'connected') {
+          void captureUnrecordedSessionThumbnail();
+        }
+      }, 1500);
     },
-    [autoFallbackStage, t, updateStatus],
+    [appendSessionEvent, autoFallbackStage, captureUnrecordedSessionThumbnail, monitorLayout.length, t, tunneled, updateStatus],
   );
 
   const handleRemoteClipboardFilesChange = useCallback(
@@ -1584,9 +1818,10 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         aiAuditCount={aiAuditCount}
         onOpenAiAuditLog={onAskAi ? handleOpenAiAuditLog : undefined}
         isRecording={recorder.isRecording}
+        isStoppingRecording={recorder.isStopping}
         recordingElapsedLabel={recorder.formattedElapsed}
         recordingSupported={recorder.isSupported}
-        onToggleRecording={SHOW_REMOTE_DESKTOP_RECORDING_BUTTON ? handleToggleRecordingClick : undefined}
+        onToggleRecording={handleToggleRecordingClick}
         quality={quality}
         onChangeQuality={handleChangeQuality}
         viewOnly={viewOnly}
@@ -1661,7 +1896,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
             onRequestReleaseGrab={releaseKeyboardGrab}
             onConnected={handleVncConnected}
             onCapabilitiesChange={handleVncCapabilitiesChange}
-            onDesktopResize={setResolution}
+            onDesktopResize={handleDesktopResize}
             onDesktopName={setDesktopTitle}
             onBell={handleVncBell}
             onFpsChange={handleFpsChange}
@@ -1699,7 +1934,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
             onFpsChange={handleFpsChange}
             onRequestReleaseGrab={releaseKeyboardGrab}
             onConnected={handleRdpConnected}
-            onDesktopResize={setResolution}
+            onDesktopResize={handleDesktopResize}
             onRemoteClipboardFilesChange={handleRemoteClipboardFilesChange}
             onClipboardFileTransferStatus={setClipboardFileTransferStatus}
             onClipboardTransferChange={handleClipboardTransferChange}
