@@ -1001,3 +1001,77 @@ test("sshChannelBridge falls back to authenticated 127.0.0.1 loopback TCP when b
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("registerTarget derives distinct canonical bridge aliases from backend-resolved SFTP endpoints when callers pass saved-profile port", async () => {
+  const tmpDir = makeTempDir("nc-ssh-bridge-sftp-ports-");
+  const conn2222 = makeFakeConn("sftp-port-2222");
+  const conn2200 = makeFakeConn("sftp-port-2200");
+
+  const sftpClients = new Map([
+    ["sftp-1", {
+      client: conn2222,
+      __netcattyRefHolder: {
+        connRef: {
+          conn: conn2222,
+          state: "live",
+          endpoint: {
+            hostId: "host-shared",
+            hostname: "10.0.0.5",
+            port: 2222,
+            username: "deploy",
+          },
+        },
+      },
+    }],
+    ["sftp-2", {
+      client: conn2200,
+      __netcattyRefHolder: {
+        connRef: {
+          conn: conn2200,
+          state: "live",
+          endpoint: {
+            hostId: "host-shared",
+            hostname: "10.0.0.5",
+            port: 2200,
+            username: "deploy",
+          },
+        },
+      },
+    }],
+  ]);
+
+  const bridge = createSshChannelBridge({
+    sessions: new Map(),
+    sftpClients,
+    stateDir: tmpDir,
+  });
+
+  try {
+    // Both callers supply the saved profile's default port (22) and same requested alias.
+    const reg1 = await bridge.registerTarget({
+      bridgeHost: "prod-aaaaaaaa.netcatty",
+      sftpId: "sftp-1",
+      hostId: "host-shared",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "deploy",
+    });
+    const reg2 = await bridge.registerTarget({
+      bridgeHost: "prod-aaaaaaaa.netcatty",
+      sftpId: "sftp-2",
+      hostId: "host-shared",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "deploy",
+    });
+
+    assert.notEqual(reg1.bridgeHost, reg2.bridgeHost);
+    assert.ok(reg1.bridgeHost.startsWith("prod-") && reg1.bridgeHost.endsWith(".netcatty"));
+    assert.ok(reg2.bridgeHost.startsWith("prod-") && reg2.bridgeHost.endsWith(".netcatty"));
+    // Both targets remain independently registered (no overwrite).
+    assert.equal(bridge.getStatus().registeredTargets, 2);
+  } finally {
+    await bridge.stop();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

@@ -789,7 +789,7 @@ function createExternalEditorBridge(options = {}) {
         installSshBridgeConfig({ userDataDir, stateDir, platform });
       }
 
-      await registerBridgeTarget({
+      const registration = await registerBridgeTarget({
         bridgeHost,
         sessionId: payload.sessionId || null,
         sftpId: payload.sftpId || null,
@@ -800,7 +800,9 @@ function createExternalEditorBridge(options = {}) {
         ...(userDataDir ? { userDataDir } : {}),
       }, context.webContentsId);
 
-      sshTarget = bridgeHost;
+      sshTarget = isValidBridgeHostname(registration?.bridgeHost)
+        ? registration.bridgeHost
+        : bridgeHost;
     } else {
       sshTarget = validateDirectSshTarget(payload.directSshTarget);
     }

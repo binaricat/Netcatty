@@ -257,6 +257,35 @@ test("openRemoteInExternalEditor registers bridge target and spawns with shell: 
     assert.equal(spacedResult.displayUri, "ssh://web-deadbeef.netcatty/srv/app/report.txt%20");
     assert.deepEqual(spawns[1].args, ["ssh://web-deadbeef.netcatty/srv/app/report.txt%20"]);
 
+    // When registerTarget returns a backend-canonicalized bridgeHost (e.g. port override),
+    // openRemoteInExternalEditor must launch the editor using that canonical alias.
+    const canonicalBridge = createExternalEditorBridge({
+      stateDir: path.join(tmpDir, "state"),
+      platform: "linux",
+      spawnImpl: fakeSpawn,
+      sshChannelBridge: {
+        async registerTarget() {
+          return { running: true, connected: true, bridgeHost: "web-2222cafe.netcatty" };
+        },
+      },
+    });
+    const canonicalResult = await canonicalBridge.openRemoteInExternalEditor({
+      editorId: "zed",
+      executablePath: "/usr/bin/zed",
+      connectionMode: "bridge",
+      bridgeHost: "web-deadbeef.netcatty",
+      sftpId: "sftp-1",
+      hostId: "h-42",
+      hostname: "10.0.0.9",
+      port: 22,
+      username: "deploy",
+      remotePath: "/srv/app/main.ts",
+      kind: "file",
+    });
+    assert.equal(canonicalResult.sshTarget, "web-2222cafe.netcatty");
+    assert.equal(canonicalResult.displayUri, "ssh://web-2222cafe.netcatty/srv/app/main.ts");
+    assert.deepEqual(spawns[2].args, ["ssh://web-2222cafe.netcatty/srv/app/main.ts"]);
+
     const cfgStatus = getSshBridgeConfigStatus({
       homedir: tmpDir,
       stateDir: path.join(tmpDir, "state"),

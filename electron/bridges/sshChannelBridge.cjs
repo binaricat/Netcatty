@@ -61,6 +61,53 @@ function isValidBridgeHostname(host) {
   return typeof host === "string" && BRIDGE_HOST_RE.test(host);
 }
 
+function fnv1aHex(input) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function buildCanonicalBridgeHostname(requestedBridgeHost, endpoint) {
+  if (!endpoint || !endpoint.hostname) return requestedBridgeHost;
+  const hostId = typeof endpoint.hostId === "string" ? endpoint.hostId.trim() : "";
+  const hostname = String(endpoint.hostname || "").trim().toLowerCase();
+  const username = typeof endpoint.username === "string" ? endpoint.username.trim() : "";
+  const rawPort = Number(endpoint.port);
+  const port = Number.isInteger(rawPort) && rawPort > 0 ? rawPort : 22;
+  const endpointKey = `${username}@${hostname}:${port}`;
+  const stableKey = hostId ? `host:${hostId}|${endpointKey}` : endpointKey;
+
+  const withoutDomain = String(requestedBridgeHost || "").replace(/\.netcatty$/i, "");
+  const slug = withoutDomain.replace(/-[0-9a-f]{8}$/i, "").slice(0, 32) || "host";
+  const candidate = `${slug}-${fnv1aHex(stableKey)}.netcatty`;
+  return isValidBridgeHostname(candidate) ? candidate : requestedBridgeHost;
+}
+
+function endpointDiffersFromPayload(endpoint, payload) {
+  if (!endpoint || !endpoint.hostname) return false;
+  const epHostId = typeof endpoint.hostId === "string" ? endpoint.hostId.trim() : "";
+  const reqHostId = typeof payload.hostId === "string" ? payload.hostId.trim() : "";
+  if (epHostId && reqHostId && epHostId !== reqHostId) return true;
+
+  const epHostname = String(endpoint.hostname || "").trim().toLowerCase();
+  const reqHostname = String(payload.hostname || "").trim().toLowerCase();
+  if (!reqHostname || epHostname !== reqHostname) return true;
+
+  const epPort = Number.isInteger(Number(endpoint.port)) && Number(endpoint.port) > 0 ? Number(endpoint.port) : 22;
+  const reqPort = Number.isInteger(Number(payload.port)) && Number(payload.port) > 0 ? Number(payload.port) : 22;
+  if (epPort !== reqPort) return true;
+
+  const epUsername = typeof endpoint.username === "string" ? endpoint.username.trim() : "";
+  const reqUsername = typeof payload.username === "string" ? payload.username.trim() : "";
+  if (epUsername && reqUsername && epUsername !== reqUsername) return true;
+  if (epUsername && !reqUsername) return true;
+
+  return false;
+}
+
 function timingSafeStringEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string") return false;
   const bufA = Buffer.from(a, "utf8");
@@ -1222,23 +1269,45 @@ function createSshChannelBridge(options = {}) {
       throw new Error("No active SSH connection is available for this host.");
     }
 
+    let resolvedEndpoint = null;
     if (resolved.transport?.id) {
       record.transportId = resolved.transport.id;
     }
     if (resolved.transport?.endpoint) {
-      record.endpoint = { ...resolved.transport.endpoint };
+      resolvedEndpoint = { ...resolved.transport.endpoint };
     } else if (record.sessionId && sessions?.get) {
       const sessionEp = sessions.get(record.sessionId)?._reuseEndpoint;
-      if (sessionEp) record.endpoint = { ...sessionEp };
+      if (sessionEp) resolvedEndpoint = { ...sessionEp };
     } else if (record.sftpId && sftpClients?.get) {
       const sftpEp = getSftpClientEndpoint(sftpClients.get(record.sftpId), sftpClients);
-      if (sftpEp) record.endpoint = { ...sftpEp };
+      if (sftpEp) resolvedEndpoint = { ...sftpEp };
     }
 
-    targets.set(bridgeHost, record);
+    if (resolvedEndpoint) {
+      record.endpoint = resolvedEndpoint;
+      if (typeof resolvedEndpoint.hostId === "string" && resolvedEndpoint.hostId) {
+        record.hostId = resolvedEndpoint.hostId;
+      }
+      if (typeof resolvedEndpoint.hostname === "string" && resolvedEndpoint.hostname) {
+        record.hostname = resolvedEndpoint.hostname;
+      }
+      if (Number.isInteger(Number(resolvedEndpoint.port)) && Number(resolvedEndpoint.port) > 0) {
+        record.port = Number(resolvedEndpoint.port);
+      }
+      if (typeof resolvedEndpoint.username === "string" && resolvedEndpoint.username) {
+        record.username = resolvedEndpoint.username;
+      }
+    }
+
+    const effectiveBridgeHost = endpointDiffersFromPayload(resolvedEndpoint, payload)
+      ? buildCanonicalBridgeHostname(bridgeHost, resolvedEndpoint)
+      : bridgeHost;
+    record.bridgeHost = effectiveBridgeHost;
+
+    targets.set(effectiveBridgeHost, record);
     return {
       ...status,
-      bridgeHost,
+      bridgeHost: effectiveBridgeHost,
       connected: true,
     };
   }

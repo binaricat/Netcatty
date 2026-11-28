@@ -19,6 +19,9 @@ export interface SftpConnection {
   id: string;
   hostId: string;
   hostLabel: string;
+  hostname?: string;
+  port?: number;
+  username?: string;
   isLocal: boolean;
   status: 'connecting' | 'connected' | 'disconnected' | 'error';
   error?: string;

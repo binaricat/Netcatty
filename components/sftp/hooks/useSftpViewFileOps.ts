@@ -380,9 +380,9 @@ export const useSftpViewFileOps = ({
       void launchRemoteExternalEditor({
         host: {
           hostId: host?.id ?? conn.hostId,
-          hostname: host?.hostname,
-          port: host?.port,
-          username: host?.username,
+          hostname: conn.hostname ?? host?.hostname,
+          port: conn.port ?? host?.port,
+          username: conn.username ?? host?.username,
           label: host?.label ?? conn.hostLabel,
         },
         remotePath: resolvedFullPath,
