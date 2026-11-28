@@ -15,7 +15,21 @@ import { withVaultImportLock } from './vaultManagedImportLock';
 
 function installDomEnv() {
   const dom = new JSDOM('', { url: 'http://localhost' });
-  const keys = ['window', 'document', 'localStorage'] as const;
+  const heldLocks = new Set<string>();
+  const fakeLocks = {
+    request: async <T>(name: string, cb: () => Promise<T>): Promise<T> => {
+      if (heldLocks.has(name)) {
+        throw new Error(`DEADLOCK: re-entrant lock acquisition on ${name}`);
+      }
+      heldLocks.add(name);
+      try {
+        return await cb();
+      } finally {
+        heldLocks.delete(name);
+      }
+    },
+  };
+  const keys = ['window', 'document', 'localStorage', 'navigator'] as const;
   const previous = new Map<string, PropertyDescriptor | undefined>(
     keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
   );
@@ -23,6 +37,7 @@ function installDomEnv() {
     window: { value: dom.window, configurable: true },
     document: { value: dom.window.document, configurable: true },
     localStorage: { value: dom.window.localStorage, configurable: true },
+    navigator: { value: { locks: fakeLocks }, configurable: true },
   });
   return {
     restore: () => {
@@ -168,26 +183,7 @@ test('clearAllRemoteDesktopRecordingsAndSyncLogs does not deadlock when updateCo
     ],
   };
 
-  let lockHeld = false;
   let updatedCount = 0;
-  const fakeLocks = {
-    request: async (_name: string, cb: () => Promise<unknown>) => {
-      if (lockHeld) {
-        throw new Error('DEADLOCK: re-entrant lock acquisition on connection-logs');
-      }
-      lockHeld = true;
-      try {
-        return await cb();
-      } finally {
-        lockHeld = false;
-      }
-    },
-  };
-  const prevNavigatorDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
-  Object.defineProperty(globalThis, 'navigator', {
-    value: { locks: fakeLocks },
-    configurable: true,
-  });
 
   publishConnectionLogsSnapshot({ connectionLogs: [liveLog] });
   registerConnectionLogsActions({
@@ -212,8 +208,6 @@ test('clearAllRemoteDesktopRecordingsAndSyncLogs does not deadlock when updateCo
     assert.equal(res.deleted, 1);
     assert.equal(updatedCount, 1);
   } finally {
-    if (prevNavigatorDesc) Object.defineProperty(globalThis, 'navigator', prevNavigatorDesc);
-    else Reflect.deleteProperty(globalThis, 'navigator');
     registerConnectionLogsActions(null);
     publishConnectionLogsSnapshot({ connectionLogs: [] });
     env.restore();
