@@ -335,6 +335,9 @@ function main() {
       sshBridge.registerHandlers(ipcMain);
       terminalBridge.registerHandlers(ipcMain);
       sftpBridge.registerHandlers(ipcMain);
+      const sshChannelBridge = require("../bridges/sshChannelBridge.cjs");
+      sshChannelBridge.init({ sessions, sftpClients });
+      sshChannelBridge.registerHandlers(ipcMain);
       registerPortForwardingWorkerBridge(ipcMain);
       registerRemoteDesktopWorkerBridge(ipcMain);
       transferBridge.registerHandlers(ipcMain);

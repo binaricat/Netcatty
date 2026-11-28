@@ -1,5 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
+import { useExternalEditorSettings } from "../../application/state/useExternalEditorSettings";
+import { getExternalEditorLabel } from "../../domain/externalEditor";
 import { logger } from "../../lib/logger";
 import { useRenderTracker } from "../../lib/useRenderTracker";
 import { cn } from "../../lib/utils";
@@ -124,7 +126,19 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   const writableHosts = useSftpWritableHosts();
 
   const { t } = useI18n();
+  const { settings: externalEditorSettings } = useExternalEditorSettings();
+  const externalEditorLabel = getExternalEditorLabel(externalEditorSettings.defaultEditor);
   const hostId = pane.connection?.hostId;
+  const paneHost = useMemo(
+    () => (hostId ? hosts.find((h) => h.id === hostId) : undefined),
+    [hostId, hosts],
+  );
+  const handleOpenInExternalEditor = useMemo(() => {
+    if (pane.connection?.isLocal || !callbacks.onOpenInExternalEditor) return undefined;
+    return (entry: Parameters<NonNullable<typeof callbacks.onOpenInExternalEditor>>[0], fullPath?: string) => {
+      callbacks.onOpenInExternalEditor?.(entry, fullPath, paneHost);
+    };
+  }, [callbacks, pane.connection?.isLocal, paneHost]);
   const { hostViewMode, setHostViewMode: saveHostViewMode } = useSftpHostViewMode(hostId);
   const [, startTransition] = useTransition();
   const [showFilterBar, setShowFilterBar] = useState(false);
@@ -668,6 +682,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
             onReceiveFromOtherPane={callbacks.onReceiveFromOtherPane}
             onOpenFileWithSystemDefault={callbacks.onOpenFileWithSystemDefault}
             onOpenFileWith={callbacks.onOpenFileWith}
+            onOpenInExternalEditor={handleOpenInExternalEditor}
+            externalEditorLabel={externalEditorLabel}
             onEditFile={callbacks.onEditFile}
             onDownloadFile={callbacks.onDownloadFile}
             onDownloadFiles={callbacks.onDownloadFiles}
@@ -724,6 +740,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           onMoveEntriesToPath={handleMoveEntriesToPath}
           onOpenFileWithSystemDefault={callbacks.onOpenFileWithSystemDefault}
           onOpenFileWith={callbacks.onOpenFileWith}
+          onOpenInExternalEditor={handleOpenInExternalEditor}
+          externalEditorLabel={externalEditorLabel}
           onEditFile={callbacks.onEditFile}
           onDownloadFile={callbacks.onDownloadFile}
           onDownloadFiles={callbacks.onDownloadFiles}

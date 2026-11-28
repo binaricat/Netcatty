@@ -1,4 +1,23 @@
 import { terminalCwdStore } from '../application/state/terminalCwdStore';
+import {
+  getExternalEditorSettingsSnapshot,
+  launchRemoteExternalEditor,
+  setExternalEditorHostTrust,
+  useExternalEditorTerminalAutoSetupConfig,
+} from '../application/state/useExternalEditorSettings';
+import {
+  EXTERNAL_EDITOR_AUTO_SETUP_UPDATED_MARKER,
+  buildExternalEditorAutoSetupCommand,
+  buildExternalEditorSessionActivateCommand,
+  getExternalEditorLabel,
+  parseExternalEditorAutoSetupShell,
+  resolveExternalEditorTrustPolicy,
+  shouldAutoSetupExternalEditorShell,
+  validateAndNormalizeRemotePath,
+  type ExternalEditorOscRequest,
+  type ExternalEditorPresetId,
+  type ExternalEditorTargetKind,
+} from '../domain/externalEditor';
 import { useTerminalDirectorySession } from '../application/state/useTerminalDirectorySession';
 import { refreshObservedTerminalDirectory, scheduleObservedTerminalDirectoryRefresh } from '../application/state/terminalDirectoryRegistry';
 import { publishTerminalSelectionTarget } from "../infrastructure/plugins/terminalSelectionRegistry";
@@ -1395,8 +1414,234 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // OSC-52 clipboard read prompt
   const [osc52ReadPromptVisible, setOsc52ReadPromptVisible] = useState(false);
   const osc52ReadResolverRef = useRef<((allowed: boolean) => void) | null>(null);
+  const [pendingExternalEditorRequest, setPendingExternalEditorRequest] = useState<{
+    editorId: ExternalEditorPresetId;
+    editorLabel: string;
+    remotePath: string;
+    kind: ExternalEditorTargetKind;
+  } | null>(null);
+  const pendingExternalEditorRequestRef = useRef(pendingExternalEditorRequest);
+  pendingExternalEditorRequestRef.current = pendingExternalEditorRequest;
+  const lastExternalEditorLaunchRef = useRef<{ key: string; at: number } | null>(null);
   const [osc7SetupOpen, setOsc7SetupOpen] = useState(false);
   const [osc7SetupRunning, setOsc7SetupRunning] = useState(false);
+
+  const executeExternalEditorLaunch = useCallback((req: {
+    editorId: ExternalEditorPresetId;
+    editorLabel: string;
+    remotePath: string;
+    kind: ExternalEditorTargetKind;
+  }) => {
+    const launchKey = `${req.editorId}:${req.kind}:${req.remotePath}`;
+    const now = Date.now();
+    const prev = lastExternalEditorLaunchRef.current;
+    if (prev && prev.key === launchKey && now - prev.at < 800) {
+      return;
+    }
+    lastExternalEditorLaunchRef.current = { key: launchKey, at: now };
+
+    void launchRemoteExternalEditor({
+      editorId: req.editorId,
+      host: {
+        hostId: host.id,
+        hostname: host.hostname,
+        port: host.port,
+        username: host.username,
+        label: host.label,
+      },
+      remotePath: req.remotePath,
+      kind: req.kind,
+      sessionId: sessionRef.current ?? sessionId,
+    }).then(() => {
+      toast.success(t("terminal.externalEditor.opened", { editor: req.editorLabel, path: req.remotePath }));
+    }).catch((err) => {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t("terminal.externalEditor.failed", { editor: req.editorLabel }),
+      );
+    });
+  }, [host.id, host.hostname, host.port, host.username, host.label, sessionId, t]);
+
+  const handleOscExternalEditorRequest = useCallback((request: ExternalEditorOscRequest) => {
+    // Strictly scope OSC 7337 remote editor opens to live SSH sessions on visible tabs.
+    if (isLocalConnection || isSerialConnection) return;
+    if (!isVisibleRef.current) return;
+    const protocol = host.protocol || "ssh";
+    if (protocol !== "ssh") return;
+
+    const settings = getExternalEditorSettingsSnapshot();
+    if (!settings.terminalRequestsEnabled) return;
+
+    const fallbackCwd = terminalCwdTracker.getRendererCwd() ?? knownCwdRef.current ?? undefined;
+    const normalized = validateAndNormalizeRemotePath(request.path, fallbackCwd);
+    if (!normalized.ok) {
+      logger.warn(
+        "[Terminal] Rejected invalid OSC 7337 remote path:",
+        "error" in normalized ? normalized.error : "invalid path",
+      );
+      return;
+    }
+
+    const editorId: ExternalEditorPresetId = request.editorId ?? settings.defaultEditor;
+    const editorLabel = getExternalEditorLabel(editorId);
+    const hostIdentity = {
+      hostId: host.id,
+      hostname: host.hostname,
+      port: host.port,
+      username: host.username,
+      label: host.label,
+    };
+    const trust = resolveExternalEditorTrustPolicy(settings, hostIdentity);
+    if (trust === "deny") {
+      logger.debug("[Terminal] Ignored OSC 7337 external editor request (host denied)");
+      return;
+    }
+
+    const launchPayload = {
+      editorId,
+      editorLabel,
+      remotePath: normalized.path,
+      kind: request.kind,
+    };
+
+    if (trust === "allow") {
+      executeExternalEditorLaunch(launchPayload);
+      return;
+    }
+
+    // Untrusted host: show explicit inline confirmation prompt (do not overwrite an active prompt).
+    setPendingExternalEditorRequest((prev) => prev ?? launchPayload);
+  }, [
+    executeExternalEditorLaunch,
+    host.id,
+    host.hostname,
+    host.port,
+    host.username,
+    host.label,
+    host.protocol,
+    isLocalConnection,
+    isSerialConnection,
+    terminalCwdTracker,
+  ]);
+
+  const handleExternalEditorPromptResponse = useCallback((decision: "deny" | "once" | "always") => {
+    const current = pendingExternalEditorRequestRef.current;
+    pendingExternalEditorRequestRef.current = null;
+    setPendingExternalEditorRequest(null);
+    if (current) {
+      if (decision === "always") {
+        setExternalEditorHostTrust({
+          hostId: host.id,
+          hostname: host.hostname,
+          port: host.port,
+          username: host.username,
+          label: host.label,
+        }, "allow");
+        executeExternalEditorLaunch(current);
+      } else if (decision === "once") {
+        executeExternalEditorLaunch(current);
+      }
+    }
+    termRef.current?.focus();
+  }, [executeExternalEditorLaunch, host.id, host.hostname, host.port, host.username, host.label]);
+
+  // Session-scoped external editor shell commands: when enabled on the host
+  // (Host Details -> Terminal Behavior) or globally in External Editor settings,
+  // install standalone helpers into ~/.netcatty/bin over the silent exec channel
+  // (never modifying ~/.bashrc / ~/.zshrc / config.fish) and prepend ~/.netcatty/bin
+  // to PATH strictly inside this Netcatty terminal window once the prompt is ready.
+  const externalEditorAutoSetupConfig = useExternalEditorTerminalAutoSetupConfig();
+  const externalEditorAutoSetupDoneSessionRef = useRef<string | null>(null);
+  const externalEditorTerminalBackendRef = useRef(terminalBackend);
+  externalEditorTerminalBackendRef.current = terminalBackend;
+  const externalEditorTRef = useRef(t);
+  externalEditorTRef.current = t;
+  const hostProtocol = host.protocol || "ssh";
+  const shouldEnableExternalEditorSessionCommands = shouldAutoSetupExternalEditorShell(
+    externalEditorAutoSetupConfig,
+    { externalEditorShellIntegration: host.externalEditorShellIntegration },
+  );
+  const defaultExternalEditor = externalEditorAutoSetupConfig.defaultEditor;
+
+  useEffect(() => {
+    if (status !== "connected") return;
+    if (isLocalConnection || isSerialConnection) return;
+    if (hostProtocol !== "ssh") return;
+    if (!shouldEnableExternalEditorSessionCommands) return;
+
+    const activeSessionId = sessionRef.current ?? sessionId;
+    if (!activeSessionId) return;
+    if (externalEditorAutoSetupDoneSessionRef.current === activeSessionId) return;
+
+    const backend = externalEditorTerminalBackendRef.current;
+    if (!backend.setupOsc7Tracking) return;
+
+    let cancelled = false;
+    let pollTimer: number | null = null;
+    const setupCmd = buildExternalEditorAutoSetupCommand(defaultExternalEditor);
+
+    void backend.setupOsc7Tracking(activeSessionId, setupCmd).then((result) => {
+      if (cancelled) return;
+      if (!result?.success) {
+        logger.warn("[Terminal] External editor session helper setup failed:", result?.error || result?.stderr);
+        return;
+      }
+      const shellKind = parseExternalEditorAutoSetupShell(result.stdout);
+      const activateCmd = buildExternalEditorSessionActivateCommand(shellKind);
+      const updated = typeof result.stdout === "string"
+        && result.stdout.includes(EXTERNAL_EDITOR_AUTO_SETUP_UPDATED_MARKER);
+
+      let attempts = 0;
+      const maxAttempts = 60; // ~6s total to let MOTD / login scripts settle
+      const tryActivateInSession = () => {
+        if (cancelled) return;
+        const currentBackendId = sessionRef.current ?? sessionId;
+        if (currentBackendId !== activeSessionId) return;
+        if (externalEditorAutoSetupDoneSessionRef.current === activeSessionId) return;
+
+        if (isTerminalReadyForCommandInjection(sessionId)) {
+          externalEditorAutoSetupDoneSessionRef.current = activeSessionId;
+          externalEditorTerminalBackendRef.current.writeToSession(
+            activeSessionId,
+            activateCmd,
+            { automated: true },
+          );
+          if (updated) {
+            toast.success(
+              externalEditorTRef.current("terminal.externalEditor.autoSetupConfigured", {
+                editor: getExternalEditorLabel(defaultExternalEditor),
+              }),
+            );
+          }
+          return;
+        }
+        attempts += 1;
+        if (attempts < maxAttempts) {
+          pollTimer = window.setTimeout(tryActivateInSession, 100);
+        }
+      };
+
+      tryActivateInSession();
+    }).catch((err) => {
+      logger.warn("[Terminal] External editor session helper setup error:", err);
+    });
+
+    return () => {
+      cancelled = true;
+      if (pollTimer !== null) {
+        window.clearTimeout(pollTimer);
+      }
+    };
+  }, [
+    status,
+    isLocalConnection,
+    isSerialConnection,
+    hostProtocol,
+    shouldEnableExternalEditorSessionCommands,
+    defaultExternalEditor,
+    sessionId,
+  ]);
   const handleOsc52ReadRequest = useCallback((): Promise<boolean> => {
     // Reject if terminal is not visible (background tab) — user can't see the prompt
     if (!isVisibleRef.current) return Promise.resolve(false);
@@ -4798,6 +5043,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       });
     },
     onOsc52ReadRequest: handleOsc52ReadRequest,
+    onOscExternalEditorRequest: handleOscExternalEditorRequest,
     onAutocompleteKeyEvent: (e: KeyboardEvent) => autocompleteKeyEventRef.current?.(e) ?? true,
     onAutocompleteInput: (data: string) => autocompleteInputRef.current?.(data),
     onAutocompleteReposition: () => autocompleteRepositionRef.current?.(),
@@ -5064,11 +5310,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onWake: wakeFromHibernateRuntime,
   });
 
-  useTerminalEffects({ isPromptSecurityAlternateScreenActive, CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, applyUserCursorWidthPreference, shouldApplyUserCursorPreference, snapshotUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, captureTerminalLogData, chainHosts: resolvedChainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, bootEpochRef, isBroadcastEnabledRef, broadcastPasswordBypassRef, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isWaitingForAutoReconnect, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, kittyKeyboardProtocolEnabledForSession, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted: cwdAwareOnCommandSubmitted, onCommandSettled: onCommandSubmitted, onHotkeyActionRef, onOpenExternalError, onOutputTriggerUserInputRef: noteOutputTriggerUserInputRef, onPluginRuntimeCwdChange: pluginAwareOnRuntimeCwdChange, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRefreshRef, pluginDecorationRules, pluginDecorationRulesRef, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prepareInitialCwdIntent, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef: recorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setShowLogs, setStatus, setConnectionDeadlineAt, shellType, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, vaultInitialized, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, snippetsRef, splitResizeActive: isResizing, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalOutputHistory: terminalOutputHistoryRef.current, terminalSettings, terminalSettingsRef, terminalTitleRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, workspaceId, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState });
+  useTerminalEffects({ isPromptSecurityAlternateScreenActive, CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, applyUserCursorWidthPreference, shouldApplyUserCursorPreference, snapshotUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, captureTerminalLogData, chainHosts: resolvedChainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleOscExternalEditorRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, bootEpochRef, isBroadcastEnabledRef, broadcastPasswordBypassRef, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isWaitingForAutoReconnect, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, kittyKeyboardProtocolEnabledForSession, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted: cwdAwareOnCommandSubmitted, onCommandSettled: onCommandSubmitted, onHotkeyActionRef, onOpenExternalError, onOutputTriggerUserInputRef: noteOutputTriggerUserInputRef, onPluginRuntimeCwdChange: pluginAwareOnRuntimeCwdChange, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRefreshRef, pluginDecorationRules, pluginDecorationRulesRef, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prepareInitialCwdIntent, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef: recorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setShowLogs, setStatus, setConnectionDeadlineAt, shellType, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, vaultInitialized, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, snippetsRef, splitResizeActive: isResizing, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalOutputHistory: terminalOutputHistoryRef.current, terminalSettings, terminalSettingsRef, terminalTitleRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, workspaceId, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState });
 
   return (
     <>
-      <TerminalView ctx={{ Activity, ArrowDownToLine, ArrowUpFromLine, Button, Clock3, Copy, Cpu, HardDrive, HoverCard, HoverCardContent, HoverCardTrigger, Maximize2, MemoryStick, Radio, RefreshCcw, Sparkles, SquareArrowOutUpRight, Unplug, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, canUpdateHost: !!onUpdateHost, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI: onAddSelectionToAI ? handleAddSelectionToAI : undefined, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDisconnect: (attachExistingSession || compactToolbar) ? undefined : handleDisconnect, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOpenHostBrowser, handleOpenSFTP, handleOsc52ReadResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, composeSendToAll, onToggleComposeSendTarget, isCancelling, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isDraggingOver, isFocusMode, isFocusedPane, isLocalConnection, remoteDragDropUsesZmodem, isPluginTerminalProviderAvailable, isReconnectActive, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, identities, knownCwdRef, needsHostKeyVerification, onAddSelectionToAI, onBroadcastInput, onCloseSession, onDetach, onDetachDragEnd, onDetachDragStart, onDetachPointerDown, onEndSessionDrag, onExpandToFocus, onTogglePaneMagnification, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onStartSessionDrag, onToggleBroadcast, onUpdateHost: handleUpdateHostFromTerminal, osc52ReadPromptVisible, osc7SetupOpen, osc7SetupRunning, passwordPromptActiveRef, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, scrollToBottomAfterProgrammaticInput, searchMatchCount, searchFocusToken, scriptExecutionOverlay: activeScriptRun ? (
+      <TerminalView ctx={{ Activity, ArrowDownToLine, ArrowUpFromLine, Button, Clock3, Copy, Cpu, HardDrive, HoverCard, HoverCardContent, HoverCardTrigger, Maximize2, MemoryStick, Radio, RefreshCcw, Sparkles, SquareArrowOutUpRight, Unplug, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, canUpdateHost: !!onUpdateHost, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI: onAddSelectionToAI ? handleAddSelectionToAI : undefined, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDisconnect: (attachExistingSession || compactToolbar) ? undefined : handleDisconnect, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOpenHostBrowser, handleOpenSFTP, handleOsc52ReadResponse, handleExternalEditorPromptResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, composeSendToAll, onToggleComposeSendTarget, isCancelling, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isDraggingOver, isFocusMode, isFocusedPane, isLocalConnection, remoteDragDropUsesZmodem, isPluginTerminalProviderAvailable, isReconnectActive, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, identities, knownCwdRef, needsHostKeyVerification, onAddSelectionToAI, onBroadcastInput, onCloseSession, onDetach, onDetachDragEnd, onDetachDragStart, onDetachPointerDown, onEndSessionDrag, onExpandToFocus, onTogglePaneMagnification, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onStartSessionDrag, onToggleBroadcast, onUpdateHost: handleUpdateHostFromTerminal, osc52ReadPromptVisible, pendingExternalEditorRequest, osc7SetupOpen, osc7SetupRunning, passwordPromptActiveRef, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, scrollToBottomAfterProgrammaticInput, searchMatchCount, searchFocusToken, scriptExecutionOverlay: activeScriptRun ? (
         <ScriptExecutionOverlay
           run={activeScriptRun}
           onPause={() => { void pauseScriptRun(activeScriptRun.runId); }}

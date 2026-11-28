@@ -426,6 +426,55 @@ export interface RemoteDesktopBridgeApi {
   onKeyboardGrabChanged(cb: (payload: { active: boolean }) => void): () => void;
 }
 
+export interface ExternalEditorDetectEntry {
+  id: "zed" | "vscode" | "cursor" | "windsurf";
+  detectedPath: string | null;
+  available: boolean;
+}
+
+export interface ExternalEditorBridgeConfigStatus {
+  installed: boolean;
+  upToDate: boolean;
+  configExists: boolean;
+  sshConfigPath: string;
+  proxyLauncherPath: string;
+  knownHostsPath: string;
+}
+
+export interface ExternalEditorOpenRemotePayload {
+  editorId: "zed" | "vscode" | "cursor" | "windsurf" | "custom";
+  executablePath?: string;
+  customArgs?: string[];
+  connectionMode: "bridge" | "direct";
+  bridgeHost?: string;
+  directSshTarget?: string;
+  sessionId?: string;
+  sftpId?: string;
+  hostId?: string;
+  hostname?: string;
+  port?: number;
+  username?: string;
+  remotePath: string;
+  kind?: "file" | "dir" | "auto";
+}
+
+export interface ExternalEditorOpenRemoteResult {
+  ok: boolean;
+  editorId: string;
+  sshTarget: string;
+  remotePath: string;
+  displayUri: string;
+  connectionMode: "bridge" | "direct";
+}
+
+export interface ExternalEditorBridgeApi {
+  detect(): Promise<Record<string, ExternalEditorDetectEntry>>;
+  getBridgeConfigStatus(): Promise<ExternalEditorBridgeConfigStatus>;
+  installBridgeConfig(): Promise<ExternalEditorBridgeConfigStatus>;
+  removeBridgeConfig(): Promise<ExternalEditorBridgeConfigStatus>;
+  openRemote(payload: ExternalEditorOpenRemotePayload): Promise<ExternalEditorOpenRemoteResult>;
+}
+
 declare global {
   interface NetcattyBridge {
     startRemoteDesktopSession?: RemoteDesktopBridgeApi["start"];
@@ -448,6 +497,7 @@ declare global {
     onRemoteDesktopKeyboardGrabChanged?: RemoteDesktopBridgeApi["onKeyboardGrabChanged"];
     remoteDesktop?: RemoteDesktopBridgeApi;
     remoteDesktopRecordings?: RemoteDesktopRecordingsBridgeApi;
+    externalEditor?: ExternalEditorBridgeApi;
   }
 }
 

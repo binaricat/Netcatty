@@ -1467,5 +1467,8 @@ export const ruVaultMessages: Messages = {
   'settings.remoteDesktopRecordings.clearAllConfirmDesc': 'С этого устройства будут безвозвратно удалены файлы .webm ({count}).',
   'settings.remoteDesktopRecordings.clearResult': 'Удалено файлов записей: {count}.',
   'settings.remoteDesktopRecordings.hint': 'Записи хранятся только локально на этом устройстве и не синхронизируются с облаком. Закреплённые журналы защищены от автоматической очистки.',
+  'sftp.context.openInExternalEditor': 'Открыть в {editor}',
+  'hostDetails.externalEditorShellIntegration': 'Включить команды внешнего редактора в этой сессии',
+  'hostDetails.externalEditorShellIntegration.desc': 'Добавляет `zed` / `ncedit` из ~/.netcatty/bin в PATH только для этой сессии терминала Netcatty (включая tmux), не изменяя ~/.bashrc и ~/.zshrc.',
 
 };

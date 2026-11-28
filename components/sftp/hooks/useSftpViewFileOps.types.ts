@@ -1,6 +1,6 @@
 import type React from "react";
 import type { MutableRefObject } from "react";
-import type { RemoteFile, SftpFileEntry, SftpFilenameEncoding } from "../../../types";
+import type { Host, RemoteFile, SftpFileEntry, SftpFilenameEncoding } from "../../../types";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import type { TextEditorModalSnapshot } from "../../TextEditorModal";
@@ -92,6 +92,8 @@ export interface UseSftpViewFileOpsResult {
   onOpenFileWithSystemDefaultRight: (file: SftpFileEntry, fullPath?: string) => void;
   onOpenFileWithLeft: (file: SftpFileEntry, fullPath?: string) => void;
   onOpenFileWithRight: (file: SftpFileEntry, fullPath?: string) => void;
+  onOpenInExternalEditorLeft: (entry: SftpFileEntry, fullPath?: string, host?: Host) => void;
+  onOpenInExternalEditorRight: (entry: SftpFileEntry, fullPath?: string, host?: Host) => void;
   onDownloadFileLeft: (file: SftpFileEntry, fullPath?: string) => void;
   onDownloadFileRight: (file: SftpFileEntry, fullPath?: string) => void;
   onExtractArchiveLeft: (file: SftpFileEntry, fullPath?: string) => void | Promise<void>;

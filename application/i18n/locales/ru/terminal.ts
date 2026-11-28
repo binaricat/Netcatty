@@ -995,4 +995,12 @@ export const ruTerminalMessages: Messages = {
   'terminal.browser.allScopeHint': 'В браузерах всех хостов.',
   'terminal.browser.downloadLocation': 'Файлы сохраняются в папку «Загрузки»',
   'terminal.browser.saveAs': 'Сохранить как…',
+  'terminal.externalEditor.opened': 'Открыто {path} в {editor}',
+  'terminal.externalEditor.failed': 'Не удалось открыть в {editor}',
+  'terminal.externalEditor.prompt.title': 'Открыть в {editor}?',
+  'terminal.externalEditor.prompt.desc': 'Удалённый хост {host} запросил открытие этого пути в {editor}:',
+  'terminal.externalEditor.prompt.deny': 'Отклонить',
+  'terminal.externalEditor.prompt.allowOnce': 'Разрешить один раз',
+  'terminal.externalEditor.prompt.alwaysTrust': 'Всегда доверять хосту',
+  'terminal.externalEditor.autoSetupConfigured': 'Команды удалённого редактора настроены ({editor})',
 };

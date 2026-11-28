@@ -26,6 +26,7 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { Button } from "../../ui/button";
 import { ConfirmDialog } from "../../ui/confirm-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip";
+import { ExternalEditorSettingsSection } from "./ExternalEditorSettingsSection";
 import {
   SectionHeader,
   SettingCard,
@@ -383,6 +384,8 @@ export default function SettingsFileAssociationsTab() {
           />
         </SettingRow>
       </SettingCard>
+
+      <ExternalEditorSettingsSection />
 
       <SectionHeader title={t('settings.sftp.defaultOpener')} />
       <SettingCard>

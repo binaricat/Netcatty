@@ -1415,5 +1415,8 @@ export const zhTWVaultMessages: Messages = {
   'settings.remoteDesktopRecordings.clearAllConfirmDesc': '將從此裝置永久刪除 {count} 個 .webm 錄影檔案。',
   'settings.remoteDesktopRecordings.clearResult': '已刪除 {count} 個錄影檔案。',
   'settings.remoteDesktopRecordings.hint': '錄影檔案僅儲存在本裝置本機，絕不上傳雲端同步；已收藏的連線日誌錄影不會在自動清理中被刪除。',
+  'sftp.context.openInExternalEditor': '在 {editor} 中開啟',
+  'hostDetails.externalEditorShellIntegration': '於此工作階段啟用外部編輯器指令',
+  'hostDetails.externalEditorShellIntegration.desc': '透過 ~/.netcatty/bin 僅於目前 Netcatty 終端機工作階段啟用 `zed` / `ncedit`（支援 tmux），不修改 ~/.bashrc 或 ~/.zshrc。',
 
 };

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppWindow, Archive, ArrowDown, ArrowRight, ArrowUp, ChevronDown, ClipboardCopy, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Terminal, TerminalSquare, Trash2, Unplug, Upload } from "lucide-react";
+import { AppWindow, Archive, ArrowDown, ArrowRight, ArrowUp, ChevronDown, ClipboardCopy, Code2, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Terminal, TerminalSquare, Trash2, Unplug, Upload } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   ContextMenu,
@@ -65,6 +65,8 @@ interface SftpPaneFileListProps {
   onMoveEntriesToPath: (sourcePaths: string[], targetPath: string) => Promise<void>;
   onOpenFileWithSystemDefault?: (entry: SftpFileEntry) => void;
   onOpenFileWith?: (entry: SftpFileEntry) => void;
+  onOpenInExternalEditor?: (entry: SftpFileEntry) => void;
+  externalEditorLabel?: string;
   onEditFile?: (entry: SftpFileEntry) => void;
   onDownloadFile?: (entry: SftpFileEntry) => void;
   onDownloadFiles?: (entries: SftpFileEntry[]) => void;
@@ -159,6 +161,8 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   onMoveEntriesToPath,
   onOpenFileWithSystemDefault,
   onOpenFileWith,
+  onOpenInExternalEditor,
+  externalEditorLabel,
   onEditFile,
   onDownloadFile,
   onDownloadFiles,
@@ -352,6 +356,12 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
             {isNavigableDirectory(entry) && (
               <ContextMenuItem onClick={() => onNavigateTo(joinPath(pane.connection.currentPath, entry.name))}>
                 <ArrowRight size={14} className="mr-2" /> {t("sftp.context.navigateTo")}
+              </ContextMenuItem>
+            )}
+            {!isLocal && onOpenInExternalEditor && (
+              <ContextMenuItem onClick={() => onOpenInExternalEditor(entry)}>
+                <Code2 size={14} className="mr-2" />{" "}
+                {t("sftp.context.openInExternalEditor", { editor: externalEditorLabel || "Zed" })}
               </ContextMenuItem>
             )}
             {!isNavigableDirectory(entry) && onOpenFileWithSystemDefault && (
@@ -560,6 +570,8 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       onNavigateTo,
       onOpenFileWithSystemDefault,
       onOpenFileWith,
+      onOpenInExternalEditor,
+      externalEditorLabel,
       onRefresh,
       onUploadExternalFileList,
       onUploadExternalFolder,

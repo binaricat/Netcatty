@@ -23,6 +23,8 @@ export interface SftpPaneTreeViewProps {
   onReceiveFromOtherPane: (files: SftpTransferSource[]) => void;
   onOpenFileWithSystemDefault?: (entry: SftpFileEntry, fullPath?: string) => void;
   onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;
+  onOpenInExternalEditor?: (entry: SftpFileEntry, fullPath?: string) => void;
+  externalEditorLabel?: string;
   onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onDownloadFiles?: (entries: SftpFileEntry[], fullPaths?: string[]) => void;

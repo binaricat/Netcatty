@@ -1415,5 +1415,8 @@ export const zhCNVaultMessages: Messages = {
   'settings.remoteDesktopRecordings.clearAllConfirmDesc': '将从此设备永久删除 {count} 个 .webm 录屏文件。',
   'settings.remoteDesktopRecordings.clearResult': '已删除 {count} 个录屏文件。',
   'settings.remoteDesktopRecordings.hint': '录屏文件仅保存在本设备本地，绝不上传云同步；已收藏的连接日志录屏不会在自动清理中被删除。',
+  'sftp.context.openInExternalEditor': '在 {editor} 中打开',
+  'hostDetails.externalEditorShellIntegration': '在此会话中启用外部编辑器命令',
+  'hostDetails.externalEditorShellIntegration.desc': '通过 ~/.netcatty/bin 仅在当前 Netcatty 终端会话中启用 `zed` / `ncedit`（支持 tmux），不修改 ~/.bashrc 或 ~/.zshrc。',
 
 };

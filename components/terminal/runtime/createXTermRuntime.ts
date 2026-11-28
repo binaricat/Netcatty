@@ -1,4 +1,9 @@
 import { shouldBroadcastDuringSensitivePrompt } from "../../../domain/terminalBroadcast";
+import {
+  EXTERNAL_EDITOR_OSC_CODE,
+  parseExternalEditorOscPayload,
+  type ExternalEditorOscRequest,
+} from "../../../domain/externalEditor";
 import type { SensitiveInputActiveRef } from "../autocomplete/terminalAutocompletePrompt";
 import { clearTerminalBroadcastUserInput, captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent, markTerminalBroadcastUserInput, type TerminalPacedBroadcast } from "./terminalPacedBroadcast";
 import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
@@ -522,6 +527,9 @@ export type CreateXTermRuntimeContext = {
 
   // Callback when remote requests clipboard read in 'prompt' mode; resolves to user's decision
   onOsc52ReadRequest?: () => Promise<boolean>;
+
+  // Callback when remote shell requests opening a path in a configured local external editor (OSC 7337)
+  onOscExternalEditorRequest?: (request: ExternalEditorOscRequest) => void;
 
   // Autocomplete key event handler — returns false if event was consumed
   onAutocompleteKeyEvent?: (e: KeyboardEvent) => boolean;
@@ -3531,6 +3539,19 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     return true;
   });
 
+  // OSC 7337 — Netcatty external editor open request (narrowly scoped editor preset + remote path)
+  const oscExternalEditorDisposable = term.parser.registerOscHandler(EXTERNAL_EDITOR_OSC_CODE, (data) => {
+    try {
+      const request = parseExternalEditorOscPayload(data);
+      if (request) {
+        ctx.onOscExternalEditorRequest?.(request);
+      }
+    } catch (err) {
+      logger.warn('[XTerm] Failed to parse OSC 7337 external editor request:', err);
+    }
+    return true;
+  });
+
   // OSC 52 — clipboard integration
   // Format: 52;<target>;<base64-data>  (write)  or  52;<target>;?  (query/read)
   // <target> is typically "c" (clipboard) or "p" (primary selection)
@@ -3796,6 +3817,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       osc9Disposable.dispose();
       osc777Disposable.dispose();
       osc99Disposable.dispose();
+      oscExternalEditorDisposable.dispose();
       osc52Disposable.dispose();
       titleChangeDisposable.dispose();
       cancelAutocompleteReposition();

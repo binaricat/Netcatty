@@ -989,4 +989,12 @@ export const esTerminalMessages: Messages = {
   'terminal.browser.allScopeHint': 'Mostrar en el navegador de todos los hosts.',
   'terminal.browser.downloadLocation': 'Guardado en la carpeta Descargas',
   'terminal.browser.saveAs': 'Guardar como…',
+  'terminal.externalEditor.opened': 'Se abrió {path} en {editor}',
+  'terminal.externalEditor.failed': 'No se pudo abrir en {editor}',
+  'terminal.externalEditor.prompt.title': '¿Abrir en {editor}?',
+  'terminal.externalEditor.prompt.desc': 'El equipo remoto {host} solicitó abrir esta ruta remota en {editor}:',
+  'terminal.externalEditor.prompt.deny': 'Denegar',
+  'terminal.externalEditor.prompt.allowOnce': 'Permitir una vez',
+  'terminal.externalEditor.prompt.alwaysTrust': 'Confiar siempre en este equipo',
+  'terminal.externalEditor.autoSetupConfigured': 'Comandos de editor remoto configurados ({editor})',
 };

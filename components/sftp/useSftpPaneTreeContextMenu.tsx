@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AppWindow, Archive, ArrowRight, ArrowUp, ClipboardCopy, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Terminal, TerminalSquare, Trash2, Upload } from 'lucide-react';
+import { AppWindow, Archive, ArrowRight, ArrowUp, ClipboardCopy, Code2, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Terminal, TerminalSquare, Trash2, Upload } from 'lucide-react';
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '../ui/context-menu';
 import { getParentPath } from '../../application/state/sftp/utils';
 import { isKnownBinaryFile } from '../../lib/sftpFileUtils';
@@ -37,7 +37,7 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     contextTarget, pane, toggleExpand, stableOnOpenEntry, stableOnRefresh, getActionPaths, toTransferSources,
     executeMoveAction, triggerUploadPicker, onUploadExternalFolder, onInsertPathToTerminal, onCdInTerminal, uploadEnabled, folderUploadEnabled,
     setMoveTargetPaths, setMoveToPath, setMoveToError, setMoveToSuggestions, setMoveToSuggestionIndex,
-    setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onDuplicateEntriesRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef,
+    setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onDuplicateEntriesRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef, onOpenInExternalEditorRef, externalEditorLabel,
     onEditFileRef, onDownloadFileRef, onDownloadFilesRef, entryByPathRef, onExtractArchiveRef, onCreateArchiveRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
     openNewFolderDialogRef, openNewFileDialogRef,
   } = props;
@@ -112,6 +112,12 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
         {isDir && (
           <ContextMenuItem onClick={() => onNavigateToRef.current(entryPath)}>
             <ArrowRight size={14} className="mr-2" />{tRef.current('sftp.context.navigateTo')}
+          </ContextMenuItem>
+        )}
+        {!isLocal && !isParentEntry && onOpenInExternalEditorRef?.current && (
+          <ContextMenuItem onClick={() => onOpenInExternalEditorRef.current?.(entry, entryPath)}>
+            <Code2 size={14} className="mr-2" />
+            {tRef.current('sftp.context.openInExternalEditor', { editor: externalEditorLabel || 'Zed' })}
           </ContextMenuItem>
         )}
         {!isDir && onOpenFileWithSystemDefaultRef.current && (
@@ -264,6 +270,8 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     onNavigateToRef,
     onOpenFileWithSystemDefaultRef,
     onOpenFileWithRef,
+    onOpenInExternalEditorRef,
+    externalEditorLabel,
     openDeleteConfirmRef,
     openNewFileDialogRef,
     openNewFolderDialogRef,

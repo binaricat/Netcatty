@@ -1,5 +1,10 @@
 import { useCallback, useRef, useState } from "react";
-import type { SftpFileEntry } from "../../../types";
+import type { Host, SftpFileEntry } from "../../../types";
+import { getExternalEditorLabel } from "../../../domain/externalEditor";
+import {
+  getExternalEditorSettingsSnapshot,
+  launchRemoteExternalEditor,
+} from "../../../application/state/useExternalEditorSettings";
 import type { TransferStatus } from "../../../domain/models";
 import { getParentPath, joinTransferTargetPath } from "../../../application/state/sftp/utils";
 import {
@@ -359,6 +364,59 @@ export const useSftpViewFileOps = ({
   const onOpenFileWithRight = useCallback(
     (file: SftpFileEntry, fullPath?: string) => handleOpenFileWithForSide("right", file, fullPath),
     [handleOpenFileWithForSide],
+  );
+
+  const handleOpenInExternalEditorForSide = useCallback(
+    (side: "left" | "right", entry: SftpFileEntry, fullPath?: string, host?: Host) => {
+      const pane = side === "left" ? sftpRef.current.leftPane : sftpRef.current.rightPane;
+      const conn = pane.connection;
+      if (!conn || conn.isLocal) return;
+
+      const resolvedFullPath = fullPath ?? sftpRef.current.joinPath(conn.currentPath, entry.name);
+      const settings = getExternalEditorSettingsSnapshot();
+      const editorLabel = getExternalEditorLabel(settings.defaultEditor);
+      const sftpId = getSftpIdForConnection?.(conn.id);
+
+      void launchRemoteExternalEditor({
+        host: {
+          hostId: host?.id ?? conn.hostId,
+          hostname: host?.hostname,
+          port: host?.port,
+          username: host?.username,
+          label: host?.label ?? conn.hostLabel,
+        },
+        remotePath: resolvedFullPath,
+        kind: isNavigableDirectory(entry) ? "dir" : "file",
+        sessionId: conn.sourceSessionId,
+        sftpId,
+        settings,
+      }).then(() => {
+        toast.success(
+          t("terminal.externalEditor.opened", { editor: editorLabel, path: resolvedFullPath }),
+          editorLabel,
+        );
+      }).catch((error) => {
+        logger.error("[SftpView] Failed to open remote path in external editor:", error);
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("terminal.externalEditor.failed", { editor: editorLabel }),
+          editorLabel,
+        );
+      });
+    },
+    [getSftpIdForConnection, sftpRef, t],
+  );
+
+  const onOpenInExternalEditorLeft = useCallback(
+    (entry: SftpFileEntry, fullPath?: string, host?: Host) =>
+      handleOpenInExternalEditorForSide("left", entry, fullPath, host),
+    [handleOpenInExternalEditorForSide],
+  );
+  const onOpenInExternalEditorRight = useCallback(
+    (entry: SftpFileEntry, fullPath?: string, host?: Host) =>
+      handleOpenInExternalEditorForSide("right", entry, fullPath, host),
+    [handleOpenInExternalEditorForSide],
   );
 
   const handleUploadExternalFilesForSide = useCallback(
@@ -982,6 +1040,8 @@ export const useSftpViewFileOps = ({
     onOpenFileWithSystemDefaultRight,
     onOpenFileWithLeft,
     onOpenFileWithRight,
+    onOpenInExternalEditorLeft,
+    onOpenInExternalEditorRight,
     onDownloadFileLeft,
     onDownloadFileRight,
     onExtractArchiveLeft,
