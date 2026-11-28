@@ -1866,6 +1866,7 @@ function buildDefaultRdpFileContent({
   const lines = [
     `full address:s:${hostPort}`,
     "prompt for credentials:i:1",
+    "use redirection server name:i:1",
     `audiomode:i:${audioEnabled === false ? 2 : 0}`,
     `redirectclipboard:i:${clipboardSync === false ? 0 : 1}`,
     "screen mode id:i:2",
