@@ -738,6 +738,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   }
   const keyListRef = React.useRef(keys);
   keyListRef.current = keys;
+  const hostSearchInputRef = React.useRef<HTMLInputElement>(null);
   const newHostActionsRef = React.useRef<HTMLDivElement>(null);
   const sessionActionsRef = React.useRef<HTMLDivElement>(null);
   const { handlePluginPreviewCommit, getPluginPreviewAnalysis } =
@@ -950,6 +951,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               dataSection="vault-hosts-header"
             >
               <VaultHeaderSearch
+                ref={hostSearchInputRef}
                 placeholder={t("vault.hosts.search.placeholder")}
                 className="flex-1"
                 inputClassName={cn(
@@ -968,8 +970,10 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                         type="button"
                         aria-label={t("common.clear")}
                         className="grid size-6 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => setSearch("")}
+                        onClick={() => {
+                          setSearch("");
+                          hostSearchInputRef.current?.focus();
+                        }}
                       >
                         <X size={14} />
                       </button>
