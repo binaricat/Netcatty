@@ -220,3 +220,159 @@ test("Host Details can restore group jump hosts from the empty-override Direct r
     assert.ok(section().findAllByType(Badge).some((badge) => badge.props.children === "Inherited from group"));
   });
 });
+
+test("Host Details keeps standalone RDP fields sparse so group RDP defaults are inherited on save", async () => {
+  const group: Partial<GroupConfig> = {
+    rdpConfig: {
+      enabled: true,
+      port: 13389,
+      domain: "CORP",
+      securityMode: "nla",
+      audioEnabled: false,
+    },
+  };
+  const rdpHost: Host = {
+    ...host,
+    protocol: "rdp",
+    port: undefined,
+    username: "",
+    password: undefined,
+    authMethod: undefined,
+    rdpConfig: undefined,
+  };
+  await withPanel(group, async ({ root, save }) => {
+    const securitySelect = root.findAllByType(Select).find((item) => item.props.value === "nla");
+    assert.ok(securitySelect, "expected standalone RDP editor to reflect inherited securityMode");
+    const saved = await save();
+    assert.equal(saved.port, undefined);
+    assert.equal(saved.rdpConfig, undefined);
+    const effective = applyGroupDefaults(saved, group);
+    assert.equal(effective.port, 13389);
+    assert.equal(effective.rdpConfig?.domain, "CORP");
+    assert.equal(effective.rdpConfig?.securityMode, "nla");
+    assert.equal(effective.rdpConfig?.audioEnabled, false);
+  }, rdpHost);
+});
+
+test("Host Details preserves useHostCredentials fallback when adding companion RDP without group credential defaults", async () => {
+  await withPanel({}, async ({ root, save }) => {
+    const rdpTab = root.findAll(
+      (node) => node.type === "button" && node.props["data-primary-protocol"] === "rdp",
+    )[0];
+    assert.ok(rdpTab);
+    await act(async () => { rdpTab.props.onClick(); });
+    const addRdpBtn = root.findAllByType(Button).find((btn) => {
+      const collect = (n: unknown): string =>
+        typeof n === "string"
+          ? n
+          : Array.isArray(n)
+            ? n.map(collect).join("")
+            : n && typeof n === "object" && "children" in n
+              ? collect((n as { children: unknown }).children)
+              : "";
+      return collect(btn.children).includes("Add RDP");
+    });
+    assert.ok(addRdpBtn);
+    await act(async () => { addRdpBtn.props.onClick(); });
+    const saved = await save();
+    assert.equal(saved.rdpConfig?.enabled, true);
+    assert.equal(saved.rdpConfig?.useHostCredentials, true);
+  });
+});
+
+test("Host Details preserves cleared inherited companion RDP identity across save", async () => {
+  const group: Partial<GroupConfig> = {
+    rdpConfig: {
+      enabled: true,
+      identityId: "group-rdp-id",
+    },
+  };
+  const companionHost: Host = {
+    ...host,
+    rdpConfig: { enabled: true },
+  };
+  await withPanel(group, async ({ root, save }) => {
+    const rdpTab = root.findAll(
+      (node) => node.type === "button" && node.props["data-primary-protocol"] === "rdp",
+    )[0];
+    await act(async () => { rdpTab.props.onClick(); });
+    const clearBtn = root.findAllByType(Button).find(
+      (btn) => btn.props.size === "icon" && btn.props.className?.includes("h-8 w-8 shrink-0"),
+    );
+    assert.ok(clearBtn, "expected Clear button on inherited companion RDP identity");
+    await act(async () => { clearBtn.props.onClick({ defaultPrevented: false }); });
+    const saved = await save();
+    assert.equal(saved.rdpConfig?.identityId, "");
+    assert.equal(saved.rdpConfig?.useHostCredentials, false);
+    const effective = applyGroupDefaults(saved, group);
+    assert.equal(effective.rdpConfig?.identityId, "");
+  }, companionHost);
+});
+
+test("Host Details retains the inherited desktop username and domain when detaching a standalone RDP identity", async () => {
+  const dom = installDomEnvironment();
+  const previousRaf = globalThis.requestAnimationFrame;
+  const previousCancelRaf = globalThis.cancelAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => setTimeout(() => callback(0), 0) as unknown as number;
+  globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+
+  let renderer: ReactTestRenderer | undefined;
+  let saved: Host | undefined;
+  const group: Partial<GroupConfig> = {
+    rdpConfig: { enabled: true, identityId: "win-admin" },
+  };
+  const standaloneRdp: Host = {
+    ...host,
+    protocol: "rdp",
+    port: undefined,
+    username: "",
+    password: undefined,
+    authMethod: undefined,
+    rdpConfig: undefined,
+  };
+
+  try {
+    await act(async () => {
+      renderer = create(
+        <I18nProvider locale="en">
+          <TooltipProvider>
+            <HostDetailsPanel
+              {...panelProps(group, standaloneRdp)}
+              identities={[
+                {
+                  id: "win-admin",
+                  label: "Windows Admin",
+                  username: "Administrator",
+                  domain: "CORP",
+                  authMethod: "password",
+                  password: "group-secret",
+                  created: 1,
+                },
+              ]}
+              onSave={(value) => { saved = value; }}
+            />
+          </TooltipProvider>
+        </I18nProvider>,
+      );
+    });
+
+    const clearBtn = renderer!.root.findAllByType(Button).find(
+      (btn) => btn.props.size === "icon" && btn.props.className?.includes("h-8 w-8 shrink-0"),
+    );
+    assert.ok(clearBtn, "expected Clear button on inherited standalone RDP identity");
+    await act(async () => { clearBtn.props.onClick({ defaultPrevented: false }); });
+
+    const buttons = renderer!.root.findByType(AsidePanelFooter).findAllByType(Button);
+    await act(async () => { await buttons[buttons.length - 1].props.onClick(); });
+
+    assert.ok(saved);
+    assert.equal(saved.identityId, "");
+    assert.equal(saved.username, "Administrator");
+    assert.equal(saved.rdpConfig?.domain, "CORP");
+  } finally {
+    if (renderer) await act(async () => { renderer!.unmount(); });
+    globalThis.requestAnimationFrame = previousRaf;
+    globalThis.cancelAnimationFrame = previousCancelRaf;
+    dom.cleanup();
+  }
+});

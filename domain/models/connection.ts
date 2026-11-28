@@ -547,6 +547,9 @@ export interface GroupConfig {
   telnetIdentityId?: string;
   telnetUsername?: string;
   telnetPassword?: string;
+  // Remote desktop defaults inherited by hosts with RDP/VNC enabled; never holds plaintext passwords.
+  rdpConfig?: RdpConfig;
+  vncConfig?: VncConfig;
   theme?: string;
   themeOverride?: boolean;
   fontFamily?: string;

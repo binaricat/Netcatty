@@ -1,7 +1,7 @@
 import { MonitorNavButton } from './MonitorNavButton';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Combobox } from "../ui/combobox";
-import React, { useCallback } from "react";
+import React, { useCallback, useRef } from "react";
 
 const LazyMonitorPanels = React.lazy(() =>
   import("./MonitorPanels").then((mod) => ({ default: mod.MonitorPanels })),
@@ -508,6 +508,16 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   } = ctx;
   const { importProgress, onCommitPluginImporterData, resetImportProgress } =
     ctx;
+  const latestIdentitiesRef = useRef(identities);
+  latestIdentitiesRef.current = identities;
+  const handleCreateIdentity = useCallback(
+    (identity: any) => {
+      const next = [...latestIdentitiesRef.current, identity];
+      latestIdentitiesRef.current = next;
+      onUpdateIdentities(next);
+    },
+    [onUpdateIdentities],
+  );
   // Host aside panel (SSH/new host) or the local-shell host panel occupies the
   // aside area — both collapse the header action buttons the same way.
   const isHostAsideOpen = isHostPanelOpen || isLocalShellHostPanelOpen;
@@ -1622,6 +1632,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   config={groupConfigs.find((c) => c.path === editingGroupPath)}
                   availableKeys={keys}
                   identities={identities}
+                  onCreateIdentity={handleCreateIdentity}
                   proxyProfiles={proxyProfiles}
                   allHosts={hosts}
                   groups={allGroupPaths}
@@ -1650,9 +1661,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   initialProtocol={editingHost ? undefined : newHostProtocol}
                   availableKeys={keys}
                   identities={identities}
-                  onCreateIdentity={(identity) =>
-                    onUpdateIdentities([...identities, identity])
-                  }
+                  onCreateIdentity={handleCreateIdentity}
                   proxyProfiles={proxyProfiles}
                   groups={allGroupPaths}
                   managedSources={managedSources}

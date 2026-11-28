@@ -5,7 +5,7 @@ import {
   parseRdpDimensionDraft,
   type RdpResolutionDraft,
 } from "../../domain/remoteDesktop";
-import type { Host } from "../../types";
+import type { Host, RdpConfig } from "../../types";
 import { Input } from "../ui/input";
 
 export interface RdpResolutionDraftProps {
@@ -14,13 +14,14 @@ export interface RdpResolutionDraftProps {
 }
 
 interface RdpResolutionFieldsProps extends RdpResolutionDraftProps {
-  form: Host;
+  form: Pick<Host, "rdpConfig">;
   setForm: React.Dispatch<React.SetStateAction<Host>>;
+  inheritedRdpConfig?: Partial<RdpConfig>;
   t: (key: string) => string;
 }
 
 export const RdpResolutionFields: React.FC<RdpResolutionFieldsProps> = ({
-  form, setForm, t, resolutionDraft, onResolutionDraftChange,
+  form, setForm, inheritedRdpConfig, t, resolutionDraft, onResolutionDraftChange,
 }) => {
   const [localDraft, setLocalDraft] = useState<RdpResolutionDraft>({});
   const id = useId();
@@ -29,8 +30,11 @@ export const RdpResolutionFields: React.FC<RdpResolutionFieldsProps> = ({
   return (
     <div className="grid grid-cols-2 gap-2">
       {(["width", "height"] as const).map((dimension) => {
-        const value = draft[dimension] ?? String(form.rdpConfig?.[dimension]
-          ?? (dimension === "width" ? DEFAULT_RDP_WIDTH : DEFAULT_RDP_HEIGHT));
+        const value = draft[dimension] ?? String(
+          form.rdpConfig?.[dimension]
+          ?? inheritedRdpConfig?.[dimension]
+          ?? (dimension === "width" ? DEFAULT_RDP_WIDTH : DEFAULT_RDP_HEIGHT),
+        );
         const invalid = parseRdpDimensionDraft(value) === undefined;
         const inputId = `${id}-${dimension}`;
         return (

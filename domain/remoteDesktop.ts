@@ -344,7 +344,6 @@ export const applyHostDefaultConnectProtocol = (
         protocol: 'ssh',
         ...(host.vncConfig ? { vncConfig: { ...host.vncConfig, defaultConnect: undefined } } : {}),
         rdpConfig: {
-          ...DEFAULT_RDP_CONFIG,
           ...(host.rdpConfig ?? {}),
           enabled: true,
           defaultConnect: true,
@@ -362,7 +361,6 @@ export const applyHostDefaultConnectProtocol = (
         protocol: 'ssh',
         ...(host.rdpConfig ? { rdpConfig: { ...host.rdpConfig, defaultConnect: undefined } } : {}),
         vncConfig: {
-          ...DEFAULT_VNC_CONFIG,
           ...(host.vncConfig ?? {}),
           enabled: true,
           defaultConnect: true,
@@ -549,8 +547,12 @@ export const sanitizeRdpConfig = (value: unknown): RdpConfig | undefined => {
   if (isValidPort(value.port)) out.port = value.port;
   const domain = readTrimmedString(value.domain);
   if (domain !== undefined) out.domain = domain;
-  const identityId = readTrimmedString(value.identityId);
-  if (identityId !== undefined) out.identityId = identityId;
+  if (value.identityId === '') {
+    out.identityId = '';
+  } else {
+    const identityId = readTrimmedString(value.identityId);
+    if (identityId !== undefined) out.identityId = identityId;
+  }
   const username = readTrimmedString(value.username);
   if (username !== undefined) out.username = username;
   const useHostCredentials = readBoolean(value.useHostCredentials);
@@ -602,8 +604,12 @@ export const sanitizeVncConfig = (value: unknown): VncConfig | undefined => {
   const defaultConnect = readBoolean(value.defaultConnect);
   if (defaultConnect !== undefined) out.defaultConnect = defaultConnect;
   if (isValidPort(value.port)) out.port = value.port;
-  const identityId = readTrimmedString(value.identityId);
-  if (identityId !== undefined) out.identityId = identityId;
+  if (value.identityId === '') {
+    out.identityId = '';
+  } else {
+    const identityId = readTrimmedString(value.identityId);
+    if (identityId !== undefined) out.identityId = identityId;
+  }
   const username = readTrimmedString(value.username);
   if (username !== undefined) out.username = username;
   const useHostCredentials = readBoolean(value.useHostCredentials);
