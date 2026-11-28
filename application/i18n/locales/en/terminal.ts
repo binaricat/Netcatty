@@ -987,4 +987,12 @@ export const enTerminalMessages: Messages = {
   'terminal.browser.allScopeHint': 'Show in every host’s browser.',
   'terminal.browser.downloadLocation': 'Saved to your Downloads folder',
   'terminal.browser.saveAs': 'Save as…',
+  'terminal.externalEditor.opened': 'Opened {path} in {editor}',
+  'terminal.externalEditor.failed': 'Failed to open in {editor}',
+  'terminal.externalEditor.prompt.title': 'Open in {editor}?',
+  'terminal.externalEditor.prompt.desc': 'Remote host {host} requested opening this remote path in {editor}:',
+  'terminal.externalEditor.prompt.deny': 'Deny',
+  'terminal.externalEditor.prompt.allowOnce': 'Allow Once',
+  'terminal.externalEditor.prompt.alwaysTrust': 'Always Trust Host',
+  'terminal.externalEditor.autoSetupConfigured': 'Remote editor commands configured ({editor})',
 };

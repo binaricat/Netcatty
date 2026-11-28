@@ -1087,4 +1087,12 @@ export const zhTWTerminalMessages: Messages = {
   'terminal.browser.allScopeHint': '在每台主機的瀏覽器中顯示。',
   'terminal.browser.downloadLocation': '檔案儲存在系統「下載項目」資料夾',
   'terminal.browser.saveAs': '另存新檔…',
+  'terminal.externalEditor.opened': '已在 {editor} 中開啟 {path}',
+  'terminal.externalEditor.failed': '無法在 {editor} 中開啟',
+  'terminal.externalEditor.prompt.title': '在 {editor} 中開啟？',
+  'terminal.externalEditor.prompt.desc': '遠端主機 {host} 請求在 {editor} 中開啟以下遠端路徑：',
+  'terminal.externalEditor.prompt.deny': '拒絕',
+  'terminal.externalEditor.prompt.allowOnce': '僅允許這次',
+  'terminal.externalEditor.prompt.alwaysTrust': '一律信任此主機',
+  'terminal.externalEditor.autoSetupConfigured': '已設定遠端編輯器指令 ({editor})',
 };

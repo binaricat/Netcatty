@@ -381,3 +381,6 @@ export const STORAGE_KEY_REMOTE_DESKTOP_AI_AUDIT = 'netcatty_remote_desktop_ai_a
 
 // Remote Desktop RDPDR local shared folders per host (device-local, never synced to cloud/iOS)
 export const STORAGE_KEY_REMOTE_DESKTOP_SHARED_FOLDERS = 'netcatty_remote_desktop_shared_folders_v1';
+
+// External Editor remote SSH integration settings (device-local: executable paths & host trust)
+export const STORAGE_KEY_EXTERNAL_EDITOR = 'netcatty_external_editor_v1';

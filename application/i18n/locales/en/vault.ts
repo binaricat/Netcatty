@@ -1451,5 +1451,8 @@ export const enVaultMessages: Messages = {
   'settings.remoteDesktopRecordings.clearAllConfirmDesc': 'This will permanently delete {count} recorded .webm file(s) from this device.',
   'settings.remoteDesktopRecordings.clearResult': 'Removed {count} recording file(s).',
   'settings.remoteDesktopRecordings.hint': 'Recordings are stored locally on this device and never synced to the cloud. Bookmarked logs are protected from automatic cleanup.',
+  'sftp.context.openInExternalEditor': 'Open in {editor}',
+  'hostDetails.externalEditorShellIntegration': 'Enable external editor commands in this session',
+  'hostDetails.externalEditorShellIntegration.desc': 'Expose `zed` / `ncedit` via ~/.netcatty/bin for this Netcatty terminal session only (including tmux) without modifying ~/.bashrc or ~/.zshrc.',
 
 };

@@ -386,6 +386,9 @@ export interface Host {
   // Show local timestamps for this host beside terminal output rows.
   // Kept per-host because timestamp visibility is usually a host/workflow preference.
   showLineTimestamps?: boolean;
+  // Auto-install remote external editor shell helpers (e.g. `zed`, `code`) on SSH connect.
+  // Undefined inherits the global ExternalEditorSettings.autoSetupShellIntegration value.
+  externalEditorShellIntegration?: boolean;
   // Undefined inherits; 'default' sends DEL (0x7F), 'ctrl-h' sends ^H (0x08).
   backspaceBehavior?: 'default' | 'ctrl-h';
   // When true, tab titles stay on the connection label instead of following the

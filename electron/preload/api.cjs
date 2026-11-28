@@ -2515,6 +2515,13 @@ function createPreloadApi(ctx) {
     openFolder: () => ipcRenderer.invoke("netcatty:remote-desktop-recording:open-folder"),
     runGc: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:gc", options),
   },
+  externalEditor: {
+    detect: () => ipcRenderer.invoke("netcatty:external-editor:detect"),
+    getBridgeConfigStatus: () => ipcRenderer.invoke("netcatty:external-editor:bridge-config-status"),
+    installBridgeConfig: () => ipcRenderer.invoke("netcatty:external-editor:install-bridge-config"),
+    removeBridgeConfig: () => ipcRenderer.invoke("netcatty:external-editor:remove-bridge-config"),
+    openRemote: (payload) => ipcRenderer.invoke("netcatty:external-editor:open-remote", payload),
+  },
     };
   }
 }

@@ -4,6 +4,7 @@ import { isRemoteDesktopProtocol } from "../domain/remoteDesktop";
 import React from "react";
 import { AlertTriangle, ChevronDown, Forward, Globe, HeartPulse, KeyRound, Link2, Palette, Plus, Router, ShieldAlert, TerminalSquare, Timer, Wifi, X, Variable } from "lucide-react";
 import { customThemeStore } from "../application/state/customThemeStore";
+import { useExternalEditorSettings } from "../application/state/useExternalEditorSettings";
 import { clearHostFontSizeOverride, clearHostThemeOverride } from "../domain/terminalAppearance";
 import { resolveSshAgentToggleUpdate } from "../domain/sshAuth";
 import { MAX_FONT_SIZE, MIN_FONT_SIZE } from "../infrastructure/config/fonts";
@@ -66,6 +67,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
   proxyInherited = false,
   clearProxyConfig,
 }) => {
+  const { settings: externalEditorSettings } = useExternalEditorSettings();
   const inheritedDeviceType = effectiveGroupDefaults?.deviceType;
   const effectiveDeviceType = form.deviceType ?? inheritedDeviceType;
   const effectiveMoshEnabled = form.moshEnabled ?? effectiveGroupDefaults?.moshEnabled;
@@ -549,6 +551,39 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             enabled={!!form.showLineTimestamps}
             onToggle={() => update("showLineTimestamps", !form.showLineTimestamps)}
           />
+          {isSshView && (
+            <HostDetailsSettingRow
+              label={t("hostDetails.externalEditorShellIntegration")}
+              hint={t("hostDetails.externalEditorShellIntegration.desc")}
+            >
+              <Select
+                value={
+                  form.externalEditorShellIntegration === true
+                    ? "enabled"
+                    : form.externalEditorShellIntegration === false
+                      ? "disabled"
+                      : "default"
+                }
+                onValueChange={(v) =>
+                  update(
+                    "externalEditorShellIntegration",
+                    v === "enabled" ? true : v === "disabled" ? false : undefined,
+                  )
+                }
+              >
+                <SelectTrigger className="h-8 w-36 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">
+                    {`${t("hostDetails.backspaceBehavior.default")} (${externalEditorSettings.autoSetupShellIntegration ? t("common.enabled") : t("common.disabled")})`}
+                  </SelectItem>
+                  <SelectItem value="enabled">{t("common.enabled")}</SelectItem>
+                  <SelectItem value="disabled">{t("common.disabled")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </HostDetailsSettingRow>
+          )}
           {isSshView && !effectiveMoshEnabled && !effectiveEtEnabled && (
             <>
               <ToggleRow

@@ -668,6 +668,30 @@ function createBridgeRegistrar(context) {
     });
     transferBridge.registerHandlers(ipcMain, { terminalWorkerManager });
     portForwardingBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+    const sshChannelBridge = require("../bridges/sshChannelBridge.cjs");
+    sshChannelBridge.init({ sessions, sftpClients, userDataDir });
+    sshChannelBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+    const externalEditorBridge = require("../bridges/externalEditorBridge.cjs");
+    externalEditorBridge.init({
+      userDataDir,
+      sshChannelBridge,
+      terminalWorkerManager,
+    });
+    externalEditorBridge.registerHandlers(ipcMain, {
+      terminalWorkerManager,
+      sshChannelBridge,
+    });
+    require("../plugins/shutdownCoordinator.cjs").registerPluginShutdown(async () => {
+      try {
+        if (terminalWorkerManager) {
+          await terminalWorkerManager.request("netcatty:ssh-bridge:stop", {}, {});
+        } else {
+          await sshChannelBridge.stop();
+        }
+      } catch (error) {
+        console.warn("[SshChannelBridge] Shutdown cleanup failed:", error?.message || error);
+      }
+    });
     const remoteDesktopBridge = require("../bridges/remoteDesktopBridge.cjs");
     const remoteDesktopMainOs = remoteDesktopBridge.registerHandlers(ipcMain, {
       terminalWorkerManager,

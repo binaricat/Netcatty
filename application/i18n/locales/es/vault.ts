@@ -1451,5 +1451,8 @@ export const esVaultMessages: Messages = {
   'settings.remoteDesktopRecordings.clearAllConfirmDesc': 'Se eliminarán permanentemente {count} archivo(s) .webm grabados en este dispositivo.',
   'settings.remoteDesktopRecordings.clearResult': 'Se eliminaron {count} archivo(s) de grabación.',
   'settings.remoteDesktopRecordings.hint': 'Las grabaciones se guardan solo localmente en este dispositivo y nunca se sincronizan en la nube. Los registros guardados están protegidos frente a la limpieza automática.',
+  'sftp.context.openInExternalEditor': 'Abrir en {editor}',
+  'hostDetails.externalEditorShellIntegration': 'Habilitar comandos de editor externo en esta sesión',
+  'hostDetails.externalEditorShellIntegration.desc': 'Activa `zed` / `ncedit` desde ~/.netcatty/bin solo para esta sesión de terminal de Netcatty (incluido tmux), sin modificar ~/.bashrc ni ~/.zshrc.',
 
 };

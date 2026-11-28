@@ -1087,4 +1087,12 @@ export const zhCNTerminalMessages: Messages = {
   'terminal.browser.allScopeHint': '在每台主机的浏览器中显示。',
   'terminal.browser.downloadLocation': '文件保存在系统“下载”文件夹',
   'terminal.browser.saveAs': '另存为…',
+  'terminal.externalEditor.opened': '已在 {editor} 中打开 {path}',
+  'terminal.externalEditor.failed': '无法在 {editor} 中打开',
+  'terminal.externalEditor.prompt.title': '在 {editor} 中打开？',
+  'terminal.externalEditor.prompt.desc': '远程主机 {host} 请求在 {editor} 中打开以下远程路径：',
+  'terminal.externalEditor.prompt.deny': '拒绝',
+  'terminal.externalEditor.prompt.allowOnce': '仅允许本次',
+  'terminal.externalEditor.prompt.alwaysTrust': '始终信任此主机',
+  'terminal.externalEditor.autoSetupConfigured': '已配置远程编辑器命令 ({editor})',
 };

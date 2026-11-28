@@ -1,0 +1,1077 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const { execFile, execFileSync, spawn } = require("node:child_process");
+const { promisify } = require("node:util");
+const execFileAsync = promisify(execFile);
+const fs = require("node:fs");
+const net = require("node:net");
+const os = require("node:os");
+const path = require("node:path");
+const test = require("node:test");
+const { Client, Server, utils } = require("ssh2");
+
+const { EventEmitter } = require("node:events");
+const { Duplex } = require("node:stream");
+const {
+  createSshChannelBridge,
+  resolveRemoteTransportForTarget,
+  bridgeChannelStreams,
+  attachClientChannelMultiplexer,
+} = require("./sshChannelBridge.cjs");
+const {
+  createTransport,
+  borrowTransport,
+  returnTransport,
+  resetSshTransportRegistryForTests,
+} = require("./sshConnectionPool.cjs");
+const { buildSshBridgeConfigBlock } = require("./externalEditorBridge.cjs");
+const {
+  LOOPBACK_TCP_AUTO_ENDPOINT,
+  getSshProxyLauncherPath,
+  getSshBridgeSocketPath,
+  parseSshBridgeEndpoint,
+  SSH_BRIDGE_DISCOVERY_ENV_VAR,
+} = require("../cli/sshBridgeDiscoveryPath.cjs");
+
+function makeTempDir(prefix) {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+
+async function startMockRemoteSshServer() {
+  const hostKey = utils.generateKeyPairSync("ed25519");
+  const receivedCommands = [];
+  const receivedSubsystems = [];
+
+  const server = new Server({ hostKeys: [hostKey.private] }, (client) => {
+    client.on("authentication", (ctx) => {
+      // Require a specific secret password that OpenSSH does NOT have.
+      if (ctx.method === "password" && ctx.username === "remoteuser" && ctx.password === "vault-only-secret") {
+        ctx.accept();
+      } else {
+        ctx.reject(["password"]);
+      }
+    });
+
+    client.on("ready", () => {
+      client.on("session", (accept) => {
+        const session = accept();
+        session.on("pty", (acceptPty) => acceptPty?.());
+        session.on("env", (acceptEnv) => acceptEnv?.());
+        session.on("exec", (acceptExec, _rejectExec, info) => {
+          receivedCommands.push(info.command);
+          const stream = acceptExec();
+          if (info.command === "fail-with-42") {
+            stream.stderr.write("remote-err-detail\n");
+            stream.exit(42);
+            stream.end();
+            return;
+          }
+          if (info.command === "echo-stdin") {
+            let acc = "";
+            stream.on("data", (d) => {
+              acc += d.toString("utf8");
+            });
+            stream.on("end", () => {
+              stream.write(`ECHO:${acc}`);
+              stream.exit(0);
+              stream.end();
+            });
+            return;
+          }
+          stream.write(`RAN:${info.command}\n`);
+          stream.exit(0);
+          stream.end();
+        });
+
+        session.on("subsystem", (acceptSubsys, _rejectSubsys, info) => {
+          receivedSubsystems.push(info.name);
+          const stream = acceptSubsys();
+          stream.write(`SUBSYS:${info.name}`);
+          stream.exit(0);
+          stream.end();
+        });
+      });
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const port = server.address().port;
+  return {
+    server,
+    port,
+    receivedCommands,
+    receivedSubsystems,
+    close: () => new Promise((resolve) => server.close(() => resolve())),
+  };
+}
+
+async function connectRemoteClient(port) {
+  const client = new Client();
+  await new Promise((resolve, reject) => {
+    client.once("ready", resolve);
+    client.once("error", reject);
+    client.connect({
+      host: "127.0.0.1",
+      port,
+      username: "remoteuser",
+      password: "vault-only-secret",
+    });
+  });
+  return client;
+}
+
+test("sshChannelBridge rejects unauthorized handshake token and unknown host", async () => {
+  const tmpDir = makeTempDir("nc-ssh-bridge-auth-");
+  const sessions = new Map();
+  const bridge = createSshChannelBridge({
+    sessions,
+    sftpClients: new Map(),
+    stateDir: tmpDir,
+  });
+
+  try {
+    const status = await bridge.ensureStarted();
+    assert.equal(status.running, true);
+    assert.ok(fs.existsSync(status.discoveryPath));
+    assert.ok(fs.existsSync(status.knownHostsPath));
+
+    const sendHandshake = (payload) => new Promise((resolve, reject) => {
+      const sock = net.createConnection(parseSshBridgeEndpoint(status.endpoint));
+      let buf = "";
+      sock.on("connect", () => sock.write(JSON.stringify(payload) + "\n"));
+      sock.on("data", (d) => {
+        buf += d.toString("utf8");
+        if (buf.includes("\n")) {
+          sock.destroy();
+          resolve(JSON.parse(buf.split("\n")[0]));
+        }
+      });
+      sock.on("error", reject);
+    });
+
+    const badToken = await sendHandshake({ token: "wrong-token", host: "demo-12345678.netcatty" });
+    assert.equal(badToken.ok, false);
+    assert.match(badToken.error, /Unauthorized/i);
+
+    const discovery = JSON.parse(fs.readFileSync(status.discoveryPath, "utf8"));
+    const unknownHost = await sendHandshake({ token: discovery.token, host: "missing-12345678.netcatty" });
+    assert.equal(unknownHost.ok, false);
+    assert.match(unknownHost.error, /No active Netcatty session/i);
+  } finally {
+    await bridge.stop();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sshChannelBridge multiplexes real OpenSSH ssh exec, stdin/stdout, exit code, and subsystem over live Netcatty transport", async (t) => {
+  // Check whether system OpenSSH `ssh` binary is available in this test environment.
+  try {
+    execFileSync("ssh", ["-V"], { stdio: "ignore" });
+  } catch {
+    t.skip("OpenSSH client not installed in test environment");
+    return;
+  }
+
+  const tmpDir = makeTempDir("nc-ssh-bridge-e2e-");
+  const stateDirWithSpace = path.join(tmpDir, "Netcatty Dev", "dev", "ssh-bridge");
+  const remote = await startMockRemoteSshServer();
+  const remoteConn = await connectRemoteClient(remote.port);
+  const sessions = new Map([
+    ["sess-1", {
+      id: "sess-1",
+      conn: remoteConn,
+      _reuseEndpoint: {
+        hostId: "host-prod-1",
+        hostname: "127.0.0.1",
+        port: remote.port,
+        username: "remoteuser",
+      },
+    }],
+  ]);
+
+  const bridge = createSshChannelBridge({
+    sessions,
+    sftpClients: new Map(),
+    stateDir: stateDirWithSpace,
+  });
+
+  try {
+    const bridgeHost = "prod-a1b2c3d4.netcatty";
+    const status = await bridge.registerTarget({
+      bridgeHost,
+      sessionId: "sess-1",
+      hostId: "host-prod-1",
+      hostname: "127.0.0.1",
+      port: remote.port,
+      username: "remoteuser",
+    });
+    assert.equal(status.connected, true);
+
+    const sshConfigPath = path.join(tmpDir, "ssh_config");
+    const proxyLauncherPath = getSshProxyLauncherPath(process.platform);
+    fs.writeFileSync(
+      sshConfigPath,
+      buildSshBridgeConfigBlock({
+        proxyLauncherPath,
+        knownHostsPath: status.knownHostsPath,
+        discoveryPath: status.discoveryPath,
+        platform: process.platform,
+      }) + "\n",
+      { mode: 0o600 },
+    );
+
+    // Explicitly do NOT set SSH_BRIDGE_DISCOVERY_ENV_VAR so we test the
+    // ProxyCommand argv discovery path (including spaces like "Netcatty Dev/dev").
+    const env = { ...process.env };
+    delete env[SSH_BRIDGE_DISCOVERY_ENV_VAR];
+
+    // 1. Standard Zed-style `ssh -T` exec command (no password or key required!)
+    const { stdout: out1 } = await execFileAsync(
+      "ssh",
+      ["-F", sshConfigPath, "-T", bridgeHost, "echo hello-from-zed"],
+      { env, encoding: "utf8", timeout: 15_000 },
+    );
+    assert.equal(out1.trim(), "RAN:echo hello-from-zed");
+
+    // 2. Zed-style Windows MasterProcess `-t` (PTY + exec) command
+    const { stdout: outPty } = await execFileAsync(
+      "ssh",
+      ["-F", sshConfigPath, "-tt", bridgeHost, "echo ZED_SSH_CONNECTION_ESTABLISHED"],
+      { env, encoding: "utf8", timeout: 15_000 },
+    );
+    assert.match(outPty, /RAN:echo ZED_SSH_CONNECTION_ESTABLISHED/);
+
+    // 3. Bidirectional stdin/stdout piping (like Zed `proxy` RPC over stdio)
+    const echoOut = await new Promise((resolve, reject) => {
+      const child = spawn("ssh", ["-F", sshConfigPath, "-T", bridgeHost, "echo-stdin"], {
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (d) => { stdout += d.toString("utf8"); });
+      child.stderr.on("data", (d) => { stderr += d.toString("utf8"); });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code !== 0) reject(new Error(`ssh exited ${code}: ${stderr}`));
+        else resolve(stdout);
+      });
+      child.stdin.end("zed-rpc-frame-payload");
+    });
+    assert.equal(echoOut, "ECHO:zed-rpc-frame-payload");
+
+    // 4. Non-zero exit code + stderr propagation
+    const errResult = await new Promise((resolve, reject) => {
+      const child = spawn("ssh", ["-F", sshConfigPath, "-T", bridgeHost, "fail-with-42"], {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderr = "";
+      child.stderr.on("data", (d) => { stderr += d.toString("utf8"); });
+      child.on("error", reject);
+      child.on("close", (code) => resolve({ code, stderr }));
+    });
+    assert.equal(errResult.code, 42);
+    assert.match(errResult.stderr, /remote-err-detail/);
+
+    // 5. Subsystem forwarding (`ssh -s <host> sftp`, used by Zed's SFTP server upload)
+    const { stdout: subsysOut } = await execFileAsync(
+      "ssh",
+      ["-F", sshConfigPath, "-T", "-s", bridgeHost, "sftp"],
+      { env, encoding: "utf8", timeout: 15_000 },
+    );
+    assert.equal(subsysOut, "SUBSYS:sftp");
+    assert.deepEqual(remote.receivedSubsystems, ["sftp"]);
+  } finally {
+    await bridge.stop();
+    remoteConn.end();
+    await remote.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+function makeFakeConn(label) {
+  const conn = new EventEmitter();
+  conn.label = label;
+  conn._sock = { destroyed: false };
+  conn.exec = () => {};
+  conn.end = () => {
+    conn._ended = true;
+  };
+  return conn;
+}
+
+test("resolveRemoteTransportForTarget keeps fallback selection within the originating hostId profile", () => {
+  const connBastionB = makeFakeConn("bastion-b");
+  const connBastionA = makeFakeConn("bastion-a");
+
+  // Two saved profiles share the same private IP/port/username behind different bastions.
+  const sessions = new Map([
+    ["sess-b", {
+      conn: connBastionB,
+      _reuseEndpoint: {
+        hostId: "host-profile-b",
+        hostname: "10.0.0.5",
+        port: 22,
+        username: "ubuntu",
+      },
+    }],
+    ["sess-a", {
+      conn: connBastionA,
+      _reuseEndpoint: {
+        hostId: "host-profile-a",
+        hostname: "10.0.0.5",
+        port: 22,
+        username: "ubuntu",
+      },
+    }],
+  ]);
+
+  // Originating session for profile A closed; fallback must skip profile B and pick profile A.
+  const resolved = resolveRemoteTransportForTarget(
+    {
+      sessionId: "sess-a-closed",
+      hostId: "host-profile-a",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "ubuntu",
+    },
+    { sessions, sftpClients: new Map() },
+  );
+  assert.equal(resolved?.conn, connBastionA);
+
+  // When only profile B is live, profile A must NOT fall back to profile B.
+  sessions.delete("sess-a");
+  const rejected = resolveRemoteTransportForTarget(
+    {
+      sessionId: "sess-a-closed",
+      hostId: "host-profile-a",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "ubuntu",
+    },
+    { sessions, sftpClients: new Map() },
+  );
+  assert.equal(rejected, null);
+
+  // Same profile isolation applies to SFTP fallback.
+  const sftpConnB = makeFakeConn("sftp-bastion-b");
+  const sftpConnA = makeFakeConn("sftp-bastion-a");
+  const sftpClients = new Map([
+    ["sftp-b", {
+      client: sftpConnB,
+      __netcattyRefHolder: {
+        connRef: {
+          conn: sftpConnB,
+          state: "live",
+          endpoint: {
+            hostId: "host-profile-b",
+            hostname: "10.0.0.5",
+            port: 22,
+            username: "ubuntu",
+          },
+        },
+      },
+    }],
+    ["sftp-a", {
+      client: sftpConnA,
+      __netcattyRefHolder: {
+        connRef: {
+          conn: sftpConnA,
+          state: "live",
+          endpoint: {
+            hostId: "host-profile-a",
+            hostname: "10.0.0.5",
+            port: 22,
+            username: "ubuntu",
+          },
+        },
+      },
+    }],
+  ]);
+
+  const resolvedSftp = resolveRemoteTransportForTarget(
+    {
+      sftpId: "sftp-a-closed",
+      hostId: "host-profile-a",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "ubuntu",
+    },
+    { sessions: new Map(), sftpClients },
+  );
+  assert.equal(resolvedSftp?.conn, sftpConnA);
+
+  sftpClients.delete("sftp-a");
+  const rejectedSftp = resolveRemoteTransportForTarget(
+    {
+      sftpId: "sftp-a-closed",
+      hostId: "host-profile-a",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "ubuntu",
+    },
+    { sessions: new Map(), sftpClients },
+  );
+  assert.equal(rejectedSftp, null);
+});
+
+test("resolveRemoteTransportForTarget resolves managed SFTP transport from __netcattyRefHolder.connRef", () => {
+  resetSshTransportRegistryForTests();
+  try {
+    const conn = makeFakeConn("sftp-managed");
+    const transport = createTransport({
+      conn,
+      endpoint: {
+        hostId: "host-sftp-1",
+        hostname: "10.1.2.3",
+        port: 22,
+        username: "deploy",
+        protocol: "ssh",
+      },
+      idleTtlMs: 10,
+    });
+    const refHolder = { id: "sftp-1", __sshLeaseKind: "sftp" };
+    borrowTransport(transport, {
+      kind: "sftp",
+      holder: refHolder,
+      leaseId: "sftp:sftp-1",
+    });
+
+    const sftpClient = {
+      client: conn,
+      __netcattyRefHolder: refHolder,
+      __netcattyTransportManaged: true,
+    };
+    const sftpClients = new Map([["sftp-1", sftpClient]]);
+
+    const resolved = resolveRemoteTransportForTarget(
+      {
+        sftpId: "sftp-1",
+        hostId: "host-sftp-1",
+        hostname: "10.1.2.3",
+        port: 22,
+        username: "deploy",
+      },
+      { sessions: new Map(), sftpClients },
+    );
+
+    assert.equal(resolved?.conn, conn);
+    assert.equal(resolved?.transport, transport);
+
+    // Borrowing an editor lease keeps the transport live even after SFTP closes.
+    const editorHolder = { id: "ssh-bridge:test" };
+    borrowTransport(resolved.transport, { kind: "forward", holder: editorHolder });
+    returnTransport(refHolder);
+    assert.equal(transport.state, "live");
+    assert.equal(transport.leases.size, 1);
+
+    returnTransport(editorHolder);
+  } finally {
+    resetSshTransportRegistryForTests();
+  }
+});
+
+test("bridgeChannelStreams applies backpressure across stdout, stderr, and stdin", async () => {
+  const makeBackpressureChannel = ({ blockWrites = false, highWaterMark = 1024 } = {}) => {
+    let blocked = blockWrites;
+    let pendingWriteCb = null;
+    const received = [];
+    let exitCode = null;
+
+    const stream = new Duplex({
+      highWaterMark,
+      read() {},
+      write(chunk, _enc, cb) {
+        received.push(Buffer.from(chunk));
+        if (blocked) {
+          pendingWriteCb = cb;
+        } else {
+          cb();
+        }
+      },
+    });
+    stream.stderr = new Duplex({
+      highWaterMark,
+      read() {},
+      write(chunk, _enc, cb) {
+        stream.stderrReceived.push(Buffer.from(chunk));
+        if (stream.stderrBlocked) {
+          stream.stderrPendingCb = cb;
+        } else {
+          cb();
+        }
+      },
+    });
+    stream.stderrBlocked = blockWrites;
+    stream.stderrPendingCb = null;
+    stream.stderrReceived = [];
+    stream.exit = (code) => {
+      exitCode = code;
+    };
+    stream.getExitCode = () => exitCode;
+    stream.getReceived = () => Buffer.concat(received);
+    stream.getStderrReceived = () => Buffer.concat(stream.stderrReceived);
+    stream.unblock = () => {
+      blocked = false;
+      if (pendingWriteCb) {
+        const cb = pendingWriteCb;
+        pendingWriteCb = null;
+        cb();
+      }
+    };
+    stream.unblockStderr = () => {
+      stream.stderrBlocked = false;
+      if (stream.stderrPendingCb) {
+        const cb = stream.stderrPendingCb;
+        stream.stderrPendingCb = null;
+        cb();
+      }
+    };
+    return stream;
+  };
+
+  // 1. remote -> client stdout backpressure
+  const client = makeBackpressureChannel({ blockWrites: true, highWaterMark: 1024 });
+  const remote = makeBackpressureChannel({ blockWrites: true, highWaterMark: 1024 });
+  bridgeChannelStreams(client, remote);
+
+  const chunk64k = Buffer.alloc(64 * 1024, 0x41);
+  // Push 4 MiB into remote readable side while client writable is blocked.
+  const totalChunks = 64;
+  for (let i = 0; i < totalChunks; i += 1) {
+    remote.push(chunk64k);
+  }
+  remote.push(null);
+
+  await new Promise((r) => setImmediate(r));
+  // Backpressure must pause remote before draining all 4 MiB into client's writable queue.
+  assert.equal(remote.isPaused(), true);
+  assert.ok(
+    client.writableLength < 256 * 1024,
+    `expected client writable buffer to stay bounded, got ${client.writableLength}`,
+  );
+
+  // Same for remote.stderr -> client.stderr
+  for (let i = 0; i < 16; i += 1) {
+    remote.stderr.push(Buffer.alloc(16 * 1024, 0x45));
+  }
+  remote.stderr.push(null);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(remote.stderr.isPaused(), true);
+  assert.ok(client.stderr.writableLength < 64 * 1024);
+
+  // Same for client -> remote stdin
+  for (let i = 0; i < 16; i += 1) {
+    client.push(Buffer.alloc(16 * 1024, 0x42));
+  }
+  client.push(null);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(client.isPaused(), true);
+  assert.ok(remote.writableLength < 64 * 1024);
+
+  // Unblock all destinations and verify full delivery + exit code.
+  const done = new Promise((resolve) => client.once("finish", resolve));
+  const remoteDone = new Promise((resolve) => remote.once("finish", resolve));
+  remote.emit("exit", 0);
+  client.unblock();
+  client.unblockStderr();
+  remote.unblock();
+
+  await Promise.all([done, remoteDone]);
+  assert.equal(client.getReceived().length, totalChunks * chunk64k.length);
+  assert.equal(client.getStderrReceived().length, 16 * 16 * 1024);
+  assert.equal(remote.getReceived().length, 16 * 16 * 1024);
+  assert.equal(client.getExitCode(), 0);
+});
+
+test("bridgeChannelStreams waits for backpressured stderr to finish before forwarding EOF/close", async () => {
+  let stderrBlocked = true;
+  let stderrPendingCb = null;
+  const stderrChunks = [];
+  let clientEndedBeforeStderrComplete = false;
+  let clientClosed = false;
+  let exitCode = null;
+  const totalStderrBytes = 240 * 1024;
+
+  const client = new Duplex({
+    highWaterMark: 1024,
+    read() {},
+    write(_chunk, _enc, cb) {
+      cb();
+    },
+  });
+  client.stderr = new Duplex({
+    highWaterMark: 1024,
+    read() {},
+    write(chunk, _enc, cb) {
+      stderrChunks.push(Buffer.from(chunk));
+      if (stderrBlocked) {
+        stderrPendingCb = cb;
+      } else {
+        cb();
+      }
+    },
+  });
+  client.exit = (code) => {
+    exitCode = code;
+  };
+  client.close = () => {
+    clientClosed = true;
+  };
+  client.on("finish", () => {
+    const receivedSoFar = Buffer.concat(stderrChunks).length;
+    if (receivedSoFar < totalStderrBytes) {
+      clientEndedBeforeStderrComplete = true;
+    }
+  });
+
+  const remote = new Duplex({ highWaterMark: 1024, read() {}, write(_c, _e, cb) { cb(); } });
+  remote.stderr = new Duplex({ highWaterMark: 1024, read() {}, write(_c, _e, cb) { cb(); } });
+
+  bridgeChannelStreams(client, remote);
+
+  // Push 240 KiB to stderr (backpressured), then immediately end stdout + exit + close remote.
+  for (let i = 0; i < 15; i += 1) {
+    remote.stderr.push(Buffer.alloc(16 * 1024, 0x45));
+  }
+  remote.stderr.push(null);
+  remote.push(null); // stdout finishes immediately
+  remote.emit("exit", 0);
+  remote.emit("close", 0);
+
+  await new Promise((r) => setImmediate(r));
+  // Client must NOT be ended or closed while stderr is still paused with buffered data.
+  assert.equal(client.writableEnded, false);
+  assert.equal(clientClosed, false);
+  assert.equal(remote.stderr.isPaused(), true);
+
+  // Unblock stderr and wait for client channel to finish.
+  const finished = new Promise((resolve) => client.once("finish", resolve));
+  stderrBlocked = false;
+  if (stderrPendingCb) {
+    const cb = stderrPendingCb;
+    stderrPendingCb = null;
+    cb();
+  }
+  await finished;
+
+  assert.equal(clientEndedBeforeStderrComplete, false);
+  assert.equal(Buffer.concat(stderrChunks).length, totalStderrBytes);
+  assert.equal(exitCode, 0);
+});
+
+test("attachClientChannelMultiplexer catches synchronous remote open throws and closes client on upstream drop", () => {
+  const client = new EventEmitter();
+  let clientEnded = false;
+  client.end = () => {
+    clientEnded = true;
+  };
+
+  const remoteConn = new EventEmitter();
+  remoteConn._sock = { destroyed: false };
+  remoteConn.exec = () => {
+    throw new Error("Not connected");
+  };
+
+  attachClientChannelMultiplexer(client, remoteConn);
+  client.emit("ready");
+
+  const session = new EventEmitter();
+  client.emit("session", () => session);
+
+  const stderrOut = [];
+  let exitCode = null;
+  let streamEnded = false;
+  let streamClosed = false;
+  const clientStream = new EventEmitter();
+  clientStream.stderr = {
+    write: (msg) => stderrOut.push(String(msg)),
+  };
+  clientStream.exit = (code) => {
+    exitCode = code;
+  };
+  clientStream.end = () => {
+    streamEnded = true;
+  };
+  clientStream.close = () => {
+    streamClosed = true;
+  };
+
+  // Synchronous throw from remoteConn.exec must be caught cleanly, not crash the worker.
+  assert.doesNotThrow(() => {
+    session.emit("exec", () => clientStream, () => {}, { command: "echo hi" });
+  });
+  assert.equal(exitCode, 1);
+  assert.equal(streamEnded, true);
+  assert.equal(streamClosed, true);
+  assert.match(stderrOut.join(""), /Not connected/);
+
+  // Upstream transport closing must close the external bridge client.
+  assert.equal(clientEnded, false);
+  remoteConn.emit("close");
+  assert.equal(clientEnded, true);
+});
+
+test("attachClientChannelMultiplexer cancels late reverse-forward listens that complete after client close", () => {
+  const client = new EventEmitter();
+  client.end = () => {};
+
+  let pendingForwardCb = null;
+  const unforwarded = [];
+  const remoteConn = new EventEmitter();
+  remoteConn._sock = { destroyed: false };
+  remoteConn.exec = () => {};
+  remoteConn.forwardIn = (bindAddr, bindPort, cb) => {
+    pendingForwardCb = cb;
+  };
+  remoteConn.unforwardIn = (bindAddr, bindPort, cb) => {
+    unforwarded.push({ bindAddr, bindPort });
+    cb?.();
+  };
+
+  attachClientChannelMultiplexer(client, remoteConn);
+  client.emit("ready");
+
+  let accepted = false;
+  let rejected = false;
+  client.emit(
+    "request",
+    () => { accepted = true; },
+    () => { rejected = true; },
+    "tcpip-forward",
+    { bindAddr: "127.0.0.1", bindPort: 0 },
+  );
+  assert.equal(typeof pendingForwardCb, "function");
+
+  // External client closes BEFORE upstream forwardIn replies.
+  client.emit("close");
+
+  // Upstream reply arrives late with assigned port 43210 -> must immediately unforwardIn.
+  pendingForwardCb(null, 43210);
+
+  assert.equal(accepted, false);
+  assert.equal(rejected, true);
+  assert.deepEqual(unforwarded, [{ bindAddr: "127.0.0.1", bindPort: 43210 }]);
+});
+
+test("getSshBridgeSocketPath allocates long Unix fallback sockets via managed tempDirBridge", () => {
+  const longStateDir = "/home/user/" + "very-long-profile-segment/".repeat(5) + "ssh-bridge";
+  const calls = [];
+  const fakeTempDirBridge = {
+    getTempFilePath(fileName) {
+      calls.push(fileName);
+      return `/tmp/Netcatty/12345_1_${fileName}`;
+    },
+  };
+  const sockPath = getSshBridgeSocketPath({
+    platform: "linux",
+    stateDir: longStateDir,
+    nonce: "abc123",
+    tempDirBridge: fakeTempDirBridge,
+  });
+  assert.deepEqual(calls, ["nc.sock"]);
+  assert.equal(sockPath, "/tmp/Netcatty/12345_1_nc.sock");
+  assert.ok(Buffer.byteLength(sockPath, "utf8") <= 96);
+});
+
+test("sshChannelBridge retains transport identity for later SSH connections after originating session closes", async () => {
+  resetSshTransportRegistryForTests();
+  const tmpDir = makeTempDir("nc-ssh-bridge-retain-");
+  const sessions = new Map();
+  const bridge = createSshChannelBridge({
+    sessions,
+    sftpClients: new Map(),
+    stateDir: tmpDir,
+  });
+
+  try {
+    const conn = makeFakeConn("password-authed");
+    // Password-authenticated transport has a non-empty authFingerprint in its endpoint key.
+    const transport = createTransport({
+      conn,
+      endpoint: {
+        hostId: "host-pw-1",
+        hostname: "10.20.30.40",
+        port: 22,
+        username: "admin",
+        protocol: "ssh",
+        password: "secret-password",
+      },
+      idleTtlMs: 60_000,
+    });
+    const shellHolder = { id: "sess-pw-1" };
+    borrowTransport(transport, { kind: "shell", holder: shellHolder });
+    sessions.set("sess-pw-1", {
+      id: "sess-pw-1",
+      conn,
+      connRef: transport,
+      _reuseEndpoint: transport.endpoint,
+    });
+
+    const status = await bridge.registerTarget({
+      bridgeHost: "pw-1234abcd.netcatty",
+      sessionId: "sess-pw-1",
+      hostId: "host-pw-1",
+      hostname: "10.20.30.40",
+      port: 22,
+      username: "admin",
+    });
+    assert.equal(status.connected, true);
+
+    // Editor holds an active lease; originating terminal closes and leaves `sessions`.
+    const editorLeaseHolder = { id: "ssh-bridge:editor-1" };
+    borrowTransport(transport, { kind: "forward", holder: editorLeaseHolder });
+    sessions.delete("sess-pw-1");
+    returnTransport(shellHolder);
+
+    // A second SSH connection from the editor must STILL succeed on the surviving transport.
+    const discovery = JSON.parse(fs.readFileSync(status.discoveryPath, "utf8"));
+    const handshakeReply = await new Promise((resolve, reject) => {
+      const sock = net.createConnection(parseSshBridgeEndpoint(status.endpoint));
+      let buf = "";
+      sock.on("connect", () => {
+        sock.write(JSON.stringify({ token: discovery.token, host: "pw-1234abcd.netcatty" }) + "\n");
+      });
+      sock.on("data", (d) => {
+        buf += d.toString("utf8");
+        if (buf.includes("\n")) {
+          sock.destroy();
+          resolve(JSON.parse(buf.split("\n")[0]));
+        }
+      });
+      sock.on("error", reject);
+    });
+    assert.equal(handshakeReply.ok, true);
+
+    // Also verify direct endpoint-based fallback works with retained authFingerprint.
+    const resolvedByEndpoint = resolveRemoteTransportForTarget(
+      {
+        hostId: "host-pw-1",
+        hostname: "10.20.30.40",
+        port: 22,
+        username: "admin",
+        endpoint: transport.endpoint,
+      },
+      { sessions: new Map(), sftpClients: new Map() },
+    );
+    assert.equal(resolvedByEndpoint?.transport, transport);
+
+    returnTransport(editorLeaseHolder);
+  } finally {
+    await bridge.stop();
+    resetSshTransportRegistryForTests();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveRemoteTransportForTarget prefers retained transport over same-hostId session on a different port", () => {
+  resetSshTransportRegistryForTests();
+  try {
+    const conn2222 = makeFakeConn("port-2222");
+    const transport2222 = createTransport({
+      conn: conn2222,
+      endpoint: {
+        hostId: "host-shared-profile",
+        hostname: "10.0.0.5",
+        port: 2222,
+        username: "deploy",
+        protocol: "ssh",
+      },
+      idleTtlMs: 60_000,
+    });
+    const editorLease = { id: "ssh-bridge:port-2222" };
+    borrowTransport(transport2222, { kind: "forward", holder: editorLease });
+
+    // Another live terminal and SFTP client share the same hostId but connect to port 2200.
+    const conn2200 = makeFakeConn("port-2200");
+    const sessions = new Map([
+      ["sess-2200", {
+        conn: conn2200,
+        _reuseEndpoint: {
+          hostId: "host-shared-profile",
+          hostname: "10.0.0.5",
+          port: 2200,
+          username: "deploy",
+        },
+      }],
+    ]);
+    const sftpClients = new Map([
+      ["sftp-2200", {
+        client: conn2200,
+        __netcattyRefHolder: {
+          connRef: {
+            conn: conn2200,
+            state: "live",
+            endpoint: {
+              hostId: "host-shared-profile",
+              hostname: "10.0.0.5",
+              port: 2200,
+              username: "deploy",
+            },
+          },
+        },
+      }],
+    ]);
+
+    const target = {
+      sessionId: "sess-2222-closed",
+      hostId: "host-shared-profile",
+      hostname: "10.0.0.5",
+      port: 2222,
+      username: "deploy",
+      transportId: transport2222.id,
+      endpoint: transport2222.endpoint,
+    };
+
+    const resolved = resolveRemoteTransportForTarget(target, { sessions, sftpClients });
+    assert.equal(resolved?.conn, conn2222);
+    assert.equal(resolved?.transport, transport2222);
+
+    // Even if the port-2222 transport is gone, neither same-hostId port-2200 fallback may match.
+    returnTransport(editorLease);
+    transport2222.state = "dead";
+    const resolvedAfterDead = resolveRemoteTransportForTarget(
+      { ...target, transportId: null, endpoint: null },
+      { sessions, sftpClients },
+    );
+    assert.equal(resolvedAfterDead, null);
+  } finally {
+    resetSshTransportRegistryForTests();
+  }
+});
+
+test("sshChannelBridge falls back to authenticated 127.0.0.1 loopback TCP when both stateDir and managed tempDir exceed Unix socket limits", async () => {
+  const longStateDir = "/home/user/" + "very-long-profile-segment/".repeat(5) + "ssh-bridge";
+  const overLimitTempBridge = {
+    getTempFilePath(fileName) {
+      return "/home/user/" + "very-long-custom-temp-dir/".repeat(6) + `12345_1_${fileName}`;
+    },
+  };
+  const endpointSpec = getSshBridgeSocketPath({
+    platform: "linux",
+    stateDir: longStateDir,
+    nonce: "abc123",
+    tempDirBridge: overLimitTempBridge,
+  });
+  assert.equal(endpointSpec, LOOPBACK_TCP_AUTO_ENDPOINT);
+
+  // Verify a real bridge instance starts cleanly without EINVAL and accepts handshake over 127.0.0.1.
+  const tmpDir = makeTempDir("nc-ssh-bridge-long-");
+  const deepStateDir = path.join(tmpDir, "a".repeat(50), "b".repeat(50), "ssh-bridge");
+  const bridge = createSshChannelBridge({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    stateDir: deepStateDir,
+    tempDirBridge: overLimitTempBridge,
+  });
+  try {
+    const status = await bridge.ensureStarted();
+    assert.equal(status.running, true);
+    assert.match(status.endpoint, /^tcp:\/\/127\.0\.0\.1:\d+$/);
+    const connectTarget = parseSshBridgeEndpoint(status.endpoint);
+    assert.equal(connectTarget.host, "127.0.0.1");
+    assert.ok(connectTarget.port > 0);
+
+    const discovery = JSON.parse(fs.readFileSync(status.discoveryPath, "utf8"));
+    const reply = await new Promise((resolve, reject) => {
+      const sock = net.createConnection(connectTarget);
+      let buf = "";
+      sock.on("connect", () => {
+        sock.write(JSON.stringify({ token: discovery.token, host: "missing-12345678.netcatty" }) + "\n");
+      });
+      sock.on("data", (d) => {
+        buf += d.toString("utf8");
+        if (buf.includes("\n")) {
+          sock.destroy();
+          resolve(JSON.parse(buf.split("\n")[0]));
+        }
+      });
+      sock.on("error", reject);
+    });
+    assert.equal(reply.ok, false);
+    assert.match(reply.error, /No active Netcatty session/i);
+  } finally {
+    await bridge.stop();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("registerTarget derives distinct canonical bridge aliases from backend-resolved SFTP endpoints when callers pass saved-profile port", async () => {
+  const tmpDir = makeTempDir("nc-ssh-bridge-sftp-ports-");
+  const conn2222 = makeFakeConn("sftp-port-2222");
+  const conn2200 = makeFakeConn("sftp-port-2200");
+
+  const sftpClients = new Map([
+    ["sftp-1", {
+      client: conn2222,
+      __netcattyRefHolder: {
+        connRef: {
+          conn: conn2222,
+          state: "live",
+          endpoint: {
+            hostId: "host-shared",
+            hostname: "10.0.0.5",
+            port: 2222,
+            username: "deploy",
+          },
+        },
+      },
+    }],
+    ["sftp-2", {
+      client: conn2200,
+      __netcattyRefHolder: {
+        connRef: {
+          conn: conn2200,
+          state: "live",
+          endpoint: {
+            hostId: "host-shared",
+            hostname: "10.0.0.5",
+            port: 2200,
+            username: "deploy",
+          },
+        },
+      },
+    }],
+  ]);
+
+  const bridge = createSshChannelBridge({
+    sessions: new Map(),
+    sftpClients,
+    stateDir: tmpDir,
+  });
+
+  try {
+    // Both callers supply the saved profile's default port (22) and same requested alias.
+    const reg1 = await bridge.registerTarget({
+      bridgeHost: "prod-aaaaaaaa.netcatty",
+      sftpId: "sftp-1",
+      hostId: "host-shared",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "deploy",
+    });
+    const reg2 = await bridge.registerTarget({
+      bridgeHost: "prod-aaaaaaaa.netcatty",
+      sftpId: "sftp-2",
+      hostId: "host-shared",
+      hostname: "10.0.0.5",
+      port: 22,
+      username: "deploy",
+    });
+
+    assert.notEqual(reg1.bridgeHost, reg2.bridgeHost);
+    assert.ok(reg1.bridgeHost.startsWith("prod-") && reg1.bridgeHost.endsWith(".netcatty"));
+    assert.ok(reg2.bridgeHost.startsWith("prod-") && reg2.bridgeHost.endsWith(".netcatty"));
+    // Both targets remain independently registered (no overwrite).
+    assert.equal(bridge.getStatus().registeredTargets, 2);
+  } finally {
+    await bridge.stop();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
